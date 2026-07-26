@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tullas.github.io/vss/infrastructure/contracts/capabilities.schema.json",
+  "title": "VSS platform capabilities",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["provider", "environment", "project", "capabilities", "services", "resource_ids", "deployment"],
+  "properties": {
+    "provider": {"type": "string", "enum": ["local"]},
+    "environment": {"type": "string", "minLength": 1},
+    "project": {"type": "string", "minLength": 1},
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["networking", "object_storage", "relational_database", "cache", "durable_messaging", "gpu_compute"],
+      "properties": {
+        "networking": {"type": "boolean"},
+        "object_storage": {"type": "boolean"},
+        "relational_database": {"type": "boolean"},
+        "cache": {"type": "boolean"},
+        "durable_messaging": {"type": "boolean"},
+        "gpu_compute": {"type": "boolean"}
+      }
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_storage"],
+      "properties": {
+        "object_storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["endpoint", "health_endpoint"],
+          "properties": {
+            "endpoint": {"type": "string", "format": "uri"},
+            "health_endpoint": {"type": "string", "format": "uri"}
+          }
+        }
+      }
+    },
+    "resource_ids": {"type": "object", "additionalProperties": {"type": "string"}},
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["managed_by"],
+      "properties": {
+        "managed_by": {"type": "string", "minLength": 1},
+        "revision": {"type": "string"},
+        "created_at": {"type": "string"}
+      }
+    }
+  }
+}

@@ -12,6 +12,14 @@ class ConfigurationEngineTests(unittest.TestCase):
         root = Path(tempfile.mkdtemp())
         (root / "environments").mkdir()
         (root / "schema").mkdir()
+        if "infrastructure:" not in defaults:
+            defaults += (
+                "infrastructure:\n"
+                "  provider: local\n"
+                "  capabilities:\n"
+                "    object_storage:\n"
+                "      enabled: true\n"
+            )
         (root / "defaults.yml").write_text(defaults, encoding="utf-8")
         (root / "environments" / f"{environment}.yml").write_text(override, encoding="utf-8")
         schema = Path(__file__).parents[2] / "config/schema/v1.json"
@@ -46,6 +54,22 @@ class ConfigurationEngineTests(unittest.TestCase):
             override="{}\n",
         )
         with self.assertRaisesRegex(ConfigError, "TRACE"):
+            load_configuration("development", root)
+
+    def test_unknown_infrastructure_provider_is_rejected(self) -> None:
+        root = self.write_config(
+            "application:\n  name: vss\nenvironment:\n  name: development\nlogging:\n  level: INFO\ninfrastructure:\n  provider: aws\n  capabilities:\n    object_storage:\n      enabled: true\n",
+            override="{}\n",
+        )
+        with self.assertRaisesRegex(ConfigError, "aws"):
+            load_configuration("development", root)
+
+    def test_unknown_infrastructure_capability_is_rejected(self) -> None:
+        root = self.write_config(
+            "application:\n  name: vss\nenvironment:\n  name: development\nlogging:\n  level: INFO\ninfrastructure:\n  provider: local\n  capabilities:\n    object_storage:\n      enabled: true\n    unknown: true\n",
+            override="{}\n",
+        )
+        with self.assertRaisesRegex(ConfigError, "unknown"):
             load_configuration("development", root)
 
     def test_unknown_environment_is_rejected(self) -> None:

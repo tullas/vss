@@ -1,0 +1,3 @@
+# Copy to .local/secrets/development.auto.tfvars and set a private password.
+minio_root_user = "vss-local"
+# minio_root_password = "set-a-private-value-locally"  # pragma: allowlist secret

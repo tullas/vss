@@ -4,3 +4,8 @@ environment:
   name: staging
 logging:
   level: INFO
+infrastructure:
+  provider: local
+  capabilities:
+    object_storage:
+      enabled: true

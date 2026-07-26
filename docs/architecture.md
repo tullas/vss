@@ -35,3 +35,6 @@ Monitoring
 ADR-0009
  |
 Infrastructure
+
+The initial ADR-0009 implementation is documented in `docs/infrastructure.md`
+and uses a local OpenTofu/Docker provider for development only.
