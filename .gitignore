@@ -9,6 +9,7 @@ __pycache__/
 # Ansible inventories and vaults are environment-specific and may contain secrets.
 ansible/inventories/*/hosts.yml
 !ansible/inventories/*/hosts.yml.example
+!ansible/inventories/development/hosts.yml
 ansible/group_vars/**/vault.yml
 
 # Never commit populated environment files, private keys, or certificates.

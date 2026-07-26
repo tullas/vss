@@ -12,6 +12,11 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    env:
+      ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
+      ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
+      ANSIBLE_LOCAL_TEMP: ${{ runner.temp }}/ansible
+
     steps:
 
     - name: Checkout repository
@@ -27,44 +32,26 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements-dev.txt
 
-    - name: Debug Ansible configuration
-      env:
-        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
+    - name: Verify Ansible configuration
       run: |
         pwd
         ls -la
         ansible --version
         ansible-config dump --only-changed
 
-    - name: Debug Ansible environment
+    - name: Validate development inventory
       run: |
-        echo "PWD:"
-        pwd
-
-        echo "Files:"
-        find . -maxdepth 3 -type f | sort | head -100
-
-        echo "Roles:"
-        ls -la ansible/roles
-        ls -la ansible/roles/baseline
-
-        echo "Ansible version:"
-        ansible --version
-
-        echo "Config:"
-        ansible-config dump --only-changed
+        ansible-inventory -i ansible/inventories/development/hosts.yml --graph
+        ansible-inventory -i ansible/inventories/development/hosts.yml --list >/dev/null
 
     - name: Ansible syntax check
       run: |
         ansible-playbook \
           --syntax-check \
           -i ansible/inventories/development/hosts.yml \
-          --roles-path ./ansible/roles \
           ansible/playbooks/site.yml
 
 
     - name: Ansible lint
-      env:
-        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
       run: |
         ansible-lint ansible/playbooks/site.yml
