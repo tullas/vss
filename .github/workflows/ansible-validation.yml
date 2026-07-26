@@ -37,14 +37,13 @@ jobs:
         ansible-config dump --only-changed
 
     - name: Ansible syntax check
-      env:
-        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
       run: |
         ansible-playbook \
           --syntax-check \
           -i localhost, \
           -c local \
-          ansible/playbooks/site.yml
+          --roles-path ansible/roles \
+          ansible/playbooks/site.yml`
 
     - name: Ansible lint
       env:

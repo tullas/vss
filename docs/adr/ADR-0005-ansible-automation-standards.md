@@ -74,5 +74,5 @@ playbook syntax check against the development inventory example.
 When Ansible is available, also run:
 
 ```bash
-cd ansible && ansible-playbook --syntax-check -i inventories/development/hosts.yml.example playbooks/site.yml
+cd ansible && ansible-playbook --syntax-check -i inventories/development/hosts.yml playbooks/site.yml
 ```
