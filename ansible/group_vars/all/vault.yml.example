@@ -1,0 +1,3 @@
+---
+# Encrypt a copied vault.yml with ansible-vault; never commit the unencrypted file.
+# example_secret: replace-through-a-secret-manager

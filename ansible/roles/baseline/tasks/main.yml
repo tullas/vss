@@ -1,0 +1,13 @@
+---
+- name: Validate baseline workspace configuration
+  ansible.builtin.assert:
+    that:
+      - baseline_workspace is match('^/')
+      - baseline_workspace_mode is match('^[0-7]{4}$')
+    fail_msg: baseline_workspace must be an absolute path and mode must be four octal digits.
+
+- name: Create baseline workspace
+  ansible.builtin.file:
+    path: "{{ baseline_workspace }}"
+    state: directory
+    mode: "{{ baseline_workspace_mode }}"

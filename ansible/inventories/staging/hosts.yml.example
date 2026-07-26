@@ -1,0 +1,7 @@
+---
+all:
+  children:
+    application:
+      hosts:
+        app-01.staging.example.internal:
+          ansible_user: automation

@@ -1,0 +1,4 @@
+---
+# These values are safe defaults; environment-specific values belong in inventory.
+baseline_workspace: /var/lib/vss
+baseline_workspace_mode: '0755'
