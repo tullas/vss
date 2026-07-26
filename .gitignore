@@ -7,3 +7,12 @@ config/environments/*.env
 ansible/inventories/*/hosts.yml
 !ansible/inventories/*/hosts.yml.example
 ansible/group_vars/**/vault.yml
+
+# Never commit populated environment files, private keys, or certificates.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_ed25519
