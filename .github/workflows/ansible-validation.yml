@@ -7,64 +7,48 @@ on:
       - main
 
 jobs:
-
   ansible-validation:
+    runs-on: ubuntu-24.04
+    env:
+      ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
 
-    runs-on: ubuntu-latest
+    env:
+      ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
+      ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
+      ANSIBLE_LOCAL_TEMP: ${{ runner.temp }}/ansible
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
 
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
 
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
+      - name: Install Ansible tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
 
-    - name: Install Ansible tools
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements-dev.txt
+      - name: Verify Ansible configuration
+        run: |
+          ansible --version
+          ansible-config dump --only-changed
+          test -f ansible/roles/baseline/tasks/main.yml
 
-    - name: Debug Ansible configuration
-      env:
-        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
-      run: |
-        pwd
-        ls -la
-        ansible --version
-        ansible-config dump --only-changed
+      - name: Validate inventory
+        run: |
+          ansible-inventory \
+            -i ansible/inventories/development/hosts.yml \
+            --list > /dev/null
 
-    - name: Debug Ansible environment
-      run: |
-        echo "PWD:"
-        pwd
+      - name: Ansible syntax check
+        run: |
+          ansible-playbook \
+            --syntax-check \
+            -i ansible/inventories/development/hosts.yml \
+            ansible/playbooks/site.yml
 
-        echo "Files:"
-        find . -maxdepth 3 -type f | sort | head -100
-
-        echo "Roles:"
-        ls -la ansible/roles
-        ls -la ansible/roles/baseline
-
-        echo "Ansible version:"
-        ansible --version
-
-        echo "Config:"
-        ansible-config dump --only-changed
-
-    - name: Ansible syntax check
-      run: |
-        ansible-playbook \
-          --syntax-check \
-          -i ansible/inventories/development/hosts.yml \
-          --roles-path ./ansible/roles \
-          ansible/playbooks/site.yml
-
-
-    - name: Ansible lint
-      env:
-        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
-      run: |
-        ansible-lint ansible/playbooks/site.yml
+      - name: Ansible lint
+        run: ansible-lint ansible/playbooks/site.yml
