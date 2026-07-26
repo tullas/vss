@@ -60,16 +60,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Run Bash test suite
+        id: bash-tests
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          report="bash-test-report.txt"
+          : > "$report"
+          status=0
           mapfile -d '' test_files < <(find tests -type f -name '*-test.sh' -print0 | sort -z)
           if (( ${#test_files[@]} == 0 )); then
-            echo "No Bash tests found"
-            exit 0
+            echo "No Bash tests found" | tee -a "$report"
           fi
           for test_file in "${test_files[@]}"; do
-            echo "::group::Running ${test_file}"
-            bash "${test_file}"
-            echo "::endgroup::"
+            echo "===== ${test_file} =====" | tee -a "$report"
+            if bash -x "$test_file" >> "$report" 2>&1; then
+              echo "PASS: ${test_file}" | tee -a "$report"
+            else
+              rc=$?
+              echo "FAIL: ${test_file} (exit ${rc})" | tee -a "$report"
+              status=1
+            fi
           done
+          cat "$report"
+          exit "$status"
+      - name: Upload Bash test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bash-test-report
+          path: bash-test-report.txt
+          if-no-files-found: error
