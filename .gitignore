@@ -2,6 +2,9 @@
 config/local.env
 config/environments/*.env
 !config/environments/*.env.example
+.venv/
+__pycache__/
+*.pyc
 
 # Ansible inventories and vaults are environment-specific and may contain secrets.
 ansible/inventories/*/hosts.yml
