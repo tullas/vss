@@ -73,11 +73,13 @@ jobs:
           fi
           for test_file in "${test_files[@]}"; do
             echo "===== ${test_file} =====" | tee -a "$report"
-            if bash -x "$test_file" >> "$report" 2>&1; then
+            if bash "$test_file" >> "$report" 2>&1; then
               echo "PASS: ${test_file}" | tee -a "$report"
             else
               rc=$?
               echo "FAIL: ${test_file} (exit ${rc})" | tee -a "$report"
+              echo "--- trace: ${test_file} ---" >> "$report"
+              bash -x "$test_file" >> "$report" 2>&1 || true
               status=1
             fi
           done

@@ -18,8 +18,8 @@ for file in "${required_files[@]}"; do
   [[ -f $ansible_dir/$file ]]
 done
 
-rg -q 'ansible\.builtin\.file:' "$ansible_dir/roles/baseline/tasks/main.yml"
-rg -q 'state: directory' "$ansible_dir/roles/baseline/tasks/main.yml"
-rg -q 'no_log: true' "$project_root/docs/adr/ADR-0005-ansible-automation-standards.md"
+grep -Eq 'ansible\.builtin\.file:' "$ansible_dir/roles/baseline/tasks/main.yml"
+grep -Eq 'state: directory' "$ansible_dir/roles/baseline/tasks/main.yml"
+grep -Eq 'no_log: true' "$project_root/docs/adr/ADR-0005-ansible-automation-standards.md"
 
 printf '%s\n' 'Ansible structure tests passed'
