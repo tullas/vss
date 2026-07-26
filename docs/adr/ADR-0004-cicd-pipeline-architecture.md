@@ -37,11 +37,11 @@ Every pull request and push receives consistent validation and test results.
 Production deployment requires an explicit operator action and any GitHub
 Environment reviewers configured by repository administrators.
 
-To enable a deployment target, provide a non-secret `DEPLOY_SCRIPT` through
-the selected environment's variables or approved configuration source. The
-script receives the environment name as its first argument and is responsible
-for the target-specific deployment and rollback behavior. A missing or invalid
-deployment script fails clearly; it is never treated as a successful deploy.
+To enable a deployment target, provide non-secret `DEPLOY_SCRIPT`,
+`HEALTHCHECK_SCRIPT`, and `ROLLBACK_SCRIPT` paths through the selected
+environment's variables or approved configuration source. Each receives the
+environment and release version. Missing or invalid adapters fail clearly; they
+are never treated as a successful deployment.
 
 ## Verification
 

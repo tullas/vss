@@ -10,10 +10,12 @@ status=0
 DEPLOY_SCRIPT= "$deploy" development >/dev/null 2>&1 || status=$?
 (( status == 78 ))
 
-adapter=$(mktemp)
-trap 'rm -f "$adapter"' EXIT
-printf '%s\n' '#!/usr/bin/env bash' 'test "$1" = staging' > "$adapter"
-chmod +x "$adapter"
-DEPLOY_SCRIPT="$adapter" "$deploy" staging >/dev/null
+adapter_dir=$(mktemp -d)
+trap 'rm -rf "$adapter_dir"' EXIT
+for adapter in deploy health rollback; do
+  printf '%s\n' '#!/usr/bin/env bash' 'test "$1" = staging' > "$adapter_dir/$adapter"
+  chmod +x "$adapter_dir/$adapter"
+done
+DEPLOY_SCRIPT="$adapter_dir/deploy" HEALTHCHECK_SCRIPT="$adapter_dir/health" ROLLBACK_SCRIPT="$adapter_dir/rollback" "$deploy" staging release-1 >/dev/null
 
 printf '%s\n' 'CI/CD tests passed'

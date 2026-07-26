@@ -11,6 +11,10 @@ on:
           - development
           - staging
           - production
+      release_version:
+        description: Immutable release version to deploy
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -26,5 +30,8 @@ jobs:
       - name: Deploy
         env:
           CONFIG_ENV: ${{ inputs.environment }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
           DEPLOY_SCRIPT: ${{ vars.DEPLOY_SCRIPT }}
-        run: bash scripts/deploy.sh "${CONFIG_ENV}"
+          HEALTHCHECK_SCRIPT: ${{ vars.HEALTHCHECK_SCRIPT }}
+          ROLLBACK_SCRIPT: ${{ vars.ROLLBACK_SCRIPT }}
+        run: bash scripts/deploy.sh "${CONFIG_ENV}" "${RELEASE_VERSION}"
