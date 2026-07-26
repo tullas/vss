@@ -11,3 +11,6 @@ dependencies = ["PyYAML>=6.0,<7", "jsonschema>=4.20,<5"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+vss = "vss_commands.cli:main"
