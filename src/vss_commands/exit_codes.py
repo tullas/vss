@@ -1,0 +1,12 @@
+from enum import IntEnum
+
+
+class ExitCode(IntEnum):
+    SUCCESS = 0
+    INVALID_USAGE = 2
+    INVALID_CONFIGURATION = 10
+    INVALID_INPUT = 11
+    UNKNOWN_COMMAND = 12
+    EXECUTION_FAILURE = 20
+    TIMEOUT = 21
+    INTERNAL_ERROR = 30
