@@ -12,7 +12,6 @@ jobs:
     env:
       ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
       ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
-      ANSIBLE_LOCAL_TEMP: ${{ runner.temp }}/ansible
 
     steps:
       - name: Checkout repository
