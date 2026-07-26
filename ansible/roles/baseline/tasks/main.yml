@@ -11,3 +11,31 @@
     path: "{{ baseline_workspace }}"
     state: directory
     mode: "{{ baseline_workspace_mode }}"
+
+- name: Install common packages
+  ansible.builtin.package:
+    name:
+      - curl
+      - wget
+      - unzip
+      - tar
+      - git
+      - vim
+    state: present
+
+- name: Ensure /opt exists
+  ansible.builtin.file:
+    path: /opt
+    state: directory
+    mode: "0755"
+
+- name: Ensure /var/log/vss exists
+  ansible.builtin.file:
+    path: /var/log/vss
+    state: directory
+    mode: "0755"
+
+- name: Display baseline completion
+  ansible.builtin.debug:
+    msg: "Baseline role completed successfully."
+However...

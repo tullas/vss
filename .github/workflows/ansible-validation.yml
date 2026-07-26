@@ -27,12 +27,27 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements-dev.txt
 
+    - name: Debug Ansible configuration
+      env:
+        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
+      run: |
+        pwd
+        ls -la
+        ansible --version
+        ansible-config dump --only-changed
+
     - name: Ansible syntax check
+      env:
+        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
       run: |
         ansible-playbook \
-        --syntax-check \
-        ansible/playbooks/test.yml
+          --syntax-check \
+          -i localhost, \
+          -c local \
+          ansible/playbooks/site.yml
 
     - name: Ansible lint
+      env:
+        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
       run: |
-        ansible-lint ansible/playbooks/test.yml
+        ansible-lint ansible/playbooks/site.yml

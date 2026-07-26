@@ -1,7 +1,0 @@
----
-all:
-  children:
-    application:
-      hosts:
-        app-01.example.internal:
-          ansible_user: automation
