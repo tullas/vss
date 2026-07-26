@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tullas.github.io/vss/config/schema/v1.json",
+  "title": "VSS configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["application", "environment", "logging"],
+  "properties": {
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "pattern": "^[a-zA-Z0-9._-]+$"}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "enum": ["development", "staging", "production"]}
+      }
+    },
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level"],
+      "properties": {
+        "level": {"type": "string", "enum": ["DEBUG", "INFO", "WARN", "ERROR"]}
+      }
+    }
+  }
+}
