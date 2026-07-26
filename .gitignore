@@ -1,0 +1,4 @@
+# Environment configuration may contain deployment-specific values or secrets.
+config/local.env
+config/environments/*.env
+!config/environments/*.env.example
