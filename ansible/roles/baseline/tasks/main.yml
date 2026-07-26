@@ -4,7 +4,9 @@
     that:
       - baseline_workspace is match('^/')
       - baseline_workspace_mode is match('^[0-7]{4}$')
-    fail_msg: baseline_workspace must be an absolute path and mode must be four octal digits.
+    fail_msg: >-
+      baseline_workspace must be an absolute path and
+      baseline_workspace_mode must contain four octal digits.
 
 - name: Create baseline workspace
   ansible.builtin.file:
@@ -29,7 +31,7 @@
     state: directory
     mode: "0755"
 
-- name: Ensure /var/log/vss exists
+- name: Ensure VSS log directory exists
   ansible.builtin.file:
     path: /var/log/vss
     state: directory
@@ -37,5 +39,4 @@
 
 - name: Display baseline completion
   ansible.builtin.debug:
-    msg: "Baseline role completed successfully."
-However...
+    msg: Baseline role completed successfully.
