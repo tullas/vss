@@ -36,14 +36,27 @@ jobs:
         ansible --version
         ansible-config dump --only-changed
 
-    - name: Ansible syntax check
+    - name: Debug Ansible paths
+      env:
+        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
+        ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
       run: |
+        ansible --version
+        ansible-config dump --only-changed
+        ls -la ansible/roles
+        ls -la ansible/roles/baseline
+
+    - name: Ansible syntax check
+      env:
+        ANSIBLE_CONFIG: ${{ github.workspace }}/ansible.cfg
+        ANSIBLE_ROLES_PATH: ${{ github.workspace }}/ansible/roles
+      run: |
+        ansible-config dump --only-changed
+
         ansible-playbook \
           --syntax-check \
-          -i localhost, \
-          -c local \
-          --roles-path ansible/roles \
-          ansible/playbooks/site.yml`
+          -i ansible/inventories/development/hosts.yml \
+          ansible/playbooks/site.yml
 
     - name: Ansible lint
       env:
