@@ -52,6 +52,12 @@ configuration. The deliberately limited file syntax does not support shell
 expansion, quoting semantics, or multiline values; those features would make
 configuration execution-prone and harder to validate.
 
+The schema-driven Python configuration engine is available as
+`python -m vss_config validate --environment <name>` and
+`python -m vss_config render --environment <name>`. It merges
+`config/defaults.yml` with the selected file under `config/environments/` and
+validates the result against the versioned schema before rendering.
+
 ## Verification
 
 Run:

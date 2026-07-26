@@ -1,0 +1,6 @@
+application:
+  name: vss
+environment:
+  name: development
+logging:
+  level: INFO
