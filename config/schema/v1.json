@@ -4,7 +4,7 @@
   "title": "VSS configuration v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["application", "environment", "logging"],
+  "required": ["application", "environment", "logging", "infrastructure"],
   "properties": {
     "application": {
       "type": "object",
@@ -28,6 +28,32 @@
       "required": ["level"],
       "properties": {
         "level": {"type": "string", "enum": ["DEBUG", "INFO", "WARN", "ERROR"]}
+      }
+    },
+    "infrastructure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "capabilities"],
+      "properties": {
+        "provider": {"type": "string", "enum": ["local"]},
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object_storage"],
+          "properties": {
+            "object_storage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": {"enabled": {"type": "boolean"}}
+            },
+            "networking": {"type": "boolean"},
+            "relational_database": {"type": "boolean"},
+            "cache": {"type": "boolean"},
+            "durable_messaging": {"type": "boolean"},
+            "gpu_compute": {"type": "boolean"}
+          }
+        }
       }
     }
   }

@@ -4,3 +4,8 @@ environment:
   name: production
 logging:
   level: WARN
+infrastructure:
+  provider: local
+  capabilities:
+    object_storage:
+      enabled: true

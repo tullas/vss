@@ -4,3 +4,13 @@ environment:
   name: development
 logging:
   level: INFO
+infrastructure:
+  provider: local
+  capabilities:
+    networking: true
+    object_storage:
+      enabled: true
+    relational_database: false
+    cache: false
+    durable_messaging: false
+    gpu_compute: false

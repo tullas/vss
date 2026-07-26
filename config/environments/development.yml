@@ -4,3 +4,8 @@ environment:
   name: development
 logging:
   level: DEBUG
+infrastructure:
+  provider: local
+  capabilities:
+    object_storage:
+      enabled: true
