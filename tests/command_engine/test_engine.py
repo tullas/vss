@@ -17,6 +17,7 @@ class CommandEngineTests(unittest.TestCase):
         self.assertIsNotNone(command)
         self.assertEqual(command.metadata.version, "1.0.0")
         self.assertTrue(command.metadata.supports_dry_run)
+        self.assertIsNotNone(get_command("system.health"))
 
     def test_success_and_generated_correlation_id(self) -> None:
         response, code = CommandRunner().run("system.info", "development")
@@ -33,6 +34,12 @@ class CommandEngineTests(unittest.TestCase):
         self.assertEqual(code, ExitCode.SUCCESS)
         self.assertEqual(response["correlation_id"], correlation_id)
         self.assertTrue(response["output"]["dry_run"])
+
+    def test_health_command_reports_configuration_only(self) -> None:
+        response, code = CommandRunner().run("system.health", "development")
+        self.assertEqual(code, ExitCode.SUCCESS)
+        self.assertEqual(response["output"]["checks"]["configuration"]["status"], "ok")
+        self.assertNotIn("vss", response["output"]["checks"])
 
     def test_unknown_command(self) -> None:
         response, code = CommandRunner().run("unknown.command", "development")
