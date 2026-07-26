@@ -9,8 +9,8 @@ required_files=(
   playbooks/site.yml
   roles/baseline/defaults/main.yml
   roles/baseline/tasks/main.yml
-  inventories/development/hosts.yml.example
-  group_vars/all/vault.yml.example
+  inventories/development/hosts.yml
+  group_vars/all/vault.yml
 )
 
 for file in "${required_files[@]}"; do
