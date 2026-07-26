@@ -1,0 +1,8 @@
+application:
+  name: vss
+
+environment:
+  name: prod
+
+logging:
+  level: INFO

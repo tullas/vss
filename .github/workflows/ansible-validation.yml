@@ -1,0 +1,38 @@
+name: Ansible Validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  ansible-validation:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install Ansible tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+
+    - name: Ansible syntax check
+      run: |
+        ansible-playbook \
+        --syntax-check \
+        ansible/playbooks/test.yml
+
+    - name: Ansible lint
+      run: |
+        ansible-lint ansible/playbooks/test.yml
