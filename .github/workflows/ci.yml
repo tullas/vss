@@ -60,4 +60,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Run Bash test suite
-        run: find tests -type f -name '*-test.sh' -print0 | sort -z | xargs -0r -n1 bash
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' test_files < <(find tests -type f -name '*-test.sh' -print0 | sort -z)
+          if (( ${#test_files[@]} == 0 )); then
+            echo "No Bash tests found"
+            exit 0
+          fi
+          for test_file in "${test_files[@]}"; do
+            echo "::group::Running ${test_file}"
+            bash "${test_file}"
+            echo "::endgroup::"
+          done
