@@ -12,6 +12,7 @@ Examples:
 vss list
 vss describe system.info
 vss run system.info --environment development
+vss run system.health --environment development
 vss run system.info --environment development --dry-run
 vss run system.info --environment development --input request.json
 ```
@@ -21,7 +22,7 @@ The request model is:
 ```json
 {
   "schema_version": "1",
-  "command": "system.info",
+  "command": "system.health",
   "environment": "development",
   "correlation_id": "optional-32-character-hex-id",
   "dry_run": false,
@@ -34,7 +35,7 @@ The response model is deterministic JSON:
 ```json
 {
   "schema_version": "1",
-  "command": "system.info",
+  "command": "system.health",
   "correlation_id": "...",
   "status": "success",
   "exit_code": 0,
@@ -42,12 +43,11 @@ The response model is deterministic JSON:
   "completed_at": "2026-07-26T21:00:00.001Z",
   "duration_ms": 1,
   "output": {
-    "command_name": "system.info",
+    "command_name": "system.health",
     "command_version": "1.0.0",
-    "os": "Linux",
-    "python_version": "3.12.3",
     "environment": "development",
-    "dry_run": false
+    "dry_run": false,
+    "checks": {"configuration": {"status": "ok", "schema_version": "1"}}
   },
   "errors": []
 }
