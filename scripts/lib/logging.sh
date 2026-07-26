@@ -34,9 +34,17 @@ log_message() {
     return 0
   fi
 
-  local timestamp line
+  local timestamp line trace_context=
   timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-  printf -v line '%s %s %s' "$timestamp" "$level" "$*"
+  if [[ -n ${TRACE_ID:-} ]]; then
+    if [[ $TRACE_ID =~ ^[a-fA-F0-9]{32}$ ]]; then
+      trace_context=" trace_id=$TRACE_ID"
+    else
+      printf '%s\n' 'error: TRACE_ID must be a 32-character hexadecimal identifier' >&2
+      return 64
+    fi
+  fi
+  printf -v line '%s %s %s%s' "$timestamp" "$level" "$*" "$trace_context"
   printf '%s\n' "$line" >&2
   if [[ -n ${LOG_FILE:-} ]]; then
     printf '%s\n' "$line" >> "$LOG_FILE"

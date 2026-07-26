@@ -1,0 +1,18 @@
+---
+# Translate these vendor-neutral rules into the environment's monitoring system.
+alerts:
+  - name: deployment_failure
+    signal: deployment_failures_total
+    condition: increase_over_15m > 0
+    severity: critical
+    owner: platform-on-call
+  - name: rollback_failure
+    signal: rollback_success_total
+    condition: rollback_attempted_without_success_over_15m
+    severity: critical
+    owner: platform-on-call
+  - name: elevated_deployment_duration
+    signal: deployment_duration_seconds
+    condition: p95_over_1h > environment_baseline
+    severity: warning
+    owner: release-engineering
