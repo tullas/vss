@@ -1,0 +1,5 @@
+application:
+  name: adr-test
+
+environment:
+  name: dev

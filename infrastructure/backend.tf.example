@@ -1,0 +1,11 @@
+# Copy this file outside source control and configure the approved remote backend.
+# Never put credentials in a backend configuration file; use runtime identity.
+#
+# terraform {
+#   backend "s3" {
+#     bucket = "organization-iac-state"
+#     key    = "vss/ENVIRONMENT.tfstate"
+#     region = "REGION"
+#     encrypt = true
+#   }
+# }

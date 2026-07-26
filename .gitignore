@@ -16,3 +16,10 @@ ansible/group_vars/**/vault.yml
 *.key
 id_rsa
 id_ed25519
+
+# OpenTofu state, plans, and backend configuration are environment-sensitive.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+infrastructure/backend.tf

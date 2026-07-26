@@ -42,6 +42,14 @@ jobs:
           python -m pip install --disable-pip-version-check 'ansible-core>=2.16,<2.20'
           cd ansible
           ansible-playbook --syntax-check -i inventories/development/hosts.yml.example playbooks/site.yml
+      - uses: opentofu/setup-opentofu@v1
+      - name: Check infrastructure formatting and validation
+        run: |
+          tofu fmt -check -recursive infrastructure
+          for environment in infrastructure/environments/*; do
+            tofu -chdir="$environment" init -backend=false
+            tofu -chdir="$environment" validate
+          done
 
   test:
     name: Test

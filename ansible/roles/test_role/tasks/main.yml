@@ -1,0 +1,6 @@
+---
+- name: Create ADR test directory
+  ansible.builtin.file:
+    path: /tmp/adr-test
+    state: directory
+    mode: '0755'

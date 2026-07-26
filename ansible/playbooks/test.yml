@@ -1,0 +1,8 @@
+---
+- name: Test ADR-0005 Ansible Standards
+  hosts: localhost
+  connection: local
+  become: false
+
+  roles:
+    - test_role
