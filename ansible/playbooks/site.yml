@@ -2,6 +2,6 @@
 - name: Apply baseline automation
   hosts: all
   gather_facts: true
-  become: true
+  become: false
   roles:
     - role: baseline
