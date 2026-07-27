@@ -277,13 +277,16 @@ def validate_workflow_invariants(root: Path) -> None:
         if not required_runs.get(job_name, set()).issubset(runs):
             raise PolicyFailure(f"canonical security validation step is missing: {job_name}")
     installer = root / "scripts/security/install-trivy.sh"
-    installer_text = installer.read_text(encoding="utf-8") if installer.is_file() else ""
-    if "version='0.72.0'" not in installer_text or "expected_sha256='bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea'" not in installer_text:
+    installer_sha256 = hashlib.sha256(installer.read_bytes()).hexdigest() if installer.is_file() else "missing"
+    if installer_sha256 != "f3cdfce62d05a0eaf8ec12b54bcc37ba9c94f4ea883381e599ad4ebe5bdd3774":
         raise PolicyFailure("security scanner installer is not checksum pinned")
+    expected_scans = {
+        "container-scan": '"$RUNNER_TEMP/vss-trivy/trivy" image --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL \'${{ matrix.image }}\'',
+        "iac-scan": '"$RUNNER_TEMP/vss-trivy/trivy" config --exit-code 1 --severity HIGH,CRITICAL --skip-dirs .venv --skip-dirs .terraform .',
+    }
     for job_name in ("container-scan", "iac-scan"):
         job_runs = {str(step.get("run", "")).strip() for step in jobs[job_name]["steps"] if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True}
-        scanner_runs = [run for run in job_runs if '"$RUNNER_TEMP/vss-trivy/trivy"' in run]
-        if 'scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs or len(scanner_runs) != 1 or "--exit-code 1" not in scanner_runs[0]:
+        if 'scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs or expected_scans[job_name] not in job_runs:
             raise PolicyFailure(f"security scanner does not fail closed: {job_name}")
     codeowners = root / ".github/CODEOWNERS"
     if not codeowners.is_file() or "/.github/workflows/ @tullas" not in codeowners.read_text(encoding="utf-8"):

@@ -194,6 +194,35 @@ class SupplyChainPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(SC.PolicyFailure, "canonical security validation step"):
                 SC.validate_workflow_invariants(root)
 
+    def test_gutted_scanner_installer_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/security.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text((ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8"), encoding="utf-8")
+            installer = root / "scripts/security/install-trivy.sh"
+            installer.parent.mkdir(parents=True)
+            source = (ROOT / "scripts/security/install-trivy.sh").read_text(encoding="utf-8")
+            installer.write_text("\n".join(source.splitlines()[:9]) + "\n", encoding="utf-8")
+            (root / ".github/CODEOWNERS").write_text("/.github/workflows/ @tullas\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "installer is not checksum pinned"):
+                SC.validate_workflow_invariants(root)
+
+    def test_echo_scanner_bypass_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/security.yml"
+            workflow.parent.mkdir(parents=True)
+            source = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
+            source = source.replace('"$RUNNER_TEMP/vss-trivy/trivy" image --exit-code 1', 'echo "$RUNNER_TEMP/vss-trivy/trivy" image --exit-code 1')
+            workflow.write_text(source, encoding="utf-8")
+            installer = root / "scripts/security/install-trivy.sh"
+            installer.parent.mkdir(parents=True)
+            installer.write_bytes((ROOT / "scripts/security/install-trivy.sh").read_bytes())
+            (root / ".github/CODEOWNERS").write_text("/.github/workflows/ @tullas\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "scanner does not fail closed"):
+                SC.validate_workflow_invariants(root)
+
     def test_sbom_is_valid_and_artifacts_reject_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "vss.cdx.json"
