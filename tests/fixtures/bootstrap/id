@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ ${1:-} == -G && -n ${VSS_TEST_ACTIVE_GROUP_IDS+x} ]]; then
+  printf '%s\n' "$VSS_TEST_ACTIVE_GROUP_IDS"
+  exit 0
+fi
+exec /usr/bin/id "$@"

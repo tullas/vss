@@ -28,8 +28,12 @@ Docker daemon. If Docker is unavailable, it requires active systemd;
 on WSL without systemd it stops and explains how to enable systemd in
 `/etc/wsl.conf` and restart WSL. It uses signed APT keyrings for the official
 Docker and OpenTofu repositories. It never installs or controls Docker Desktop
-on Windows, adds users to privileged groups, runs OpenTofu apply/destroy, or
-prints credentials.
+on Windows, runs OpenTofu apply/destroy, or prints credentials. When Docker
+Engine installation adds the original developer to the `docker` group,
+bootstrap compares the group database with the current process's active
+supplementary groups. It returns `RESTART_REQUIRED` before verification until
+the developer starts a new login session. On WSL, run `wsl --shutdown` from
+Windows PowerShell and then `./scripts/bootstrap-host.sh --resume` inside WSL.
 
 The dedicated playbook is an implementation detail of `bootstrap-host.sh`.
 Direct non-root playbook execution fails before role changes; the supported
@@ -58,9 +62,14 @@ The role creates `.local/state/development` and `.local/secrets`, and copies
 the safe secrets example only when the destination does not exist. Existing
 local secrets are not overwritten.
 
-`verify` checks `docker info`, `tofu version`, repository paths and ignored
-state/secrets configuration, then runs `scripts/iac-local.sh validate`. It does
-not apply infrastructure.
+`verify` checks the Docker CLI, `docker info`, `tofu version`, required
+repository paths, and `scripts/iac-local.sh validate`. It does not apply
+infrastructure. Failures include booleans for all five checks plus only safe
+diagnostics: the return code, executable or check name, and a fixed sanitized
+summary. Docker CLI absence, a stopped daemon, socket permission denial,
+OpenTofu absence, missing repository paths, and IaC validation failures each
+report their exact supported next action without including command output,
+environment values, credentials, or state contents.
 
 ## Assumptions and privilege boundaries
 
