@@ -49,6 +49,7 @@
     name:
       - ca-certificates
       - curl
+      - python3-debian
     state: present
     update_cache: true
   when: not local_toolchain_docker_available
@@ -99,3 +100,18 @@
     state: started
     enabled: true
   when: not local_toolchain_docker_available
+
+- name: Ensure the bootstrap user can access the managed Docker daemon
+  ansible.builtin.user:
+    name: "{{ local_toolchain_user }}"
+    groups: docker
+    append: true
+  register: local_toolchain_docker_group
+  when: not local_toolchain_docker_available
+
+- name: Report Docker group session boundary  # noqa no-handler
+  ansible.builtin.debug:
+    msg: >-
+      Docker group membership changed for {{ local_toolchain_user }}. A new
+      login session or WSL restart is required before Docker is accessible.
+  when: local_toolchain_docker_group is changed

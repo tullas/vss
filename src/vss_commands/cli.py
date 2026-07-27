@@ -30,6 +30,23 @@ def _parser() -> argparse.ArgumentParser:
     for action in ("check", "local", "verify"):
         action_parser = bootstrap_actions.add_parser(action)
         add_execution_options(action_parser)
+    secrets = subparsers.add_parser("secrets")
+    secrets_actions = secrets.add_subparsers(dest="secrets_action", required=True)
+    secrets_init = secrets_actions.add_parser("init")
+    add_execution_options(secrets_init)
+    secrets_init.add_argument("--rotate", action="store_true")
+    secrets_init.add_argument("--yes", action="store_true")
+    secrets_status = secrets_actions.add_parser("status")
+    add_execution_options(secrets_status)
+    platform = subparsers.add_parser("platform")
+    platform_actions = platform.add_subparsers(dest="platform_action", required=True)
+    for action in ("plan", "up", "status", "verify", "down"):
+        action_parser = platform_actions.add_parser(action)
+        add_execution_options(action_parser)
+        if action in ("up", "down"):
+            action_parser.add_argument("--non-interactive", action="store_true")
+        if action == "down":
+            action_parser.add_argument("--yes", action="store_true")
     subparsers.add_parser("list")
     describe = subparsers.add_parser("describe")
     describe.add_argument("command")
@@ -68,7 +85,18 @@ def main(argv: list[str] | None = None) -> int:
     if input_error is not None:
         print(json.dumps({"error": "input must be valid JSON object"}, sort_keys=True, separators=(",", ":")))
         return int(input_error)
-    command_name = args.command if args.action == "run" else f"bootstrap.{args.bootstrap_action}"
+    if args.action == "run":
+        command_name = args.command
+    elif args.action == "bootstrap":
+        command_name = f"bootstrap.{args.bootstrap_action}"
+    else:
+        command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
+    if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret
+        input_data = {"rotate": args.rotate, "confirmed": args.yes}
+    elif args.action == "platform" and args.platform_action in ("up", "down"):
+        input_data = {"non_interactive": args.non_interactive}
+        if args.platform_action == "down":
+            input_data["confirmed"] = args.yes
     response, exit_code = CommandRunner().run(
         command_name,
         args.environment,

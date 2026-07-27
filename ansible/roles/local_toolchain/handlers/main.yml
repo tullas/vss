@@ -7,3 +7,8 @@
   ansible.builtin.service:
     name: docker
     state: restarted
+
+- name: Dearmor OpenTofu repository signing key
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor --output /etc/apt/keyrings/opentofu-repo.gpg /etc/apt/keyrings/opentofu-repo.asc
+  changed_when: true

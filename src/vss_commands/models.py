@@ -28,9 +28,10 @@ CommandHandler = Callable[[CommandContext, dict[str, Any], bool], dict[str, Any]
 class SafeCommandError(RuntimeError):
     """Handler failure message approved for inclusion in the response envelope."""
 
-    def __init__(self, message: str, output: dict[str, Any] | None = None) -> None:
+    def __init__(self, message: str, output: dict[str, Any] | None = None, exit_code: int = 20) -> None:
         super().__init__(message)
         self.output = output or {}
+        self.exit_code = exit_code
 
 
 @dataclass(frozen=True)
