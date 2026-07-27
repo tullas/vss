@@ -82,7 +82,7 @@ jobs:
         run: scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"
       - name: Run Trivy image scan
         run: >-
-          "$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln --ignore-unfixed
+          "$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln
           --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json"
           '${{ matrix.image }}'
       - name: Enforce container vulnerability policy

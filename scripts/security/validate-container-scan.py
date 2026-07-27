@@ -19,8 +19,9 @@ def load_object(path: Path) -> dict[str, Any]:
 
 
 def finding_key(target: str, finding: dict[str, Any]) -> tuple[str, str, str, str]:
+    canonical_target = "/" + target.lstrip("/")
     return (
-        target,
+        canonical_target,
         str(finding.get("VulnerabilityID", "")),
         str(finding.get("PkgName", "")),
         str(finding.get("Severity", "")),
@@ -39,14 +40,34 @@ def validate(root: Path, image: str, report_path: Path, today: dt.date | None = 
     component = next((item for item in components if isinstance(item, dict) and item.get("source") == image), None)
     if component is None:
         raise ValueError("container image is not registered")
+    metadata = report.get("Metadata")
+    if not isinstance(metadata, dict) or metadata.get("ImageID") != component.get("version"):
+        raise ValueError("container scan digest evidence is missing")
+    repo_digests = metadata.get("RepoDigests")
+    if not isinstance(repo_digests, list) or not any(isinstance(item, str) and item.endswith("@" + str(component.get("version"))) for item in repo_digests):
+        raise ValueError("container scan repository digest is missing")
 
-    actual = {
-        finding_key(str(result.get("Target", "")), finding)
-        for result in report["Results"]
-        if isinstance(result, dict)
-        for finding in (result.get("Vulnerabilities") or [])
-        if isinstance(finding, dict) and finding.get("Severity") in {"HIGH", "CRITICAL"}
-    }
+    actual_records: list[tuple[str, str, str, str]] = []
+    for result in report["Results"]:
+        if not isinstance(result, dict) or not isinstance(result.get("Target"), str) or not result["Target"]:
+            raise ValueError("container scan result is malformed")
+        vulnerabilities = result.get("Vulnerabilities")
+        if vulnerabilities is None:
+            continue
+        if not isinstance(vulnerabilities, list):
+            raise ValueError("container scan findings are malformed")
+        for finding in vulnerabilities:
+            if not isinstance(finding, dict):
+                raise ValueError("container scan finding is malformed")
+            if finding.get("Severity") not in {"HIGH", "CRITICAL"}:
+                continue
+            record = finding_key(result["Target"], finding)
+            if not all(record):
+                raise ValueError("container scan finding is incomplete")
+            actual_records.append(record)
+    actual = set(actual_records)
+    if len(actual) != len(actual_records):
+        raise ValueError("container scan contains duplicate findings")
     if not actual:
         return {"image": component["id"], "findings": 0, "exception": False, "status": "passed"}
 
@@ -78,6 +99,8 @@ def validate(root: Path, image: str, report_path: Path, today: dt.date | None = 
         for item in allowed_records
         if isinstance(item, dict)
     }
+    if len(allowed) != len(allowed_records) or any(not all(item) for item in allowed):
+        raise ValueError("container exception finding scope is malformed")
     if actual != allowed:
         raise ValueError(f"container findings differ from approved scope for {component['id']}")
     return {

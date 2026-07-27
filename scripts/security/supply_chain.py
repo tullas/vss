@@ -85,6 +85,24 @@ def validate_exceptions(root: Path, today: dt.date | None = None) -> None:
             raise PolicyFailure(f"security exception expiry is invalid: {record['id']}") from exc
         if expiry < now:
             raise PolicyFailure(f"security exception is expired: {record['id']}")
+        if record["id"] == "ubuntu-2604-pebble-ci-2026-07":
+            exact_identity = {
+                "component": "container-ubuntu-2604",
+                "version": "sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb",
+                "owner": "Bootstrap Owner",
+                "approver_identity": "@tullas",
+                "approved_at": "2026-07-27",
+                "expiry_date": "2026-08-10",
+            }
+            if any(record.get(key) != value for key, value in exact_identity.items()):
+                raise PolicyFailure("Ubuntu acceptance exception differs from human approval")
+            if record.get("approver_roles") != ["Enterprise Architect", "Product Security risk approver"]:
+                raise PolicyFailure("Ubuntu acceptance exception approval roles are invalid")
+            allowed = record.get("allowed_findings")
+            if not isinstance(allowed, list) or len(allowed) != 5 or len({json.dumps(item, sort_keys=True) for item in allowed}) != 5:
+                raise PolicyFailure("Ubuntu acceptance exception finding scope is invalid")
+            if any(not isinstance(item, dict) or set(item) != {"target", "id", "package", "severity"} or item.get("target") != "/usr/bin/pebble" or item.get("severity") != "HIGH" for item in allowed):
+                raise PolicyFailure("Ubuntu acceptance exception finding scope is invalid")
 
 
 def validate_component_admission(root: Path) -> None:
@@ -123,7 +141,7 @@ def validate_images(root: Path) -> None:
     if not production_match or not DIGEST_RE.fullmatch(production_match.group(1)):
         raise PolicyFailure("mutable production image reference")
     acceptance = (root / "scripts/acceptance-ubuntu-26.04-image.sh").read_text(encoding="utf-8")
-    acceptance_match = re.search(r"image=\$\{VSS_ACCEPTANCE_IMAGE:-([^}]+)\}", acceptance)
+    acceptance_match = re.search(r"readonly image='([^']+)'", acceptance)
     if not acceptance_match or not DIGEST_RE.fullmatch(acceptance_match.group(1)):
         raise PolicyFailure("mutable acceptance image reference")
     admitted = {record["source"] for record in component_map(root).values() if record["ecosystem"] == "oci"}
@@ -131,6 +149,10 @@ def validate_images(root: Path) -> None:
         raise PolicyFailure("production image is not admitted")
     if acceptance_match.group(1) not in admitted:
         raise PolicyFailure("acceptance image is not admitted")
+    if acceptance_match.group(1) == "docker.io/library/ubuntu@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb":
+        acceptance_sha256 = hashlib.sha256(acceptance.encode("utf-8")).hexdigest()
+        if acceptance_sha256 != "268fb4473cc9e1746d5095a3d520a6250bbca32abd9451fb0e40d37b89901a69" or "pebble" in acceptance.lower():
+            raise PolicyFailure("approved acceptance execution boundary changed")
     prohibited_acceptance_options = ("--privileged", "/var/run/docker.sock", "--device", "--cap-add")
     if any(option in acceptance for option in prohibited_acceptance_options) or 'target=/source,readonly' not in acceptance:
         raise PolicyFailure("acceptance image isolation is weakened")
@@ -284,7 +306,7 @@ def validate_workflow_invariants(root: Path) -> None:
     if installer_sha256 != "f3cdfce62d05a0eaf8ec12b54bcc37ba9c94f4ea883381e599ad4ebe5bdd3774":
         raise PolicyFailure("security scanner installer is not checksum pinned")
     expected_scans = {
-        "container-scan": '"$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json" \'${{ matrix.image }}\'',
+        "container-scan": '"$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json" \'${{ matrix.image }}\'',
         "iac-scan": '"$RUNNER_TEMP/vss-trivy/trivy" config --exit-code 1 --severity HIGH,CRITICAL --skip-dirs .venv --skip-dirs .terraform .',
     }
     for job_name in ("container-scan", "iac-scan"):
@@ -292,6 +314,10 @@ def validate_workflow_invariants(root: Path) -> None:
         required_container_policy = "python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}' --report \"$RUNNER_TEMP/trivy-report.json\""
         if 'scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs or expected_scans[job_name] not in job_runs or (job_name == "container-scan" and required_container_policy not in job_runs):
             raise PolicyFailure(f"security scanner does not fail closed: {job_name}")
+    scanned_images = jobs["container-scan"].get("strategy", {}).get("matrix", {}).get("image", [])
+    required_images = sorted(record["source"] for record in component_map(root).values() if record["ecosystem"] == "oci")
+    if not isinstance(scanned_images, list) or sorted(scanned_images) != required_images:
+        raise PolicyFailure("container scan matrix does not cover every admitted image")
     codeowners = root / ".github/CODEOWNERS"
     if not codeowners.is_file() or "/.github/workflows/ @tullas" not in codeowners.read_text(encoding="utf-8"):
         raise PolicyFailure("security control paths lack CODEOWNERS review")

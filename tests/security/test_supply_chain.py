@@ -47,11 +47,16 @@ class SupplyChainPolicyTests(unittest.TestCase):
         write_json(root / "security/components.yml", {"components": [component("ubuntu", "ubuntu", "oci", "sha256:" + "a" * 64, source=image)]})
         finding = {"VulnerabilityID": "CVE-2026-0001", "PkgName": "stdlib", "Severity": "HIGH"}
         report = root / "report.json"
-        write_json(report, {"ArtifactName": image, "ArtifactType": "container_image", "Results": [{"Target": "usr/bin/pebble", "Vulnerabilities": [finding]}]})
+        write_json(report, {
+            "ArtifactName": image,
+            "ArtifactType": "container_image",
+            "Metadata": {"ImageID": "sha256:" + "a" * 64, "RepoDigests": ["ubuntu@sha256:" + "a" * 64]},
+            "Results": [{"Target": "usr/bin/pebble", "Vulnerabilities": [finding]}],
+        })
         write_json(root / "security/exceptions.yml", {"exceptions": [{
             "id": "test-exception", "component": "ubuntu", "version": "sha256:" + "a" * 64,
             "owner": "Bootstrap Owner", "approval": "Independent Human Approver", "expiry_date": "2026-08-10",
-            "allowed_findings": [{"target": "usr/bin/pebble", "id": "CVE-2026-0001", "package": "stdlib", "severity": "HIGH"}],
+            "allowed_findings": [{"target": "/usr/bin/pebble", "id": "CVE-2026-0001", "package": "stdlib", "severity": "HIGH"}],
         }]})
         return image, report
 
@@ -82,12 +87,31 @@ class SupplyChainPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "does not match requested image"):
                 CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
 
+    def test_container_report_digest_substitution_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image, report = self._container_scan_fixture(root)
+            value = json.loads(report.read_text(encoding="utf-8"))
+            value["Metadata"]["ImageID"] = "sha256:" + "b" * 64
+            write_json(report, value)
+            with self.assertRaisesRegex(ValueError, "digest evidence is missing"):
+                CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+
     def test_expired_container_exception_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             image, report = self._container_scan_fixture(root)
             with self.assertRaisesRegex(ValueError, "expired"):
                 CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 8, 11))
+
+    def test_approved_ubuntu_expiry_change_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            value = json.loads((ROOT / "security/exceptions.yml").read_text(encoding="utf-8"))
+            value["exceptions"][0]["expiry_date"] = "2026-08-11"
+            write_json(root / "security/exceptions.yml", value)
+            with self.assertRaisesRegex(SC.PolicyFailure, "differs from human approval"):
+                SC.validate_exceptions(root, today=dt.date(2026, 7, 27))
 
     def test_unpinned_action_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -108,7 +132,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
             path.write_text('variable "minio_image" { default = "minio/minio:latest" }', encoding="utf-8")
             script = root / "scripts/acceptance-ubuntu-26.04-image.sh"
             script.parent.mkdir(parents=True)
-            script.write_text("image=${VSS_ACCEPTANCE_IMAGE:-ubuntu:26.04}\n", encoding="utf-8")
+            script.write_text("readonly image='ubuntu:26.04'\n", encoding="utf-8")
             with self.assertRaisesRegex(SC.PolicyFailure, "mutable production"):
                 SC.validate_images(root)
 
@@ -123,7 +147,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
             path.write_text(f'variable "minio_image" {{ default = "{unreviewed}" }}', encoding="utf-8")
             script = root / "scripts/acceptance-ubuntu-26.04-image.sh"
             script.parent.mkdir(parents=True)
-            script.write_text(f"image=${{VSS_ACCEPTANCE_IMAGE:-{accepted}}}\n", encoding="utf-8")
+            script.write_text(f"readonly image='{accepted}'\ndocker run --rm --mount \"type=bind,source=$project_root,target=/source,readonly\" \"$image\" bash -ceu true\n", encoding="utf-8")
             with self.assertRaisesRegex(SC.PolicyFailure, "not admitted"):
                 SC.validate_images(root)
 
@@ -267,6 +291,21 @@ class SupplyChainPolicyTests(unittest.TestCase):
             workflow.parent.mkdir(parents=True)
             source = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
             source = source.replace('"$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln', 'echo "$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln')
+            workflow.write_text(source, encoding="utf-8")
+            installer = root / "scripts/security/install-trivy.sh"
+            installer.parent.mkdir(parents=True)
+            installer.write_bytes((ROOT / "scripts/security/install-trivy.sh").read_bytes())
+            (root / ".github/CODEOWNERS").write_text("/.github/workflows/ @tullas\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "scanner does not fail closed"):
+                SC.validate_workflow_invariants(root)
+
+    def test_generic_unfixed_finding_suppression_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/security.yml"
+            workflow.parent.mkdir(parents=True)
+            source = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
+            source = source.replace("image --scanners vuln\n          --severity", "image --scanners vuln --ignore-unfixed\n          --severity")
             workflow.write_text(source, encoding="utf-8")
             installer = root / "scripts/security/install-trivy.sh"
             installer.parent.mkdir(parents=True)

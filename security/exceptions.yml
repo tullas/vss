@@ -11,14 +11,17 @@
       "compensating_controls": "Exact digest and finding set; explicit bash entrypoint; read-only repository mount; no privileged mode or host socket; scan every candidate; fail on scope change.",
       "owner": "Bootstrap Owner",
       "approval": "@tullas (Enterprise Architect and human Product Security risk approver)",
+      "approver_identity": "@tullas",
+      "approver_roles": ["Enterprise Architect", "Product Security risk approver"],
+      "approved_at": "2026-07-27",
       "expiry_date": "2026-08-10",
       "remediation_plan": "Adopt a Canonical Ubuntu 26.04 digest without these findings or a separately reviewed purpose-built acceptance image; update inventory, SBOM and rollback evidence and rerun all gates.",
       "allowed_findings": [
-        {"target": "usr/bin/pebble", "id": "CVE-2026-25681", "package": "golang.org/x/net", "severity": "HIGH"},
-        {"target": "usr/bin/pebble", "id": "CVE-2026-27136", "package": "golang.org/x/net", "severity": "HIGH"},
-        {"target": "usr/bin/pebble", "id": "CVE-2026-33814", "package": "golang.org/x/net", "severity": "HIGH"},
-        {"target": "usr/bin/pebble", "id": "CVE-2026-39821", "package": "golang.org/x/net", "severity": "HIGH"},
-        {"target": "usr/bin/pebble", "id": "CVE-2026-39822", "package": "stdlib", "severity": "HIGH"}
+        {"target": "/usr/bin/pebble", "id": "CVE-2026-25681", "package": "golang.org/x/net", "severity": "HIGH"},
+        {"target": "/usr/bin/pebble", "id": "CVE-2026-27136", "package": "golang.org/x/net", "severity": "HIGH"},
+        {"target": "/usr/bin/pebble", "id": "CVE-2026-33814", "package": "golang.org/x/net", "severity": "HIGH"},
+        {"target": "/usr/bin/pebble", "id": "CVE-2026-39821", "package": "golang.org/x/net", "severity": "HIGH"},
+        {"target": "/usr/bin/pebble", "id": "CVE-2026-39822", "package": "stdlib", "severity": "HIGH"}
       ]
     }
   ]
