@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import tomllib
+import yaml
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +87,18 @@ def validate_exceptions(root: Path, today: dt.date | None = None) -> None:
             raise PolicyFailure(f"security exception is expired: {record['id']}")
 
 
+def validate_component_admission(root: Path) -> None:
+    exceptions = load_json(root / "security/exceptions.yml").get("exceptions", [])
+    excepted = {
+        (str(record.get("component")), str(record.get("version")))
+        for record in exceptions
+        if isinstance(record, dict)
+    }
+    for record in component_map(root).values():
+        if record["approval_status"] == "prohibited" and (str(record["id"]), str(record["version"])) not in excepted:
+            raise PolicyFailure(f"prohibited component is not admitted: {record['id']}")
+
+
 def validate_actions(root: Path) -> None:
     registered = {record["name"]: record["version"] for record in component_map(root).values() if record["ecosystem"] == "github-action"}
     seen: set[str] = set()
@@ -106,15 +119,17 @@ def validate_actions(root: Path) -> None:
 
 def validate_images(root: Path) -> None:
     variables = (root / "infrastructure/modules/local/object_storage/variables.tf").read_text(encoding="utf-8")
-    match = re.search(r'variable "minio_image".*?default\s*=\s*"([^"]+)"', variables, re.DOTALL)
-    if not match or not DIGEST_RE.fullmatch(match.group(1)):
+    production_match = re.search(r'variable "minio_image".*?default\s*=\s*"([^"]+)"', variables, re.DOTALL)
+    if not production_match or not DIGEST_RE.fullmatch(production_match.group(1)):
         raise PolicyFailure("mutable production image reference")
     acceptance = (root / "scripts/acceptance-ubuntu-26.04-image.sh").read_text(encoding="utf-8")
-    match = re.search(r"image=\$\{VSS_ACCEPTANCE_IMAGE:-([^}]+)\}", acceptance)
-    if not match or not DIGEST_RE.fullmatch(match.group(1)):
+    acceptance_match = re.search(r"image=\$\{VSS_ACCEPTANCE_IMAGE:-([^}]+)\}", acceptance)
+    if not acceptance_match or not DIGEST_RE.fullmatch(acceptance_match.group(1)):
         raise PolicyFailure("mutable acceptance image reference")
     admitted = {record["source"] for record in component_map(root).values() if record["ecosystem"] == "oci"}
-    if match.group(1) not in admitted:
+    if production_match.group(1) not in admitted:
+        raise PolicyFailure("production image is not admitted")
+    if acceptance_match.group(1) not in admitted:
         raise PolicyFailure("acceptance image is not admitted")
 
 
@@ -137,7 +152,7 @@ def validate_locks(root: Path) -> None:
     metadata = load_json(root / "security/lock-metadata.json")
     if metadata.get("generator") != "uv 0.10.7":
         raise PolicyFailure("unapproved lock generator")
-    for group in ("inputs", "locks"):
+    for group in ("inputs", "locks", "policy_files"):
         records = metadata.get(group, {})
         if not isinstance(records, dict) or not records:
             raise PolicyFailure("lock metadata is incomplete")
@@ -224,14 +239,49 @@ def validate_opentofu(root: Path) -> None:
 def validate_workflow_invariants(root: Path) -> None:
     path = root / ".github/workflows/security.yml"
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
-    required = {"policy", "dependency-review", "python-vulnerability", "container-scan", "iac-scan", "static-analysis", "sbom-provenance"}
+    required = {"policy", "dependency-review", "python-vulnerability", "bootstrap-python311-license", "container-scan", "iac-scan", "static-analysis", "sbom-provenance"}
     missing = {job for job in required if not re.search(rf"^  {re.escape(job)}:\s*$", text, re.MULTILINE)}
     if missing:
         raise PolicyFailure("required security workflow job is missing")
-    if "continue-on-error: true" in text or not re.search(r"^permissions:\s*\n  contents: read\s*$", text, re.MULTILINE):
+    if not re.search(r"^permissions:\s*\n  contents: read\s*$", text, re.MULTILINE):
         raise PolicyFailure("security workflow weakens fail-closed permissions")
-    if "python3 scripts/security/validate-supply-chain.py" not in text:
-        raise PolicyFailure("canonical policy validation step is missing")
+    try:
+        workflow = yaml.safe_load(text)
+        jobs = workflow["jobs"]
+    except (yaml.YAMLError, KeyError, TypeError) as exc:
+        raise PolicyFailure("security workflow structure is invalid") from exc
+    expected_if = {"dependency-review": "github.event_name == 'pull_request'"}
+    required_runs = {
+        "policy": {"python3 scripts/security/validate-supply-chain.py"},
+        "python-vulnerability": {
+            "pip-audit --require-hashes -r requirements/locks/runtime.lock.txt",
+            "python3 scripts/security/validate-python-licenses.py",
+        },
+        "bootstrap-python311-license": {"python3 scripts/security/validate-python-licenses.py --lock requirements/locks/bootstrap-py311.lock.txt"},
+        "sbom-provenance": {"scripts/security/build-release-candidate.sh dist/security-evidence"},
+    }
+    for job_name in required:
+        job = jobs.get(job_name)
+        if not isinstance(job, dict) or job.get("continue-on-error") is True:
+            raise PolicyFailure(f"required security job is disabled: {job_name}")
+        if "if" in job and job.get("if") != expected_if.get(job_name):
+            raise PolicyFailure(f"required security job has a disabling condition: {job_name}")
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            raise PolicyFailure(f"required security job lacks steps: {job_name}")
+        active_steps = [step for step in steps if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True]
+        runs = {str(step.get("run", "")).strip() for step in active_steps}
+        for run in runs:
+            if "|| true" in run or re.search(r";\s*true\s*$", run):
+                raise PolicyFailure(f"security command suppresses failure: {job_name}")
+        if not required_runs.get(job_name, set()).issubset(runs):
+            raise PolicyFailure(f"canonical security validation step is missing: {job_name}")
+    container = jobs["container-scan"]
+    iac = jobs["iac-scan"]
+    for job_name, job in (("container-scan", container), ("iac-scan", iac)):
+        trivy = next((step for step in job["steps"] if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True and str(step.get("uses", "")).startswith("aquasecurity/trivy-action@")), None)
+        if not trivy or str(trivy.get("with", {}).get("exit-code")) != "1":
+            raise PolicyFailure(f"security scanner does not fail closed: {job_name}")
     codeowners = root / ".github/CODEOWNERS"
     if not codeowners.is_file() or "/.github/workflows/ @tullas" not in codeowners.read_text(encoding="utf-8"):
         raise PolicyFailure("security control paths lack CODEOWNERS review")
@@ -239,7 +289,7 @@ def validate_workflow_invariants(root: Path) -> None:
 
 def validate_all(root: Path) -> list[str]:
     checks = [
-        validate_licenses, validate_exceptions, validate_actions, validate_images,
+        validate_licenses, validate_exceptions, validate_component_admission, validate_actions, validate_images,
         validate_locks, validate_manifest_alignment, validate_direct_dependencies, validate_vulnerability_admission, validate_opentofu,
         validate_workflow_invariants,
     ]

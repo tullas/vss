@@ -6,6 +6,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,6 +60,21 @@ class SupplyChainPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(SC.PolicyFailure, "mutable production"):
                 SC.validate_images(root)
 
+    def test_unreviewed_production_image_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            accepted = "registry.example/accepted@sha256:" + "a" * 64
+            unreviewed = "registry.example/unreviewed@sha256:" + "b" * 64
+            write_json(root / "security/components.yml", {"components": [component("accepted", "accepted", "oci", "digest", source=accepted)]})
+            path = root / "infrastructure/modules/local/object_storage/variables.tf"
+            path.parent.mkdir(parents=True)
+            path.write_text(f'variable "minio_image" {{ default = "{unreviewed}" }}', encoding="utf-8")
+            script = root / "scripts/acceptance-ubuntu-26.04-image.sh"
+            script.parent.mkdir(parents=True)
+            script.write_text(f"image=${{VSS_ACCEPTANCE_IMAGE:-{accepted}}}\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "not admitted"):
+                SC.validate_images(root)
+
     def test_prohibited_license_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -66,6 +82,14 @@ class SupplyChainPolicyTests(unittest.TestCase):
             write_json(root / "security/license-policy.yml", {"allowed": ["MIT"], "review_required": [], "prohibited": ["SSPL-1.0"]})
             with self.assertRaisesRegex(SC.PolicyFailure, "prohibited"):
                 SC.validate_licenses(root)
+
+    def test_prohibited_component_without_exception_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_json(root / "security/components.yml", {"components": [component("blocked", "blocked", "pypi", "1", status="prohibited")]})
+            write_json(root / "security/exceptions.yml", {"exceptions": []})
+            with self.assertRaisesRegex(SC.PolicyFailure, "prohibited component"):
+                SC.validate_component_admission(root)
 
     def test_expired_exception_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -88,10 +112,14 @@ class SupplyChainPolicyTests(unittest.TestCase):
             bootstrap = root / "scripts/bootstrap-host.sh"
             bootstrap.parent.mkdir(parents=True)
             bootstrap.write_text('pip install --require-hashes -r "$bootstrap_lock"\n', encoding="utf-8")
+            review_path = root / "security/python-license-reviews.yml"
+            review_path.parent.mkdir(parents=True)
+            review_path.write_text('{"reviewed": {}}\n', encoding="utf-8")
             write_json(root / "security/lock-metadata.json", {
                 "generator": "uv 0.10.7",
                 "inputs": {"requirements/inputs/runtime.in": hashlib.sha256(input_path.read_bytes()).hexdigest()},
                 "locks": {"requirements/locks/runtime.lock.txt": hashlib.sha256(lock_path.read_bytes()).hexdigest()},
+                "policy_files": {"security/python-license-reviews.yml": hashlib.sha256(review_path.read_bytes()).hexdigest()},
             })
             with self.assertRaisesRegex(SC.PolicyFailure, "lacks an enforced hash"):
                 SC.validate_locks(root)
@@ -120,6 +148,52 @@ class SupplyChainPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(SC.PolicyFailure, "job is missing"):
                 SC.validate_workflow_invariants(root)
 
+    def test_disabled_security_job_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/security.yml"
+            workflow.parent.mkdir(parents=True)
+            source = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
+            workflow.write_text(source.replace("  policy:\n", "  policy:\n    if: false\n"), encoding="utf-8")
+            codeowners = root / ".github/CODEOWNERS"
+            codeowners.write_text("/.github/workflows/ @tullas\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "disabling condition"):
+                SC.validate_workflow_invariants(root)
+
+    def test_expression_disabled_security_job_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/security.yml"
+            workflow.parent.mkdir(parents=True)
+            source = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
+            workflow.write_text(source.replace("  policy:\n", "  policy:\n    if: ${{ false }}\n"), encoding="utf-8")
+            (root / ".github/CODEOWNERS").write_text("/.github/workflows/ @tullas\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "disabling condition"):
+                SC.validate_workflow_invariants(root)
+
+    def test_security_command_failure_suppression_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/security.yml"
+            workflow.parent.mkdir(parents=True)
+            source = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
+            workflow.write_text(source.replace("python3 scripts/security/validate-supply-chain.py", "python3 scripts/security/validate-supply-chain.py || true"), encoding="utf-8")
+            (root / ".github/CODEOWNERS").write_text("/.github/workflows/ @tullas\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "suppresses failure"):
+                SC.validate_workflow_invariants(root)
+
+    def test_disabled_required_security_step_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/security.yml"
+            workflow.parent.mkdir(parents=True)
+            source = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
+            target = "      - run: python3 scripts/security/validate-supply-chain.py\n"
+            workflow.write_text(source.replace(target, target.rstrip() + "\n        if: ${{ false }}\n"), encoding="utf-8")
+            (root / ".github/CODEOWNERS").write_text("/.github/workflows/ @tullas\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "canonical security validation step"):
+                SC.validate_workflow_invariants(root)
+
     def test_sbom_is_valid_and_artifacts_reject_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "vss.cdx.json"
@@ -129,6 +203,23 @@ class SupplyChainPolicyTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(ROOT / "scripts/security/validate-artifacts.py"), directory], capture_output=True, text=True, check=False)
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn("do-not-leak", result.stdout + result.stderr)
+
+    def test_secrets_inside_release_archive_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.txt"
+            source.write_text("-----BEGIN " + "PRIVATE KEY-----\ndo-not-leak\n", encoding="utf-8")
+            archive = root / "vss-source.tar.gz"
+            with tarfile.open(archive, "w:gz") as output:
+                output.add(source, arcname="source.txt")
+            source.unlink()
+            result = subprocess.run([sys.executable, str(ROOT / "scripts/security/validate-artifacts.py"), directory], capture_output=True, text=True, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("do-not-leak", result.stdout + result.stderr)
+
+    def test_real_repository_release_evidence_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run([str(ROOT / "scripts/security/build-release-candidate.sh"), directory], cwd=ROOT, check=True, capture_output=True, text=True)
 
     def test_security_diagnostics_do_not_reveal_sensitive_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

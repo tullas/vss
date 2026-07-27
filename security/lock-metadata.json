@@ -11,5 +11,8 @@
     "requirements/locks/development.lock.txt": "9378fb5dfaff5baf6fe58c003ae0c78411976f9bc82b02f7d8b4d10f5ee707dd",
     "requirements/locks/runtime.lock.txt": "086f6c8339ba9d59282336559c763a9179309487e13725f5d18adb778a727ba4"
   },
+  "policy_files": {
+    "security/python-license-reviews.yml": "1ab8e9ebba1adb85e29f2b71e816364d649b08ffe2207f74066e0c89b94b1464"
+  },
   "schema_version": "1.0"
 }

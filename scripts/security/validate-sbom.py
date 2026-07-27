@@ -23,6 +23,14 @@ if not {"github-action", "oci", "opentofu-provider", "apt"}.issubset(ecosystems)
     raise SystemExit("SBOM omits a required external-input class")
 if not any(str(item.get("purl", "")).startswith("pkg:pypi/") for item in components):
     raise SystemExit("SBOM omits Python packages")
+try:
+    from cyclonedx.schema import SchemaVersion
+    from cyclonedx.validation.json import JsonStrictValidator
+except ImportError:
+    pass
+else:
+    if JsonStrictValidator(SchemaVersion.V1_6).validate_str(args.sbom.read_text(encoding="utf-8")):
+        raise SystemExit("SBOM fails the CycloneDX 1.6 schema")
 encoded = json.dumps(value)
 if re.search(r"(?i)(password|secret|token|api[_-]?key)\s*[:=]\s*[^\s,}]+", encoded):
     raise SystemExit("SBOM contains sensitive-looking content")

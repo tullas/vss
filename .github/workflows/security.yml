@@ -25,6 +25,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/runtime.lock.txt
       - run: python3 scripts/security/validate-supply-chain.py
       - run: python -m unittest discover -s tests/security -p 'test_*.py'
 
@@ -51,6 +52,19 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/development.lock.txt
       - run: pip-audit --require-hashes -r requirements/locks/runtime.lock.txt
+      - run: python3 scripts/security/validate-python-licenses.py
+
+  bootstrap-python311-license:
+    name: Bootstrap Python 3.11 license scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/bootstrap-py311.lock.txt
+      - run: python3 scripts/security/validate-python-licenses.py --lock requirements/locks/bootstrap-py311.lock.txt
 
   container-scan:
     name: Container image scan
@@ -122,13 +136,18 @@ jobs:
 
   sbom-provenance:
     name: SBOM and Level 1-compatible provenance
-    needs: [policy, python-vulnerability, container-scan, iac-scan, static-analysis]
+    needs: [policy, python-vulnerability, bootstrap-python311-license, container-scan, iac-scan, static-analysis]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install schema validator from controlled lock
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/development.lock.txt
       - name: Build release candidate evidence
         run: scripts/security/build-release-candidate.sh dist/security-evidence
       - name: Build SBOM dependency diff

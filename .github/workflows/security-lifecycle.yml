@@ -13,6 +13,10 @@ jobs:
     name: Vulnerability, EOL, exception and security-PR report
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -20,17 +24,41 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/development.lock.txt
       - name: Known vulnerability report
-        run: pip-audit --require-hashes -r requirements/locks/runtime.lock.txt
+        id: audit
+        run: |
+          set +e
+          pip-audit --require-hashes -r requirements/locks/runtime.lock.txt
+          status=$?
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Outdated dependency report
+        id: outdated
+        if: always()
+        run: python -m pip list --outdated --format=json | tee /tmp/outdated.json
       - name: Lifecycle and exception report
+        id: lifecycle
+        if: always()
         run: |
           python3 scripts/security/lifecycle-report.py | tee /tmp/lifecycle.json
           printf '## Security lifecycle report\n```json\n' >> "$GITHUB_STEP_SUMMARY"
           cat /tmp/lifecycle.json >> "$GITHUB_STEP_SUMMARY"
           printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
       - name: Outdated dependency and stale security PR report
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           printf '## Open dependency/security pull requests\n' >> "$GITHUB_STEP_SUMMARY"
-          gh pr list --state open --search 'author:app/dependabot OR label:security' --json number,title,updatedAt,url >> "$GITHUB_STEP_SUMMARY"
-          printf '\nFailed scheduled security scans remain visible as failed workflow runs and are not suppressed.\n' >> "$GITHUB_STEP_SUMMARY"
+          gh pr list --state open --search 'author:app/dependabot OR label:security' --json number,title,createdAt,updatedAt,url >> "$GITHUB_STEP_SUMMARY"
+          printf '\n## Failed security scans\n' >> "$GITHUB_STEP_SUMMARY"
+          gh run list --workflow security.yml --status failure --limit 20 --json databaseId,conclusion,createdAt,headBranch,url >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce scheduled findings and report health
+        if: always()
+        env:
+          AUDIT_STATUS: ${{ steps.audit.outputs.status }}
+          OUTDATED_OUTCOME: ${{ steps.outdated.outcome }}
+          LIFECYCLE_OUTCOME: ${{ steps.lifecycle.outcome }}
+        run: |
+          if [[ "$AUDIT_STATUS" != 0 || "$OUTDATED_OUTCOME" != success || "$LIFECYCLE_OUTCOME" != success ]]; then
+            exit 1
+          fi

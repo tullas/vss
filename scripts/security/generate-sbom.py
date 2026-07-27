@@ -45,7 +45,7 @@ def registry_components(root: Path) -> list[dict]:
                 "bom-ref": f"vss:{item['ecosystem']}:{item['id']}@{item['version']}",
                 "name": item["name"],
                 "version": item["version"],
-                "licenses": [{"license": {"id": item["license"]}}],
+                "licenses": [{"license": ({"name": "License not asserted"} if item["license"] == "NOASSERTION" else {"id": item["license"]})}],
                 "externalReferences": [{"type": "distribution", "url": item["source"]}],
                 "properties": [
                     {"name": "vss:ecosystem", "value": item["ecosystem"]},
