@@ -1,0 +1,36 @@
+name: Security Lifecycle Report
+
+on:
+  schedule:
+    - cron: '41 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle-report:
+    name: Vulnerability, EOL, exception and security-PR report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/development.lock.txt
+      - name: Known vulnerability report
+        run: pip-audit --require-hashes -r requirements/locks/runtime.lock.txt
+      - name: Lifecycle and exception report
+        run: |
+          python3 scripts/security/lifecycle-report.py | tee /tmp/lifecycle.json
+          printf '## Security lifecycle report\n```json\n' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/lifecycle.json >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```\n' >> "$GITHUB_STEP_SUMMARY"
+      - name: Outdated dependency and stale security PR report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '## Open dependency/security pull requests\n' >> "$GITHUB_STEP_SUMMARY"
+          gh pr list --state open --search 'author:app/dependabot OR label:security' --json number,title,updatedAt,url >> "$GITHUB_STEP_SUMMARY"
+          printf '\nFailed scheduled security scans remain visible as failed workflow runs and are not suppressed.\n' >> "$GITHUB_STEP_SUMMARY"
