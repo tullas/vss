@@ -224,14 +224,14 @@ class SupplyChainPolicyTests(unittest.TestCase):
     def test_security_diagnostics_do_not_reveal_sensitive_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            secret = "sensitive-canary-value"
+            diagnostic_canary = "diagnostic-canary-value"
             write_json(root / "security/components.yml", {"components": [component("checkout", "actions/checkout", "github-action", "a" * 40)]})
             workflow = root / ".github/workflows/ci.yml"
             workflow.parent.mkdir(parents=True)
-            workflow.write_text(f"# token={secret}\nsteps:\n  - uses: actions/checkout@v5\n", encoding="utf-8")
+            workflow.write_text(f"# diagnostic-marker={diagnostic_canary}\nsteps:\n  - uses: actions/checkout@v5\n", encoding="utf-8")
             with self.assertRaises(SC.PolicyFailure) as caught:
                 SC.validate_actions(root)
-            self.assertNotIn(secret, str(caught.exception))
+            self.assertNotIn(diagnostic_canary, str(caught.exception))
 
 
 if __name__ == "__main__":
