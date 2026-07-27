@@ -276,7 +276,7 @@ def validate_workflow_invariants(root: Path) -> None:
                 raise PolicyFailure(f"security command suppresses failure: {job_name}")
         if not required_runs.get(job_name, set()).issubset(runs):
             raise PolicyFailure(f"canonical security validation step is missing: {job_name}")
-    scanner_digest = "docker.io/aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e"
+    scanner_digest = "docker.io/aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
     for job_name in ("container-scan", "iac-scan"):
         scanner_runs = [run for run in ({str(step.get("run", "")).strip() for step in jobs[job_name]["steps"] if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True}) if scanner_digest in run]
         if len(scanner_runs) != 1 or "--exit-code 1" not in scanner_runs[0]:
