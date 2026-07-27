@@ -17,6 +17,11 @@ assert SPEC and SPEC.loader
 SC = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = SC
 SPEC.loader.exec_module(SC)
+CONTAINER_SPEC = importlib.util.spec_from_file_location("validate_container_scan", ROOT / "scripts/security/validate-container-scan.py")
+assert CONTAINER_SPEC and CONTAINER_SPEC.loader
+CONTAINER_SCAN = importlib.util.module_from_spec(CONTAINER_SPEC)
+sys.modules[CONTAINER_SPEC.name] = CONTAINER_SCAN
+CONTAINER_SPEC.loader.exec_module(CONTAINER_SCAN)
 
 
 def write_json(path: Path, value: object) -> None:
@@ -37,6 +42,53 @@ def component(component_id: str, name: str, ecosystem: str, version: str, licens
 
 
 class SupplyChainPolicyTests(unittest.TestCase):
+    def _container_scan_fixture(self, root: Path) -> tuple[str, Path]:
+        image = "docker.io/library/ubuntu@sha256:" + "a" * 64
+        write_json(root / "security/components.yml", {"components": [component("ubuntu", "ubuntu", "oci", "sha256:" + "a" * 64, source=image)]})
+        finding = {"VulnerabilityID": "CVE-2026-0001", "PkgName": "stdlib", "Severity": "HIGH"}
+        report = root / "report.json"
+        write_json(report, {"ArtifactName": image, "ArtifactType": "container_image", "Results": [{"Target": "usr/bin/pebble", "Vulnerabilities": [finding]}]})
+        write_json(root / "security/exceptions.yml", {"exceptions": [{
+            "id": "test-exception", "component": "ubuntu", "version": "sha256:" + "a" * 64,
+            "owner": "Bootstrap Owner", "approval": "Independent Human Approver", "expiry_date": "2026-08-10",
+            "allowed_findings": [{"target": "usr/bin/pebble", "id": "CVE-2026-0001", "package": "stdlib", "severity": "HIGH"}],
+        }]})
+        return image, report
+
+    def test_exact_container_exception_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image, report = self._container_scan_fixture(root)
+            result = CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+            self.assertTrue(result["exception"])
+
+    def test_container_exception_scope_change_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image, report = self._container_scan_fixture(root)
+            value = json.loads(report.read_text(encoding="utf-8"))
+            value["Results"][0]["Vulnerabilities"].append({"VulnerabilityID": "CVE-2026-0002", "PkgName": "stdlib", "Severity": "CRITICAL"})
+            write_json(report, value)
+            with self.assertRaisesRegex(ValueError, "differ from approved scope"):
+                CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+
+    def test_container_report_for_different_image_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image, report = self._container_scan_fixture(root)
+            value = json.loads(report.read_text(encoding="utf-8"))
+            value["ArtifactName"] = "docker.io/library/other@sha256:" + "b" * 64
+            write_json(report, value)
+            with self.assertRaisesRegex(ValueError, "does not match requested image"):
+                CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+
+    def test_expired_container_exception_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image, report = self._container_scan_fixture(root)
+            with self.assertRaisesRegex(ValueError, "expired"):
+                CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 8, 11))
+
     def test_unpinned_action_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -214,7 +266,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
             workflow = root / ".github/workflows/security.yml"
             workflow.parent.mkdir(parents=True)
             source = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
-            source = source.replace('"$RUNNER_TEMP/vss-trivy/trivy" image --exit-code 1', 'echo "$RUNNER_TEMP/vss-trivy/trivy" image --exit-code 1')
+            source = source.replace('"$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln', 'echo "$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln')
             workflow.write_text(source, encoding="utf-8")
             installer = root / "scripts/security/install-trivy.sh"
             installer.parent.mkdir(parents=True)

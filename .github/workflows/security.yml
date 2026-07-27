@@ -82,8 +82,13 @@ jobs:
         run: scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"
       - name: Run Trivy image scan
         run: >-
-          "$RUNNER_TEMP/vss-trivy/trivy" image --exit-code 1 --ignore-unfixed
-          --severity HIGH,CRITICAL '${{ matrix.image }}'
+          "$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln --ignore-unfixed
+          --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json"
+          '${{ matrix.image }}'
+      - name: Enforce container vulnerability policy
+        run: >-
+          python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}'
+          --report "$RUNNER_TEMP/trivy-report.json"
 
   iac-scan:
     name: IaC and Dockerfile scan

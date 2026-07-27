@@ -131,6 +131,9 @@ def validate_images(root: Path) -> None:
         raise PolicyFailure("production image is not admitted")
     if acceptance_match.group(1) not in admitted:
         raise PolicyFailure("acceptance image is not admitted")
+    prohibited_acceptance_options = ("--privileged", "/var/run/docker.sock", "--device", "--cap-add")
+    if any(option in acceptance for option in prohibited_acceptance_options) or 'target=/source,readonly' not in acceptance:
+        raise PolicyFailure("acceptance image isolation is weakened")
 
 
 def _lock_requirements(path: Path) -> list[tuple[str, str]]:
@@ -281,12 +284,13 @@ def validate_workflow_invariants(root: Path) -> None:
     if installer_sha256 != "f3cdfce62d05a0eaf8ec12b54bcc37ba9c94f4ea883381e599ad4ebe5bdd3774":
         raise PolicyFailure("security scanner installer is not checksum pinned")
     expected_scans = {
-        "container-scan": '"$RUNNER_TEMP/vss-trivy/trivy" image --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL \'${{ matrix.image }}\'',
+        "container-scan": '"$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json" \'${{ matrix.image }}\'',
         "iac-scan": '"$RUNNER_TEMP/vss-trivy/trivy" config --exit-code 1 --severity HIGH,CRITICAL --skip-dirs .venv --skip-dirs .terraform .',
     }
     for job_name in ("container-scan", "iac-scan"):
         job_runs = {str(step.get("run", "")).strip() for step in jobs[job_name]["steps"] if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True}
-        if 'scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs or expected_scans[job_name] not in job_runs:
+        required_container_policy = "python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}' --report \"$RUNNER_TEMP/trivy-report.json\""
+        if 'scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs or expected_scans[job_name] not in job_runs or (job_name == "container-scan" and required_container_policy not in job_runs):
             raise PolicyFailure(f"security scanner does not fail closed: {job_name}")
     codeowners = root / ".github/CODEOWNERS"
     if not codeowners.is_file() or "/.github/workflows/ @tullas" not in codeowners.read_text(encoding="utf-8"):
