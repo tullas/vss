@@ -9,7 +9,7 @@ docker run --rm \
   "$image" \
   bash -ceu '
     apt-get update
-    apt-get install -y git python3
+    apt-get install -y git python3 util-linux
     cp -a /source /tmp/vss
     cd /tmp/vss
     rm -rf .venv .local
@@ -32,5 +32,12 @@ docker run --rm \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       VSS_BOOTSTRAP_INSTALL_ONLY=1 ./scripts/bootstrap-host.sh
     test -x .venv/bin/ansible-playbook
+    mkdir -p /tmp/fake-bin
+    ln -s /tmp/vss/tests/fixtures/bootstrap/fake-interactive-ansible /tmp/fake-bin/ansible-playbook
+    VSS_TEST_INTERACTIVE_MARKER=/tmp/interactive-ran \
+      script -qec "PATH=/tmp/fake-bin:\$PATH .venv/bin/vss bootstrap local --environment development --ask-become-pass" \
+      /tmp/interactive-transcript
+    test -e /tmp/interactive-ran
+    grep -Fq '"status":"success"' /tmp/interactive-transcript
   '
 printf 'Ubuntu 26.04 clean-image phase-0 acceptance passed\n'

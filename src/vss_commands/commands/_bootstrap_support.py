@@ -95,6 +95,16 @@ def run_capture(command: list[str], cwd: Path, timeout: float = 120.0) -> subpro
         return None
 
 
+def run_interactive(command: list[str], cwd: Path) -> subprocess.CompletedProcess[bytes] | None:
+    """Run with the caller's terminal descriptors; never capture interactive input."""
+    try:
+        return subprocess.run(command, cwd=cwd, check=False)
+    except KeyboardInterrupt:
+        return subprocess.CompletedProcess(command, 130)
+    except OSError:
+        return None
+
+
 def run_quiet(command: list[str], cwd: Path, timeout: float = 120.0) -> bool:
     result = run_capture(command, cwd, timeout)
     return result is not None and result.returncode == 0
