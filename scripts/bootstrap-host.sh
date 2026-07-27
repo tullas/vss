@@ -264,7 +264,7 @@ fi
 run "$venv_dir/bin/vss" bootstrap check --environment development
 bootstrap_args=(bootstrap local --environment development)
 if (( EUID != 0 )); then
-  [[ -t 0 && -t 1 ]] || { log 'ERROR: bootstrap requires interactive sudo, but no terminal is attached'; exit 77; }
+  [[ -t 0 && -t 1 && -t 2 ]] || { log 'ERROR: bootstrap requires an interactive terminal for privilege escalation'; exit 77; }
   bootstrap_args+=(--ask-become-pass)
 fi
 run "$venv_dir/bin/vss" "${bootstrap_args[@]}"

@@ -40,7 +40,7 @@ class CommandRunner:
         timeout_seconds: float | None = None,
         verbose: bool = False,
         ask_become_pass: bool = False,
-    ) -> tuple[dict[str, Any], ExitCode]:
+    ) -> tuple[dict[str, Any], int]:
         started_at = utc_now()
         started_clock = time.monotonic()
         correlation = correlation_id or new_correlation_id()
@@ -51,7 +51,7 @@ class CommandRunner:
             "started_at": started_at,
         }
 
-        def finish(status: str, exit_code: ExitCode, output: dict[str, Any], errors: list[str]):
+        def finish(status: str, exit_code: int, output: dict[str, Any], errors: list[str]):
             completed_at = utc_now()
             response = {
                 **response_base,
@@ -85,6 +85,19 @@ class CommandRunner:
             return finish("error", ExitCode.INVALID_INPUT, {}, ["command does not support dry-run"])
 
         context = CommandContext(environment, configuration, correlation, verbose, ask_become_pass)
+        # Interactive children must remain on the main thread so terminal
+        # signals such as Ctrl+C reach subprocess.run and its foreground child.
+        if ask_become_pass:
+            try:
+                output = registered.handler(context, payload, dry_run)
+                return finish("success", ExitCode.SUCCESS, output, [])
+            except KeyboardInterrupt:
+                return finish("error", ExitCode.INTERRUPTED, {}, ["command interrupted"])
+            except SafeCommandError as exc:
+                return finish("error", exc.exit_code, exc.output, [str(exc)])
+            except Exception:
+                return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["command execution failed"])
+
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = executor.submit(registered.handler, context, payload, dry_run)
         try:
@@ -92,8 +105,10 @@ class CommandRunner:
             return finish("success", ExitCode.SUCCESS, output, [])
         except concurrent.futures.TimeoutError:
             return finish("error", ExitCode.TIMEOUT, {}, ["command timed out"])
+        except KeyboardInterrupt:
+            return finish("error", ExitCode.INTERRUPTED, {}, ["command interrupted"])
         except SafeCommandError as exc:
-            return finish("error", ExitCode(exc.exit_code), exc.output, [str(exc)])
+            return finish("error", exc.exit_code, exc.output, [str(exc)])
         except Exception:
             return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["command execution failed"])
         finally:

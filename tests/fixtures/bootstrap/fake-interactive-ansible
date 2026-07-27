@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ -t 0 && -t 1 && -t 2 ]]
+printf '%s\n' "$@" | grep -Fxq -- '--ask-become-pass'
+printf 'interactive Ansible progress\n' >&2
+touch "${VSS_TEST_INTERACTIVE_MARKER:?}"

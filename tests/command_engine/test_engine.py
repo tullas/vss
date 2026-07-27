@@ -144,6 +144,72 @@ class CommandEngineTests(unittest.TestCase):
         self.assertEqual(response["status"], "success")
         self.assertEqual(run_capture.call_args.args[0][0], str(ansible))
 
+    def test_bootstrap_local_interactive_uses_inherited_terminal(self) -> None:
+        completed = subprocess.CompletedProcess(args=["ansible-playbook"], returncode=0)
+        with (
+            patch("vss_commands.commands.bootstrap_local.shutil.which", return_value="/venv/bin/ansible-playbook"),
+            patch("vss_commands.commands.bootstrap_local.sys.stdin.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.sys.stdout.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.sys.stderr.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.run_interactive", return_value=completed) as interactive,
+            patch("vss_commands.commands.bootstrap_local.run_capture") as capture,
+        ):
+            response, code = CommandRunner().run("bootstrap.local", "development", ask_become_pass=True)
+        self.assertEqual(code, ExitCode.SUCCESS)
+        self.assertEqual(response["status"], "success")
+        self.assertIn("--ask-become-pass", interactive.call_args.args[0])
+        capture.assert_not_called()
+
+    def test_bootstrap_local_interactive_requires_terminal_before_launch(self) -> None:
+        with (
+            patch("vss_commands.commands.bootstrap_local.shutil.which", return_value="/venv/bin/ansible-playbook"),
+            patch("vss_commands.commands.bootstrap_local.sys.stdin.isatty", return_value=False),
+            patch("vss_commands.commands.bootstrap_local.run_interactive") as interactive,
+        ):
+            response, code = CommandRunner().run("bootstrap.local", "development", ask_become_pass=True)
+        self.assertEqual(code, ExitCode.NOT_READY)
+        self.assertEqual(response["errors"], ["bootstrap requires an interactive terminal for privilege escalation"])
+        interactive.assert_not_called()
+
+    def test_bootstrap_local_interactive_failure_is_generic_and_preserves_status(self) -> None:
+        completed = subprocess.CompletedProcess(args=["ansible-playbook"], returncode=7)
+        with (
+            patch("vss_commands.commands.bootstrap_local.shutil.which", return_value="/venv/bin/ansible-playbook"),
+            patch("vss_commands.commands.bootstrap_local.sys.stdin.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.sys.stdout.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.sys.stderr.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.run_interactive", return_value=completed),
+        ):
+            response, code = CommandRunner().run("bootstrap.local", "development", ask_become_pass=True)
+        self.assertEqual(code, 7)
+        self.assertEqual(response["output"], {"ansible": {"return_code": 7}})
+        encoded = json.dumps(response).lower()
+        for forbidden in ("become password", "sudo prompt", "typed-secret"):
+            self.assertNotIn(forbidden, encoded)
+
+    def test_run_interactive_inherits_descriptors_and_normalizes_interrupt(self) -> None:
+        from vss_commands.commands._bootstrap_support import run_interactive
+
+        command = ["ansible-playbook", "--ask-become-pass"]
+        with patch("vss_commands.commands._bootstrap_support.subprocess.run", side_effect=KeyboardInterrupt) as launched:
+            result = run_interactive(command, Path("/tmp"))
+        self.assertIsNotNone(result)
+        self.assertEqual(result.returncode, ExitCode.INTERRUPTED)
+        launched.assert_called_once_with(command, cwd=Path("/tmp"), check=False)
+
+    def test_bootstrap_local_ctrl_c_returns_interrupted_json(self) -> None:
+        with (
+            patch("vss_commands.commands.bootstrap_local.shutil.which", return_value="/venv/bin/ansible-playbook"),
+            patch("vss_commands.commands.bootstrap_local.sys.stdin.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.sys.stdout.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.sys.stderr.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.run_interactive", side_effect=KeyboardInterrupt),
+        ):
+            response, code = CommandRunner().run("bootstrap.local", "development", ask_become_pass=True)
+        self.assertEqual(code, ExitCode.INTERRUPTED)
+        self.assertEqual(response["errors"], ["command interrupted"])
+        self.assertNotIn("password", json.dumps(response).lower())
+
     def test_success_and_generated_correlation_id(self) -> None:
         response, code = CommandRunner().run("system.info", "development")
         self.assertEqual(code, ExitCode.SUCCESS)
