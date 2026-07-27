@@ -276,11 +276,10 @@ def validate_workflow_invariants(root: Path) -> None:
                 raise PolicyFailure(f"security command suppresses failure: {job_name}")
         if not required_runs.get(job_name, set()).issubset(runs):
             raise PolicyFailure(f"canonical security validation step is missing: {job_name}")
-    container = jobs["container-scan"]
-    iac = jobs["iac-scan"]
-    for job_name, job in (("container-scan", container), ("iac-scan", iac)):
-        trivy = next((step for step in job["steps"] if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True and str(step.get("uses", "")).startswith("aquasecurity/trivy-action@")), None)
-        if not trivy or str(trivy.get("with", {}).get("exit-code")) != "1":
+    scanner_digest = "docker.io/aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e"
+    for job_name in ("container-scan", "iac-scan"):
+        scanner_runs = [run for run in ({str(step.get("run", "")).strip() for step in jobs[job_name]["steps"] if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True}) if scanner_digest in run]
+        if len(scanner_runs) != 1 or "--exit-code 1" not in scanner_runs[0]:
             raise PolicyFailure(f"security scanner does not fail closed: {job_name}")
     codeowners = root / ".github/CODEOWNERS"
     if not codeowners.is_file() or "/.github/workflows/ @tullas" not in codeowners.read_text(encoding="utf-8"):

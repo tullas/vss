@@ -76,16 +76,14 @@ jobs:
         image:
           - docker.io/library/ubuntu@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
           - docker.io/minio/minio@sha256:391d1d45fdbe79944cb6de9337b073864bb9ee38c4c24280bfb39572e925af08
+          - docker.io/aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
-        with:
-          version: v0.67.2
-          image-ref: ${{ matrix.image }}
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '1'
+      - name: Run digest-pinned Trivy image scan
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          docker.io/aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
+          image --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL '${{ matrix.image }}'
 
   iac-scan:
     name: IaC and Dockerfile scan
@@ -93,14 +91,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
-        with:
-          version: v0.67.2
-          scan-type: config
-          scan-ref: .
-          format: table
-          severity: HIGH,CRITICAL
-          exit-code: '1'
+      - name: Run digest-pinned Trivy configuration scan
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work
+          docker.io/aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
+          config --exit-code 1 --severity HIGH,CRITICAL --skip-dirs .venv --skip-dirs .terraform /work
 
   static-analysis:
     name: CodeQL static analysis
@@ -130,7 +125,7 @@ jobs:
           persist-credentials: false
       - uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
-          results_file: /tmp/scorecard-results.sarif
+          results_file: scorecard-results.sarif
           results_format: sarif
           publish_results: false
 

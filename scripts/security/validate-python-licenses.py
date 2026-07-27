@@ -20,6 +20,7 @@ aliases = {
     "Apache 2.0": "Apache-2.0", "Apache License, Version 2.0": "Apache-2.0",
     "Apache Software License": "Apache-2.0", "BSD License": "BSD-3-Clause",
     "ISC License": "ISC", "ISC License (ISCL)": "ISC", "MIT License": "MIT",
+    "GPLv3+": "GPL-3.0-or-later", "GNU General Public License v3 or later (GPLv3+)": "GPL-3.0-or-later",
     "Mozilla Public License 2.0 (MPL 2.0)": "MPL-2.0",
     "PSFL": "PSF-2.0", "Python Software Foundation License": "PSF-2.0",
 }
