@@ -38,6 +38,6 @@ docker run --rm \
       script -qec "PATH=/tmp/fake-bin:\$PATH .venv/bin/vss bootstrap local --environment development --ask-become-pass" \
       /tmp/interactive-transcript
     test -e /tmp/interactive-ran
-    grep -Fq '"status":"success"' /tmp/interactive-transcript
+    grep -Fq "\"status\":\"success\"" /tmp/interactive-transcript
   '
 printf 'Ubuntu 26.04 clean-image phase-0 acceptance passed\n'
