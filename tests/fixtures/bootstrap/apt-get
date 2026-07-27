@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'apt-get %s\n' "$*" >>"${VSS_TEST_COMMAND_LOG:?}"
+if [[ ${1:-} == install ]]; then
+  touch "${VSS_TEST_VENV_MARKER:?}"
+fi

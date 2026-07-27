@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ ${1:-} == -c && ${2:-} == *"print(f"* ]]; then
+  printf '%s\n' "${VSS_TEST_PYTHON_VERSION:?}"
+  exit 0
+fi
+if [[ ${1:-} == -c ]]; then
+  exit 0
+fi
+if [[ ${1:-} == -m && ${2:-} == venv ]]; then
+  printf 'venv %s\n' "${VSS_TEST_PYTHON_VERSION:?}" >>"${VSS_TEST_COMMAND_LOG:?}"
+  [[ -e ${VSS_TEST_VENV_MARKER:?} ]]
+  exit
+fi
+exit 64

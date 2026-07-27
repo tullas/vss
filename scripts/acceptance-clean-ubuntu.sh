@@ -14,7 +14,9 @@ run_logged() {
   "$@" >"$log_dir/$name.log" 2>&1
 }
 
-run_logged 01-check ./scripts/bootstrap-host.sh --check
+check_status=0
+run_logged 01-check ./scripts/bootstrap-host.sh --check || check_status=$?
+(( check_status == 0 || check_status == 69 ))
 run_logged 02-bootstrap ./scripts/bootstrap-host.sh
 run_logged 03-bootstrap-idempotent ./scripts/bootstrap-host.sh
 run_logged 04-secrets vss secrets init --environment development
