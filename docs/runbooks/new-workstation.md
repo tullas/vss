@@ -24,6 +24,7 @@ vss platform verify --environment development
 ```
 
 When bootstrap reports `RESTART_REQUIRED`, run exactly the printed PowerShell command before `--resume`.
+When prompted during bootstrap, enter the sudo password directly into sudo; no Ansible password prompt is part of this supported path.
 
 ## Docker Desktop already integrated with WSL
 

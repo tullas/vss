@@ -34,6 +34,8 @@ docker run --rm \
     test -x .venv/bin/ansible-playbook
     test "$(.venv/bin/python -c "from ansible.release import __version__; print(__version__)")" = 2.21.2
     .venv/bin/ansible-playbook --version
+    VSS_BOOTSTRAP_SUDO_ONLY=1 ./scripts/bootstrap-host.sh >/tmp/root-sudo-preflight.json
+    grep -Fq "\"preauthenticated\":false" /tmp/root-sudo-preflight.json
     mkdir -p /tmp/fake-bin
     ln -s /tmp/vss/tests/fixtures/bootstrap/fake-interactive-ansible /tmp/fake-bin/ansible-playbook
     VSS_TEST_INTERACTIVE_MARKER=/tmp/interactive-ran \

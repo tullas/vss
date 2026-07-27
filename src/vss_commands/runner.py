@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -87,7 +88,10 @@ class CommandRunner:
         context = CommandContext(environment, configuration, correlation, verbose, ask_become_pass)
         # Interactive children must remain on the main thread so terminal
         # signals such as Ctrl+C reach subprocess.run and its foreground child.
-        if ask_become_pass:
+        terminal_bootstrap = command == "bootstrap.local" and all(
+            stream.isatty() for stream in (sys.stdin, sys.stdout, sys.stderr)
+        )
+        if ask_become_pass or terminal_bootstrap:
             try:
                 output = registered.handler(context, payload, dry_run)
                 return finish("success", ExitCode.SUCCESS, output, [])

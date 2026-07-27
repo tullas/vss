@@ -35,6 +35,26 @@ bootstrap_env() {
     "$@" "$script"
 }
 
+host_env() {
+  env \
+    PATH="$fixtures:$PATH" \
+    VSS_OS_RELEASE_FILE="$fixtures/ubuntu-os-release" \
+    VSS_IS_WSL=false \
+    VSS_PID1=systemd \
+    VSS_PYTHON_BIN="$fixtures/fake-python" \
+    VSS_TEST_PYTHON_VERSION=3.14 \
+    VSS_TEST_COMMAND_LOG="$test_dir/commands.log" \
+    VSS_TEST_VENV_MARKER="$test_dir/venv.available" \
+    VSS_TEST_VENV_PYTHON_FIXTURE="$fixtures/fake-venv-python" \
+    VSS_VENV_DIR="$sudo_venv" \
+    VSS_BOOTSTRAP_TEST_ROOT="$test_dir" \
+    VSS_SUDO_BIN="${VSS_SUDO_BIN:-$fixtures/fake-sudo}" \
+    VSS_SUDO_KEEPALIVE_SECONDS=0.02 \
+    "$@"
+}
+
+run_host_tty() { host_env script -qec "$script" /dev/null; }
+
 run_phase0() { bootstrap_env "$1" "$test_dir/.venv" VSS_BOOTSTRAP_PHASE0_ONLY "${@:2}"; }
 run_venv() { bootstrap_env "$1" "$test_dir/.venv" VSS_BOOTSTRAP_VENV_ONLY "${@:2}"; }
 run_install() { bootstrap_env "$1" "$2" VSS_BOOTSTRAP_INSTALL_ONLY "${@:3}"; }
@@ -181,6 +201,42 @@ status=0
 VSS_SUDO_BIN=__vss_missing_sudo__ run_phase0 3.14 >"$test_dir/sudo.out" 2>&1 || status=$?
 (( status == 77 ))
 grep -Fq 'sudo is required for host changes' "$test_dir/sudo.out"
+
+# The supported host path authenticates with native sudo before Ansible and
+# never asks Ansible to mediate a password.
+sudo_venv="$test_dir/sudo-managed-venv"
+rm -rf -- "$sudo_venv"
+run_install 3.14 "$sudo_venv" >/dev/null 2>&1
+: >"$test_dir/commands.log"
+run_host_tty >"$test_dir/host.out" 2>&1
+grep -Fq 'sudo -v' "$test_dir/commands.log"
+grep -Fq 'vss bootstrap local --environment development' "$test_dir/commands.log"
+! grep -Fq -- '--ask-become-pass' "$test_dir/commands.log"
+grep -Fq 'sudo -k' "$test_dir/commands.log"
+sudo_line=$(grep -Fn 'sudo -v' "$test_dir/commands.log" | head -n1 | cut -d: -f1)
+ansible_line=$(grep -Fn 'vss bootstrap local --environment development' "$test_dir/commands.log" | head -n1 | cut -d: -f1)
+(( sudo_line < ansible_line ))
+keeper_count=$(grep -Fc 'sudo -n true' "$test_dir/commands.log")
+sleep 0.1
+[[ $(grep -Fc 'sudo -n true' "$test_dir/commands.log") -eq $keeper_count ]]
+run_host_tty >/dev/null 2>&1
+
+# Failed authentication, missing sudo, and a missing terminal stop before Ansible.
+: >"$test_dir/commands.log"
+status=0
+VSS_TEST_SUDO_AUTH_FAILS=1 run_host_tty >"$test_dir/auth-failed.out" 2>&1 || status=$?
+(( status == 77 ))
+grep -Fq 'sudo authentication failed; bootstrap stopped before Ansible' "$test_dir/auth-failed.out"
+! grep -Fq 'vss bootstrap local' "$test_dir/commands.log"
+status=0
+host_env env VSS_BOOTSTRAP_SUDO_ONLY=1 "$script" >"$test_dir/no-terminal.out" 2>&1 || status=$?
+(( status == 77 ))
+grep -Fq 'bootstrap requires an interactive terminal for sudo authentication' "$test_dir/no-terminal.out"
+status=0
+VSS_SUDO_BIN=__vss_missing_sudo__ run_host_tty >"$test_dir/missing-host-sudo.out" 2>&1 || status=$?
+(( status == 77 ))
+grep -Fq 'sudo is required for host changes' "$test_dir/missing-host-sudo.out"
+! grep -Eqi '(password:|become password|prompt)' "$test_dir/auth-failed.out" "$test_dir/no-terminal.out" "$test_dir/missing-host-sudo.out"
 
 grep -Fq 'RESTART_REQUIRED' "$script"
 grep -Fq 'bootstrap verify' "$script"

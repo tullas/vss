@@ -160,6 +160,25 @@ class CommandEngineTests(unittest.TestCase):
         self.assertIn("--ask-become-pass", interactive.call_args.args[0])
         capture.assert_not_called()
 
+    def test_bootstrap_local_terminal_without_password_flag_stays_interactive(self) -> None:
+        completed = subprocess.CompletedProcess(args=["ansible-playbook"], returncode=0)
+        with (
+            patch("vss_commands.commands.bootstrap_local.shutil.which", return_value="/venv/bin/ansible-playbook"),
+            patch("vss_commands.commands.bootstrap_local.sys.stdin.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.sys.stdout.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.sys.stderr.isatty", return_value=True),
+            patch("vss_commands.runner.sys.stdin.isatty", return_value=True),
+            patch("vss_commands.runner.sys.stdout.isatty", return_value=True),
+            patch("vss_commands.runner.sys.stderr.isatty", return_value=True),
+            patch("vss_commands.commands.bootstrap_local.run_interactive", return_value=completed) as interactive,
+            patch("vss_commands.commands.bootstrap_local.run_capture") as capture,
+        ):
+            response, code = CommandRunner().run("bootstrap.local", "development")
+        self.assertEqual(code, ExitCode.SUCCESS)
+        self.assertNotIn("--ask-become-pass", interactive.call_args.args[0])
+        capture.assert_not_called()
+        self.assertNotIn("password", json.dumps(response).lower())
+
     def test_bootstrap_local_interactive_requires_terminal_before_launch(self) -> None:
         with (
             patch("vss_commands.commands.bootstrap_local.shutil.which", return_value="/venv/bin/ansible-playbook"),

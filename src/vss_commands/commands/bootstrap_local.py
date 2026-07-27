@@ -40,13 +40,15 @@ def execute(context: CommandContext, input_data: dict, dry_run: bool) -> dict:
     ]
     if dry_run:
         command.append("--check")
+    interactive = all(stream.isatty() for stream in (sys.stdin, sys.stdout, sys.stderr))
     if context.ask_become_pass:
-        if not all(stream.isatty() for stream in (sys.stdin, sys.stdout, sys.stderr)):
+        if not interactive:
             raise SafeCommandError(
                 "bootstrap requires an interactive terminal for privilege escalation",
                 exit_code=ExitCode.NOT_READY,
             )
         command.append("--ask-become-pass")
+    if interactive:
         result = run_interactive(command, root)
         if result is None:
             raise SafeCommandError(

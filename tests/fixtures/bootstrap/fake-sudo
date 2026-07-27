@@ -1,3 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ -n ${VSS_TEST_COMMAND_LOG:-} ]]; then printf 'sudo %s\n' "$*" >>"$VSS_TEST_COMMAND_LOG"; fi
+if [[ ${1:-} == -v ]]; then
+  [[ ${VSS_TEST_SUDO_AUTH_FAILS:-0} != 1 ]]
+  exit
+fi
+if [[ ${1:-} == -n && ${2:-} == true ]]; then
+  [[ ${VSS_TEST_SUDO_KEEPER_FAILS:-0} != 1 ]]
+  exit
+fi
+if [[ ${1:-} == -k ]]; then exit 0; fi
+if [[ ${1:-} == ln ]]; then exit 0; fi
 exec "$@"

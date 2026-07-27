@@ -8,6 +8,9 @@ os_release_file=${VSS_OS_RELEASE_FILE:-/etc/os-release}
 python_bin=${VSS_PYTHON_BIN:-python3}
 if [[ -n ${VSS_VENV_DIR+x} ]]; then venv_dir=$VSS_VENV_DIR; else venv_dir="$project_root/.venv"; fi
 sudo_bin=${VSS_SUDO_BIN:-sudo}
+sudo_keeper_pid=
+sudo_preauthenticated=false
+tmp_file=
 mode=run
 verbose=false
 
@@ -39,6 +42,23 @@ chmod 700 "$progress_dir"
 
 log() { printf '%s\n' "$*" >&2; }
 run() { if $verbose; then printf '+ %q ' "$@" >&2; printf '\n' >&2; fi; "$@"; }
+stop_sudo_keeper() {
+  [[ -n $sudo_keeper_pid ]] || return 0
+  kill "$sudo_keeper_pid" 2>/dev/null || true
+  wait "$sudo_keeper_pid" 2>/dev/null || true
+  sudo_keeper_pid=
+}
+cleanup() {
+  stop_sudo_keeper
+  if $sudo_preauthenticated; then
+    "${SUDO[@]}" -k >/dev/null 2>&1 || true
+    sudo_preauthenticated=false
+  fi
+  [[ -z $tmp_file ]] || rm -f -- "$tmp_file"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 need_sudo() {
   if (( EUID == 0 )); then SUDO=(); return; fi
   command -v "$sudo_bin" >/dev/null 2>&1 || { log 'ERROR: sudo is required for host changes'; exit 77; }
@@ -46,6 +66,35 @@ need_sudo() {
     log 'ERROR: host changes require interactive sudo, but no terminal is attached'; exit 77
   fi
   SUDO=("$sudo_bin")
+}
+sudo_keeper() {
+  local sleep_pid=
+  trap '[[ -z $sleep_pid ]] || kill "$sleep_pid" 2>/dev/null || true; wait "$sleep_pid" 2>/dev/null || true; exit 0' TERM INT
+  while "${SUDO[@]}" -n true >/dev/null 2>&1; do
+    sleep "${VSS_SUDO_KEEPALIVE_SECONDS:-45}" &
+    sleep_pid=$!
+    wait "$sleep_pid" || exit 0
+    sleep_pid=
+  done
+}
+preauthenticate_sudo() {
+  if (( EUID == 0 )); then return 0; fi
+  if [[ ! -t 0 || ! -t 1 || ! -t 2 ]]; then
+    log 'ERROR: bootstrap requires an interactive terminal for sudo authentication'
+    exit 77
+  fi
+  need_sudo
+  if ! run "${SUDO[@]}" -v; then
+    log 'ERROR: sudo authentication failed; bootstrap stopped before Ansible'
+    exit 77
+  fi
+  if ! "${SUDO[@]}" -n true >/dev/null 2>&1; then
+    log 'ERROR: sudo authentication could not be validated; bootstrap stopped before Ansible'
+    exit 77
+  fi
+  sudo_preauthenticated=true
+  sudo_keeper &
+  sudo_keeper_pid=$!
 }
 restart_required() {
   printf 'state=RESTART_REQUIRED\nreason=%s\n' "$1" >"$progress_file"
@@ -66,7 +115,6 @@ if $is_wsl && [[ $pid1 != systemd ]]; then
   fi
   need_sudo
   tmp_file=$(mktemp)
-  trap 'rm -f "$tmp_file"' EXIT
   if [[ -f /etc/wsl.conf ]]; then
     awk '
       BEGIN { in_boot=0; saw_boot=0; wrote=0 }
@@ -278,17 +326,20 @@ if [[ ${VSS_BOOTSTRAP_INSTALL_ONLY:-0} == 1 ]]; then
   exit 0
 fi
 
+preauthenticate_sudo
+
+# Internal boundary used by sudo lifecycle and clean-image acceptance tests.
+if [[ ${VSS_BOOTSTRAP_SUDO_ONLY:-0} == 1 ]]; then
+  printf '{"state":"SUDO_READY","preauthenticated":%s}\n' "$([[ $EUID == 0 ]] && printf false || printf true)"
+  exit 0
+fi
+
 if [[ ! -L /usr/local/bin/vss || $(readlink -f /usr/local/bin/vss 2>/dev/null || true) != "$venv_dir/bin/vss" ]]; then
   need_sudo
   run "${SUDO[@]}" ln -sfn "$venv_dir/bin/vss" /usr/local/bin/vss
 fi
 run "$venv_dir/bin/vss" bootstrap check --environment development
-bootstrap_args=(bootstrap local --environment development)
-if (( EUID != 0 )); then
-  [[ -t 0 && -t 1 && -t 2 ]] || { log 'ERROR: bootstrap requires an interactive terminal for privilege escalation'; exit 77; }
-  bootstrap_args+=(--ask-become-pass)
-fi
-run "$venv_dir/bin/vss" "${bootstrap_args[@]}"
+run "$venv_dir/bin/vss" bootstrap local --environment development
 
 current_user=${SUDO_USER:-$USER}
 if getent group docker >/dev/null 2>&1 && id -nG "$current_user" | tr ' ' '\n' | grep -Fxq docker; then :
