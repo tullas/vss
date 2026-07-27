@@ -89,6 +89,11 @@ command -v "$python_bin" >/dev/null 2>&1 || { log 'ERROR: Python 3.11 or newer i
 }
 python_version=$("$python_bin" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 [[ $python_version =~ ^[0-9]+\.[0-9]+$ ]] || { log 'ERROR: unable to determine the Python version'; exit 69; }
+case $python_version in
+  3.11) selected_ansible_version=2.19.9 ;;
+  3.12|3.13|3.14) selected_ansible_version=2.21.2 ;;
+  *) log "ERROR: Python $python_version is unsupported by the VSS Ansible compatibility policy; supported versions are 3.11 through 3.14"; exit 69 ;;
+esac
 venv_package="python${python_version}-venv"
 
 validate_venv_path() {
@@ -120,13 +125,15 @@ validate_venv_path() {
 
 venv_health_reason=unknown
 venv_healthy() {
-  local candidate=$1 candidate_python="$1/bin/python"
+  local candidate=$1 candidate_python="$1/bin/python" candidate_version
   if [[ ! -x $candidate_python ]]; then venv_health_reason=missing-python; return 1; fi
   if ! "$candidate_python" -c 'pass' >/dev/null 2>&1; then venv_health_reason=python-failed; return 1; fi
   if ! "$candidate_python" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
     venv_health_reason=unsupported-python
     return 1
   fi
+  candidate_version=$("$candidate_python" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
+  if [[ $candidate_version != "$python_version" ]]; then venv_health_reason=python-version-mismatch; return 1; fi
   if ! "$candidate_python" -m pip --version >/dev/null 2>&1; then venv_health_reason=pip-missing; return 1; fi
   venv_health_reason=healthy
   return 0
@@ -235,8 +242,20 @@ if [[ $mode == check ]]; then
   exit 0
 fi
 
+installed_ansible_version=$("$venv_dir/bin/python" -c 'from ansible.release import __version__; print(__version__)' 2>/dev/null || true)
+ansible_combination_supported=false
+[[ $installed_ansible_version == "$selected_ansible_version" ]] && ansible_combination_supported=true
+printf '{"state":"ANSIBLE_COMPATIBILITY","python_version":"%s","installed_ansible_core":"%s","selected_ansible_core":"%s","supported":%s}\n' \
+  "$python_version" "${installed_ansible_version:-not-installed}" "$selected_ansible_version" "$ansible_combination_supported" >&2
+
 run "$venv_dir/bin/python" -m pip install --disable-pip-version-check -r requirements-bootstrap.txt
 run "$venv_dir/bin/python" -m pip install --disable-pip-version-check --no-deps -e .
+
+installed_ansible_version=$("$venv_dir/bin/python" -c 'from ansible.release import __version__; print(__version__)' 2>/dev/null || true)
+[[ $installed_ansible_version == "$selected_ansible_version" ]] || {
+  log "ERROR: ansible-core compatibility verification failed for Python $python_version"
+  exit 69
+}
 
 verify_venv_executable() {
   local executable=$1 expected="$venv_dir/bin/$1" discovered
@@ -250,10 +269,12 @@ verify_venv_executable() {
 for executable in python pip vss ansible-playbook; do
   verify_venv_executable "$executable"
 done
+run "$venv_dir/bin/ansible-playbook" --version >/dev/null
 
 # Internal boundary used by clean-image and command-isolation tests.
 if [[ ${VSS_BOOTSTRAP_INSTALL_ONLY:-0} == 1 ]]; then
-  printf '{"state":"TOOLCHAIN_READY","python_version":"%s"}\n' "$python_version"
+  printf '{"state":"TOOLCHAIN_READY","python_version":"%s","ansible_core_version":"%s","ansible_compatible":true}\n' \
+    "$python_version" "$installed_ansible_version"
   exit 0
 fi
 

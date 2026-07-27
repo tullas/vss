@@ -9,6 +9,8 @@ trap 'rm -rf -- "$test_dir"' EXIT
 
 [[ -x $script ]]
 bash -n "$script"
+grep -Fq 'ansible-core==2.19.9; python_version >= "3.11" and python_version < "3.12"' "$root/requirements-bootstrap.txt"
+grep -Fq 'ansible-core==2.21.2; python_version >= "3.12" and python_version < "3.15"' "$root/requirements-bootstrap.txt"
 
 bootstrap_env() {
   local version=$1 venv_path=$2 phase=$3
@@ -58,11 +60,12 @@ touch "$test_dir/venv.available"
 run_phase0 3.14 >/dev/null
 ! grep -Fq 'apt-get' "$test_dir/commands.log"
 
-# Future Python minor versions derive matching package names.
+# Unsupported future Python fails before dependency installation rather than guessing.
 for version in 3.15 3.16; do
-  : >"$test_dir/commands.log"; rm -f "$test_dir/venv.available"
-  run_phase0 "$version" >/dev/null
-  grep -Fq "apt-get install -y python${version}-venv" "$test_dir/commands.log"
+  status=0
+  run_phase0 "$version" >"$test_dir/future-python.out" 2>&1 || status=$?
+  (( status == 69 ))
+  grep -Fq 'unsupported by the VSS Ansible compatibility policy' "$test_dir/future-python.out"
 done
 
 # No managed venv exists: create and verify it.
@@ -78,6 +81,33 @@ run_venv 3.14 >/dev/null
 run_venv 3.14 >/dev/null
 after=$(stat -c '%i' "$test_dir/.venv")
 [[ $before == "$after" ]]
+
+# Every supported control-node Python selects its deterministic Ansible pin.
+for version in 3.11 3.12 3.13 3.14; do
+  compatibility_venv="$test_dir/compatibility-$version"
+  rm -rf -- "$compatibility_venv"
+  output=$(run_install "$version" "$compatibility_venv" 2>"$test_dir/compatibility-$version.err")
+  if [[ $version == 3.11 ]]; then expected=2.19.9; else expected=2.21.2; fi
+  grep -Fq "\"selected_ansible_core\":\"$expected\"" "$test_dir/compatibility-$version.err"
+  grep -Fq "\"ansible_core_version\":\"$expected\"" <<<"$output"
+done
+
+# An incompatible Ansible is upgraded in place; a supported pin is unchanged.
+compatibility_venv="$test_dir/existing-ansible"
+rm -rf -- "$compatibility_venv"
+run_venv 3.14 VSS_VENV_DIR="$compatibility_venv" >/dev/null
+printf '2.19.2\n' >"$compatibility_venv/.ansible-version"
+before=$(stat -c '%i' "$compatibility_venv")
+: >"$test_dir/commands.log"
+run_install 3.14 "$compatibility_venv" >/dev/null 2>"$test_dir/incompatible.err"
+after=$(stat -c '%i' "$compatibility_venv")
+[[ $before == "$after" ]]
+grep -Fq 'ansible-core 2.19.2 -> 2.21.2' "$test_dir/commands.log"
+grep -Fq '"supported":false' "$test_dir/incompatible.err"
+: >"$test_dir/commands.log"
+run_install 3.14 "$compatibility_venv" >/dev/null 2>"$test_dir/supported.err"
+! grep -Fq 'ansible-core ' "$test_dir/commands.log"
+grep -Fq '"supported":true' "$test_dir/supported.err"
 ! grep -Fq 'venv 3.14' "$test_dir/commands.log"
 
 # Installed venv tools are discovered without global Ansible or activation.
