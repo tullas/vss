@@ -22,14 +22,26 @@ def execute(context: CommandContext, input_data: dict, dry_run: bool) -> dict:
     path = secrets_path(context.environment)
     rotate = input_data.get("rotate", False)
     confirmed = input_data.get("confirmed", False)
+    metadata = secrets_metadata(context.environment)
+    content_complete = (
+        metadata["file_exists"]
+        and all(metadata["required_keys_present"].values())
+        and not metadata["validation_errors"]
+    )
+    if path.exists() and not rotate and content_complete:
+        raise SafeCommandError("secrets already exist; refusing to overwrite without --rotate", metadata, ExitCode.CONFIRMATION_REQUIRED)
     if path.exists() and not rotate:
-        raise SafeCommandError("secrets already exist; refusing to overwrite without --rotate", secrets_metadata(context.environment), ExitCode.CONFIRMATION_REQUIRED)
+        raise SafeCommandError(
+            f"local secrets are incomplete; run vss secrets init --environment {context.environment} --rotate",
+            metadata,
+            ExitCode.CONFIRMATION_REQUIRED,
+        )
     if rotate and not confirmed:
         raise SafeCommandError("secret rotation requires --yes confirmation", secrets_metadata(context.environment), ExitCode.CONFIRMATION_REQUIRED)
     if not ignored_by_git(path):
         raise SafeCommandError("secrets path is not ignored by Git; refusing to write", exit_code=ExitCode.NOT_READY)
     if dry_run:
-        return {**secrets_metadata(context.environment), "would_create": not path.exists(), "would_rotate": path.exists()}
+        return {**metadata, "would_create": not path.exists(), "would_rotate": path.exists()}
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     username = safe_username()
     password = secrets.token_urlsafe(32)
