@@ -10,3 +10,6 @@ local_toolchain_developer_user: ''
 local_toolchain_developer_uid: ''
 local_toolchain_developer_gid: ''
 local_toolchain_developer_home: ''
+local_toolchain_docker_key_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+local_toolchain_opentofu_key_fingerprint: E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80
+local_toolchain_opentofu_repo_key_fingerprint: F4AF70F66EAC4337EEECC97407D3DFCD4C61499F

@@ -177,8 +177,8 @@ command -v "$python_bin" >/dev/null 2>&1 || { log 'ERROR: Python 3.11 or newer i
 python_version=$("$python_bin" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 [[ $python_version =~ ^[0-9]+\.[0-9]+$ ]] || { log 'ERROR: unable to determine the Python version'; exit 69; }
 case $python_version in
-  3.11) selected_ansible_version=2.19.9 ;;
-  3.12|3.13|3.14) selected_ansible_version=2.21.2 ;;
+  3.11) selected_ansible_version=2.19.9; bootstrap_lock=requirements/locks/bootstrap-py311.lock.txt ;;
+  3.12|3.13|3.14) selected_ansible_version=2.21.2; bootstrap_lock=requirements/locks/bootstrap-py312.lock.txt ;;
   *) log "ERROR: Python $python_version is unsupported by the VSS Ansible compatibility policy; supported versions are 3.11 through 3.14"; exit 69 ;;
 esac
 venv_package="python${python_version}-venv"
@@ -335,8 +335,8 @@ ansible_combination_supported=false
 printf '{"state":"ANSIBLE_COMPATIBILITY","python_version":"%s","installed_ansible_core":"%s","selected_ansible_core":"%s","supported":%s}\n' \
   "$python_version" "${installed_ansible_version:-not-installed}" "$selected_ansible_version" "$ansible_combination_supported" >&2
 
-run "$venv_dir/bin/python" -m pip install --disable-pip-version-check -r requirements-bootstrap.txt
-run "$venv_dir/bin/python" -m pip install --disable-pip-version-check --no-deps -e .
+run "$venv_dir/bin/python" -m pip install --disable-pip-version-check --require-hashes -r "$bootstrap_lock"
+run "$venv_dir/bin/python" -m pip install --disable-pip-version-check --no-deps --no-build-isolation -e .
 
 installed_ansible_version=$("$venv_dir/bin/python" -c 'from ansible.release import __version__; print(__version__)' 2>/dev/null || true)
 [[ $installed_ansible_version == "$selected_ansible_version" ]] || {

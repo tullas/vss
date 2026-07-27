@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-image=${VSS_ACCEPTANCE_IMAGE:-ubuntu:26.04}
+image=${VSS_ACCEPTANCE_IMAGE:-docker.io/library/ubuntu@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb}
 docker run --rm \
   --mount "type=bind,source=$project_root,target=/source,readonly" \
   "$image" \

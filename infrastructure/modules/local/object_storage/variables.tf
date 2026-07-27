@@ -16,7 +16,7 @@ variable "volume_name" {
 variable "minio_image" {
   description = "Pinned MinIO image reference."
   type        = string
-  default     = "minio/minio:RELEASE.2024-05-28T17-19-04Z"
+  default     = "docker.io/minio/minio@sha256:391d1d45fdbe79944cb6de9337b073864bb9ee38c4c24280bfb39572e925af08"
 }
 
 variable "root_user" {

@@ -37,6 +37,23 @@
     - Dearmor OpenTofu repository signing key
     - Refresh APT cache
 
+- name: Inspect OpenTofu release signing key fingerprint
+  ansible.builtin.command: gpg --show-keys --with-colons /etc/apt/keyrings/opentofu.gpg
+  register: local_toolchain_opentofu_key
+  changed_when: false
+
+- name: Inspect OpenTofu repository signing key fingerprint
+  ansible.builtin.command: gpg --show-keys --with-colons /etc/apt/keyrings/opentofu-repo.asc
+  register: local_toolchain_opentofu_repo_key_inspection
+  changed_when: false
+
+- name: Require approved OpenTofu signing keys
+  ansible.builtin.assert:
+    that:
+      - local_toolchain_opentofu_key_fingerprint in local_toolchain_opentofu_key.stdout
+      - local_toolchain_opentofu_repo_key_fingerprint in local_toolchain_opentofu_repo_key_inspection.stdout
+    fail_msg: OpenTofu signing key fingerprint is not approved.
+
 - name: Apply OpenTofu key handler before repository configuration
   ansible.builtin.meta: flush_handlers
 
