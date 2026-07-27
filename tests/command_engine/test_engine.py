@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from vss_commands import CommandRunner, ExitCode
@@ -18,6 +19,52 @@ class CommandEngineTests(unittest.TestCase):
         self.assertEqual(command.metadata.version, "1.0.0")
         self.assertTrue(command.metadata.supports_dry_run)
         self.assertIsNotNone(get_command("system.health"))
+
+    def test_bootstrap_commands_are_registered(self) -> None:
+        for name in ("bootstrap.check", "bootstrap.local", "bootstrap.verify"):
+            command = get_command(name)
+            self.assertIsNotNone(command)
+            self.assertTrue(command.metadata.supports_dry_run)
+
+    def test_bootstrap_check_reports_missing_tools_without_changes(self) -> None:
+        with patch("vss_commands.commands._bootstrap_support.shutil.which", return_value=None):
+            response, code = CommandRunner().run("bootstrap.check", "development")
+        self.assertEqual(code, ExitCode.SUCCESS)
+        self.assertFalse(response["output"]["checks"]["docker"]["cli_available"])
+        self.assertFalse(response["output"]["checks"]["opentofu"]["available"])
+        self.assertNotIn("password", json.dumps(response).lower())
+
+    def test_bootstrap_check_detects_systemd_disabled_wsl(self) -> None:
+        with (
+            patch("vss_commands.commands._bootstrap_support.platform.release", return_value="5.15.90-microsoft-standard-WSL2"),
+            patch("vss_commands.commands._bootstrap_support.shutil.which", return_value=None),
+        ):
+            response, code = CommandRunner().run("bootstrap.check", "development")
+        self.assertEqual(code, ExitCode.SUCCESS)
+        self.assertTrue(response["output"]["checks"]["platform"]["is_wsl"])
+        self.assertFalse(response["output"]["checks"]["systemd"]["active"])
+
+    def test_bootstrap_check_reuses_accessible_docker_daemon(self) -> None:
+        def which(name: str) -> str | None:
+            return f"/usr/bin/{name}" if name in {"docker", "tofu", "systemctl"} else None
+
+        with (
+            patch("vss_commands.commands._bootstrap_support.shutil.which", side_effect=which),
+            patch(
+                "vss_commands.commands._bootstrap_support._run",
+                side_effect=[(True, "systemd"), (True, "Docker version 27.0"), (True, "27.0") , (True, "OpenTofu v1.9.0")],
+            ),
+            patch("vss_commands.commands._bootstrap_support.socket.socket"),
+        ):
+            response, code = CommandRunner().run("bootstrap.check", "development")
+        self.assertEqual(code, ExitCode.SUCCESS)
+        self.assertTrue(response["output"]["checks"]["docker"]["daemon_accessible"])
+
+    def test_bootstrap_verify_missing_tool_fails_without_leaking_values(self) -> None:
+        with patch("vss_commands.commands._bootstrap_support.shutil.which", return_value=None):
+            response, code = CommandRunner().run("bootstrap.verify", "development")
+        self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertNotIn("password", json.dumps(response).lower())
 
     def test_success_and_generated_correlation_id(self) -> None:
         response, code = CommandRunner().run("system.info", "development")
@@ -72,6 +119,14 @@ class CommandEngineTests(unittest.TestCase):
         self.assertEqual(unknown.returncode, int(ExitCode.UNKNOWN_COMMAND))
         invalid = subprocess.run([sys.executable, "-m", "vss_commands", "run", "system.info", "--environment", "qa"], capture_output=True, text=True, env=environment)
         self.assertEqual(invalid.returncode, int(ExitCode.INVALID_CONFIGURATION))
+        checked = subprocess.run(
+            [sys.executable, "-m", "vss_commands", "bootstrap", "check", "--environment", "development"],
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertEqual(checked.returncode, 0)
+        self.assertIn('"checks"', checked.stdout)
 
 
 if __name__ == "__main__":

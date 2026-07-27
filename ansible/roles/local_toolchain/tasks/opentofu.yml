@@ -1,0 +1,37 @@
+---
+- name: Check OpenTofu availability
+  ansible.builtin.command: tofu version
+  register: local_toolchain_tofu
+  changed_when: false
+  failed_when: false
+
+- name: Ensure APT keyring directory exists for OpenTofu
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+  when: local_toolchain_tofu.rc != 0
+
+- name: Install the official OpenTofu repository keyring
+  ansible.builtin.get_url:
+    url: https://get.opentofu.org/opentofu.gpg
+    dest: /etc/apt/keyrings/opentofu.gpg
+    mode: '0644'
+  when: local_toolchain_tofu.rc != 0
+
+- name: Configure the official OpenTofu repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/opentofu.gpg]
+      https://packages.opentofu.org/opentofu/tofu/any/ any main
+    filename: opentofu
+    state: present
+    update_cache: true
+  when: local_toolchain_tofu.rc != 0
+
+- name: Install OpenTofu
+  ansible.builtin.apt:
+    name: tofu
+    state: "{{ local_toolchain_opentofu_package_state }}"
+    update_cache: true
+  when: local_toolchain_tofu.rc != 0

@@ -1,0 +1,89 @@
+---
+- name: Check Docker CLI
+  ansible.builtin.command: docker --version
+  register: local_toolchain_docker_cli
+  changed_when: false
+  failed_when: false
+
+- name: Check Docker daemon accessibility
+  ansible.builtin.command: docker info
+  register: local_toolchain_docker_info
+  changed_when: false
+  failed_when: false
+  when: local_toolchain_docker_cli.rc == 0
+
+- name: Set Docker availability facts
+  ansible.builtin.set_fact:
+    local_toolchain_docker_available: "{{ local_toolchain_docker_cli.rc | default(1) == 0 and local_toolchain_docker_info.rc | default(1) == 0 }}"
+
+- name: Check systemd when Docker is unavailable  # noqa command-instead-of-module
+  ansible.builtin.command: systemctl is-system-running
+  register: local_toolchain_systemd
+  changed_when: false
+  failed_when: false
+  when: not local_toolchain_docker_available
+
+- name: Stop when Docker cannot be managed without systemd
+  ansible.builtin.fail:
+    msg: >-
+      Docker is unavailable and systemd is not active. Enable systemd in
+      /etc/wsl.conf (for WSL), restart WSL, and run this command again.
+  when:
+    - not local_toolchain_docker_available
+    - local_toolchain_systemd.stdout | default('') != 'active'
+
+- name: Install Docker repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+    update_cache: true
+  when: not local_toolchain_docker_available
+
+- name: Ensure APT keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+  when: not local_toolchain_docker_available
+
+- name: Install Docker repository keyring
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    mode: '0644'
+  when: not local_toolchain_docker_available
+
+- name: Configure the official Docker repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: [https://download.docker.com/linux/ubuntu]
+    suites: ["{{ ansible_facts.distribution_release }}"]
+    components: [stable]
+    signed_by: /etc/apt/keyrings/docker.asc
+    state: present
+    enabled: true
+  when: not local_toolchain_docker_available
+  notify: Refresh APT cache
+
+- name: Install Docker Engine packages
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: "{{ local_toolchain_docker_package_state }}"
+    update_cache: true
+  when: not local_toolchain_docker_available
+  notify: Restart Docker
+
+- name: Ensure Docker service is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  when: not local_toolchain_docker_available

@@ -12,7 +12,7 @@ from jsonschema import Draft202012Validator
 from vss_config import ConfigError, load_configuration
 
 from .exit_codes import ExitCode
-from .models import CommandContext
+from .models import CommandContext, SafeCommandError
 from .registry import get_command
 
 
@@ -90,6 +90,8 @@ class CommandRunner:
             return finish("success", ExitCode.SUCCESS, output, [])
         except concurrent.futures.TimeoutError:
             return finish("error", ExitCode.TIMEOUT, {}, ["command timed out"])
+        except SafeCommandError as exc:
+            return finish("error", ExitCode.EXECUTION_FAILURE, {}, [str(exc)])
         except Exception:
             return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["command execution failed"])
         finally:

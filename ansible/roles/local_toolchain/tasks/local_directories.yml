@@ -1,0 +1,22 @@
+---
+- name: Create local state directory
+  ansible.builtin.file:
+    path: "{{ local_toolchain_state_dir }}"
+    state: directory
+    mode: '0700'
+  become: false
+
+- name: Create local secrets directory
+  ansible.builtin.file:
+    path: "{{ local_toolchain_secrets_dir }}"
+    state: directory
+    mode: '0700'
+  become: false
+
+- name: Copy safe local secrets example without overwriting
+  ansible.builtin.copy:
+    src: "{{ local_toolchain_secrets_example }}"
+    dest: "{{ local_toolchain_secrets_dir }}/development.auto.tfvars.example"
+    mode: '0600'
+    force: false
+  become: false

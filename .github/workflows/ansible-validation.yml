@@ -45,6 +45,10 @@ jobs:
             --syntax-check \
             -i ansible/inventories/development/hosts.yml \
             ansible/playbooks/site.yml
+          ansible-playbook \
+            --syntax-check \
+            -i ansible/inventories/development/hosts.yml \
+            ansible/playbooks/bootstrap-local.yml
 
       - name: Ansible lint
-        run: ansible-lint ansible/playbooks/site.yml
+        run: ansible-lint ansible/playbooks/site.yml ansible/playbooks/bootstrap-local.yml

@@ -23,6 +23,10 @@ class CommandContext:
 CommandHandler = Callable[[CommandContext, dict[str, Any], bool], dict[str, Any]]
 
 
+class SafeCommandError(RuntimeError):
+    """Handler failure message approved for inclusion in the response envelope."""
+
+
 @dataclass(frozen=True)
 class RegisteredCommand:
     metadata: CommandMetadata
