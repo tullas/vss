@@ -6,7 +6,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 project_root=$(cd -- "$script_dir/.." && pwd)
 os_release_file=${VSS_OS_RELEASE_FILE:-/etc/os-release}
 python_bin=${VSS_PYTHON_BIN:-python3}
-venv_dir=${VSS_VENV_DIR:-$project_root/.venv}
+if [[ -n ${VSS_VENV_DIR+x} ]]; then venv_dir=$VSS_VENV_DIR; else venv_dir="$project_root/.venv"; fi
 sudo_bin=${VSS_SUDO_BIN:-sudo}
 mode=run
 verbose=false
@@ -91,6 +91,47 @@ python_version=$("$python_bin" -c "import sys; print(f'{sys.version_info.major}.
 [[ $python_version =~ ^[0-9]+\.[0-9]+$ ]] || { log 'ERROR: unable to determine the Python version'; exit 69; }
 venv_package="python${python_version}-venv"
 
+validate_venv_path() {
+  local root_real target_real test_root_real
+  [[ -n $venv_dir ]] || { log 'ERROR: VSS virtual environment path is empty'; exit 64; }
+  root_real=$(realpath -e -- "$project_root")
+  target_real=$(realpath -m -- "$venv_dir")
+  [[ $target_real != / && $target_real != "$root_real" ]] || {
+    log 'ERROR: refusing dangerous VSS virtual environment path'; exit 64;
+  }
+  if [[ -L $venv_dir ]]; then
+    log 'ERROR: refusing symbolic-link VSS virtual environment path'; exit 64
+  fi
+  case $target_real in
+    "$root_real"/*) ;;
+    *)
+      [[ -n ${VSS_BOOTSTRAP_TEST_ROOT:-} ]] || {
+        log 'ERROR: VSS virtual environment must be inside the repository'; exit 64;
+      }
+      test_root_real=$(realpath -m -- "$VSS_BOOTSTRAP_TEST_ROOT")
+      case $target_real in
+        "$test_root_real"/*) ;;
+        *) log 'ERROR: VSS virtual environment must be inside the repository'; exit 64 ;;
+      esac
+      ;;
+  esac
+  venv_dir=$target_real
+}
+
+venv_health_reason=unknown
+venv_healthy() {
+  local candidate=$1 candidate_python="$1/bin/python"
+  if [[ ! -x $candidate_python ]]; then venv_health_reason=missing-python; return 1; fi
+  if ! "$candidate_python" -c 'pass' >/dev/null 2>&1; then venv_health_reason=python-failed; return 1; fi
+  if ! "$candidate_python" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+    venv_health_reason=unsupported-python
+    return 1
+  fi
+  if ! "$candidate_python" -m pip --version >/dev/null 2>&1; then venv_health_reason=pip-missing; return 1; fi
+  venv_health_reason=healthy
+  return 0
+}
+
 probe_venv() {
   local probe_dir
   probe_dir=$(mktemp -d)
@@ -102,12 +143,69 @@ probe_venv() {
   return 1
 }
 
-if [[ ! -d $venv_dir ]] && ! probe_venv; then
-  [[ $mode != check ]] || { log "ERROR: Python venv support is missing; install $venv_package"; exit 69; }
+ensure_system_venv_support() {
+  probe_venv && return 0
   need_sudo
   run "${SUDO[@]}" apt-get update
   run "${SUDO[@]}" apt-get install -y "$venv_package"
   probe_venv || { log "ERROR: Python venv support is still unavailable after installing $venv_package"; exit 69; }
+}
+
+replace_venv() {
+  local parent base replacement backup=
+  parent=$(dirname -- "$venv_dir")
+  base=$(basename -- "$venv_dir")
+  mkdir -p -- "$parent"
+  replacement=$(mktemp -d "$parent/.${base}.replacement.XXXXXX")
+  if ! "$python_bin" -m venv "$replacement" >/dev/null 2>&1; then
+    rm -rf -- "$replacement"
+    log 'ERROR: failed to create replacement VSS virtual environment'
+    exit 69
+  fi
+  if ! venv_healthy "$replacement" && [[ $venv_health_reason == pip-missing ]]; then
+    "$replacement/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 || true
+  fi
+  if ! venv_healthy "$replacement"; then
+    rm -rf -- "$replacement"
+    log "ERROR: replacement VSS virtual environment is unhealthy ($venv_health_reason)"
+    exit 69
+  fi
+  if [[ -e $venv_dir ]]; then
+    backup="$parent/.${base}.backup.$$"
+    [[ ! -e $backup ]] || { rm -rf -- "$replacement"; log 'ERROR: temporary VSS venv backup path already exists'; exit 69; }
+    if ! mv -- "$venv_dir" "$backup"; then
+      rm -rf -- "$replacement"
+      log 'ERROR: failed to preserve unhealthy VSS virtual environment'
+      exit 69
+    fi
+  fi
+  if ! mv -- "$replacement" "$venv_dir"; then
+    [[ -n $backup && -e $backup && ! -e $venv_dir ]] && mv -- "$backup" "$venv_dir"
+    rm -rf -- "$replacement"
+    log 'ERROR: failed to activate replacement VSS virtual environment'
+    exit 69
+  fi
+  [[ -z $backup ]] || rm -rf -- "$backup"
+}
+
+validate_venv_path
+venv_was_healthy=false
+if venv_healthy "$venv_dir"; then
+  venv_was_healthy=true
+elif [[ -e $venv_dir ]]; then
+  log "VSS virtual environment is unhealthy ($venv_health_reason); rebuilding safely"
+fi
+
+if ! $venv_was_healthy; then
+  if [[ $mode == check ]]; then
+    if [[ ! -e $venv_dir ]] && ! probe_venv; then
+      log "ERROR: Python venv support is missing; install $venv_package"
+    else
+      log "ERROR: VSS virtual environment is not ready ($venv_health_reason)"
+    fi
+    exit 69
+  fi
+  ensure_system_venv_support
 fi
 
 # Internal phase boundary used by clean-image and command-isolation tests.
@@ -116,12 +214,22 @@ if [[ ${VSS_BOOTSTRAP_PHASE0_ONLY:-0} == 1 ]]; then
   exit 0
 fi
 
+if ! $venv_was_healthy; then
+  replace_venv
+fi
+venv_healthy "$venv_dir" || { log "ERROR: VSS virtual environment verification failed ($venv_health_reason)"; exit 69; }
+
+# Internal boundary for managed-venv recovery and clean-image acceptance tests.
+if [[ ${VSS_BOOTSTRAP_VENV_ONLY:-0} == 1 ]]; then
+  printf '{"state":"VENV_READY","python_version":"%s"}\n' "$python_version"
+  exit 0
+fi
+
 if [[ $mode == check ]]; then
   if [[ -x $venv_dir/bin/vss ]]; then run "$venv_dir/bin/vss" bootstrap check --environment development --dry-run; else log 'CHECK: .venv is absent; bootstrap is required'; fi
   exit 0
 fi
 
-[[ -d $venv_dir ]] || run "$python_bin" -m venv "$venv_dir"
 run "$venv_dir/bin/python" -m pip install --disable-pip-version-check -r requirements-bootstrap.txt
 run "$venv_dir/bin/python" -m pip install --disable-pip-version-check --no-deps -e .
 if [[ ! -L /usr/local/bin/vss || $(readlink -f /usr/local/bin/vss 2>/dev/null || true) != "$venv_dir/bin/vss" ]]; then

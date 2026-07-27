@@ -9,7 +9,12 @@ if [[ ${1:-} == -c ]]; then
 fi
 if [[ ${1:-} == -m && ${2:-} == venv ]]; then
   printf 'venv %s\n' "${VSS_TEST_PYTHON_VERSION:?}" >>"${VSS_TEST_COMMAND_LOG:?}"
-  [[ -e ${VSS_TEST_VENV_MARKER:?} ]]
-  exit
+  [[ -e ${VSS_TEST_VENV_MARKER:?} ]] || exit 1
+  mkdir -p -- "${3:?}/bin"
+  cp -- "${VSS_TEST_VENV_PYTHON_FIXTURE:?}" "$3/bin/python"
+  chmod +x "$3/bin/python"
+  if [[ ${VSS_TEST_NEW_VENV_PIP_MISSING:-0} == 1 ]]; then touch "$3/.pip-missing"; fi
+  if [[ ${VSS_TEST_NEW_VENV_ENSUREPIP_FAILS:-0} == 1 ]]; then touch "$3/.ensurepip-fails"; fi
+  exit 0
 fi
 exit 64

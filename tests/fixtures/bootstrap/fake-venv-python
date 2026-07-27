@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+venv_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+if [[ -n ${VSS_TEST_COMMAND_LOG:-} ]]; then printf 'venv-python %s\n' "$*" >>"$VSS_TEST_COMMAND_LOG"; fi
+if [[ ${1:-} == -c && ${2:-} == pass ]]; then
+  [[ ! -e $venv_root/.python-fails ]]
+  exit
+fi
+if [[ ${1:-} == -c ]]; then
+  [[ ! -e $venv_root/.unsupported ]]
+  exit
+fi
+if [[ ${1:-} == -m && ${2:-} == pip ]]; then
+  [[ ! -e $venv_root/.pip-missing ]]
+  exit
+fi
+if [[ ${1:-} == -m && ${2:-} == ensurepip ]]; then
+  [[ ! -e $venv_root/.ensurepip-fails ]] || exit 1
+  rm -f -- "$venv_root/.pip-missing"
+  exit 0
+fi
+exit 64

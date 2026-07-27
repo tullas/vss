@@ -13,8 +13,20 @@ docker run --rm \
     cp -a /source /tmp/vss
     cd /tmp/vss
     rm -rf .venv .local
-    VSS_BOOTSTRAP_PHASE0_ONLY=1 ./scripts/bootstrap-host.sh
     version=$(python3 -c "import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")")
-    dpkg-query -W "python${version}-venv" >/dev/null
+    if python3 -m venv .venv >/tmp/initial-venv.log 2>&1; then
+      echo "expected initial venv creation to fail without python${version}-venv" >&2
+      exit 1
+    fi
+    test -d .venv
+    apt-get install -y "python${version}-venv"
+    before_partial=$(find .venv -mindepth 1 -maxdepth 2 | wc -l)
+    test "$before_partial" -gt 0
+    VSS_BOOTSTRAP_VENV_ONLY=1 ./scripts/bootstrap-host.sh
+    .venv/bin/python -m pip --version
+    before_inode=$(stat -c %i .venv)
+    VSS_BOOTSTRAP_VENV_ONLY=1 ./scripts/bootstrap-host.sh
+    after_inode=$(stat -c %i .venv)
+    test "$before_inode" = "$after_inode"
   '
 printf 'Ubuntu 26.04 clean-image phase-0 acceptance passed\n'
