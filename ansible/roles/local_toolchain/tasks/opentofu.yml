@@ -1,37 +1,70 @@
 ---
-- name: Check OpenTofu availability
-  ansible.builtin.command: tofu version
-  register: local_toolchain_tofu
-  changed_when: false
-  failed_when: false
+- name: Install OpenTofu repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
 
 - name: Ensure APT keyring directory exists for OpenTofu
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
     mode: '0755'
-  when: local_toolchain_tofu.rc != 0
 
-- name: Install the official OpenTofu repository keyring
+- name: Install the OpenTofu release signing key
   ansible.builtin.get_url:
     url: https://get.opentofu.org/opentofu.gpg
     dest: /etc/apt/keyrings/opentofu.gpg
     mode: '0644'
-  when: local_toolchain_tofu.rc != 0
 
-- name: Configure the official OpenTofu repository
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [signed-by=/etc/apt/keyrings/opentofu.gpg]
-      https://packages.opentofu.org/opentofu/tofu/any/ any main
-    filename: opentofu
-    state: present
-    update_cache: true
-  when: local_toolchain_tofu.rc != 0
+- name: Download the OpenTofu repository signing key
+  ansible.builtin.get_url:
+    url: https://packages.opentofu.org/opentofu/tofu/gpgkey
+    dest: /etc/apt/keyrings/opentofu-repo.asc
+    mode: '0644'
+  register: local_toolchain_opentofu_repo_key
+  notify:
+    - Dearmor OpenTofu repository signing key
+    - Refresh APT cache
+
+- name: Apply OpenTofu key handler before repository configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure the dearmored OpenTofu key is readable
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/opentofu-repo.gpg
+    state: file
+    mode: '0644'
+
+- name: Remove stale packagecloud OpenTofu repository definition
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/opentofu_tofu.list
+    state: absent
+  notify: Refresh APT cache
+
+- name: Configure the official two-key OpenTofu repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/opentofu.list
+    mode: '0644'
+    content: |
+      deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main
+      deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main
+  notify: Refresh APT cache
+
+- name: Apply repository handler changes before installation
+  ansible.builtin.meta: flush_handlers
 
 - name: Install OpenTofu
   ansible.builtin.apt:
     name: tofu
     state: "{{ local_toolchain_opentofu_package_state }}"
     update_cache: true
-  when: local_toolchain_tofu.rc != 0
+
+- name: Verify the installed OpenTofu version
+  ansible.builtin.command: tofu version
+  register: local_toolchain_tofu_version
+  changed_when: false

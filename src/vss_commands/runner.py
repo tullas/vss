@@ -93,7 +93,7 @@ class CommandRunner:
         except concurrent.futures.TimeoutError:
             return finish("error", ExitCode.TIMEOUT, {}, ["command timed out"])
         except SafeCommandError as exc:
-            return finish("error", ExitCode.EXECUTION_FAILURE, exc.output, [str(exc)])
+            return finish("error", ExitCode(exc.exit_code), exc.output, [str(exc)])
         except Exception:
             return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["command execution failed"])
         finally:

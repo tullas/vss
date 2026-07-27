@@ -6,3 +6,4 @@ local_toolchain_secrets_example: "{{ local_toolchain_project_root }}/infrastruct
 local_toolchain_docker_package_state: present
 local_toolchain_opentofu_package_state: present
 local_toolchain_environment: development
+local_toolchain_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id, true) }}"

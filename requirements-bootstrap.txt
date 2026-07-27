@@ -1,0 +1,2 @@
+-r requirements.txt
+ansible-core==2.19.2
