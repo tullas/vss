@@ -16,6 +16,9 @@ if [[ ${1:-} == -c ]]; then
     cat "$venv_root/.ansible-version"
     exit 0
   fi
+  if [[ ${2:-} == *'json.dumps(dict(zip('* ]]; then
+    exec /usr/bin/python3 "$@"
+  fi
   [[ ! -e $venv_root/.unsupported ]]
   exit
 fi
@@ -32,10 +35,18 @@ if [[ ${1:-} == -m && ${2:-} == pip ]]; then
       printf 'ansible-core %s -> %s\n' "${installed_ansible_version:-not-installed}" "$selected_ansible_version" >>"${VSS_TEST_COMMAND_LOG:?}"
       printf '%s\n' "$selected_ansible_version" >"$venv_root/.ansible-version"
     fi
-    for executable in pip ansible-playbook; do
+    for executable in pip; do
       printf '#!/usr/bin/env bash\nexit 0\n' >"$venv_root/bin/$executable"
       chmod +x "$venv_root/bin/$executable"
     done
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'printf "ansible-playbook %s\n" "$*" >>"${VSS_TEST_COMMAND_LOG:?}"' \
+      '[[ $* != *--ask-become-pass* ]]' \
+      'if [[ ${VSS_TEST_ANSIBLE_FAILS:-0} == 1 && $* == *bootstrap-local.yml* ]]; then exit 7; fi' \
+      >"$venv_root/bin/ansible-playbook"
+    chmod +x "$venv_root/bin/ansible-playbook"
     printf '%s\n' \
       '#!/usr/bin/env bash' \
       'set -euo pipefail' \

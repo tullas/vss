@@ -1,2 +1,3 @@
 #!/usr/bin/env bash
+if [[ ${1:-} == passwd ]]; then exec /usr/bin/getent "$@"; fi
 exit 1

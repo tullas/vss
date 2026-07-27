@@ -22,19 +22,33 @@ docker run --rm \
     apt-get install -y "python${version}-venv"
     before_partial=$(find .venv -mindepth 1 -maxdepth 2 | wc -l)
     test "$before_partial" -gt 0
-    VSS_BOOTSTRAP_VENV_ONLY=1 ./scripts/bootstrap-host.sh
+    VSS_IS_WSL=false VSS_PID1=systemd VSS_BOOTSTRAP_VENV_ONLY=1 ./scripts/bootstrap-host.sh
     .venv/bin/python -m pip --version
     before_inode=$(stat -c %i .venv)
-    VSS_BOOTSTRAP_VENV_ONLY=1 ./scripts/bootstrap-host.sh
+    VSS_IS_WSL=false VSS_PID1=systemd VSS_BOOTSTRAP_VENV_ONLY=1 ./scripts/bootstrap-host.sh
     after_inode=$(stat -c %i .venv)
     test "$before_inode" = "$after_inode"
     test -z "$(command -v ansible-playbook || true)"
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-      VSS_BOOTSTRAP_INSTALL_ONLY=1 ./scripts/bootstrap-host.sh
+      VSS_IS_WSL=false VSS_PID1=systemd VSS_BOOTSTRAP_INSTALL_ONLY=1 ./scripts/bootstrap-host.sh
     test -x .venv/bin/ansible-playbook
     test "$(.venv/bin/python -c "from ansible.release import __version__; print(__version__)")" = 2.21.2
     .venv/bin/ansible-playbook --version
-    VSS_BOOTSTRAP_SUDO_ONLY=1 ./scripts/bootstrap-host.sh >/tmp/root-sudo-preflight.json
+    useradd --create-home vssdev
+    chown -R vssdev:vssdev /tmp/vss
+    developer_uid=$(id -u vssdev)
+    developer_gid=$(id -g vssdev)
+    developer_home=$(getent passwd vssdev | cut -d: -f6)
+    developer_vars=$(.venv/bin/python -c \
+      "import json,sys; print(json.dumps(dict(zip((\"local_toolchain_developer_user\", \"local_toolchain_developer_uid\", \"local_toolchain_developer_gid\", \"local_toolchain_developer_home\", \"local_toolchain_project_root\"), sys.argv[1:]))))" \
+      vssdev "$developer_uid" "$developer_gid" "$developer_home" /tmp/vss)
+    .venv/bin/ansible-playbook \
+      -i ansible/inventories/development/hosts.yml \
+      ansible/playbooks/bootstrap-local.yml \
+      --tags local_directories \
+      --extra-vars "$developer_vars"
+    test -z "$(find .local -user root -print)"
+    VSS_IS_WSL=false VSS_PID1=systemd VSS_BOOTSTRAP_SUDO_ONLY=1 ./scripts/bootstrap-host.sh >/tmp/root-sudo-preflight.json
     grep -Fq "\"preauthenticated\":false" /tmp/root-sudo-preflight.json
     mkdir -p /tmp/fake-bin
     ln -s /tmp/vss/tests/fixtures/bootstrap/fake-interactive-ansible /tmp/fake-bin/ansible-playbook

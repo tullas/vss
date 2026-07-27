@@ -3,6 +3,14 @@
   hosts: localhost
   connection: local
   gather_facts: true
-  become: true
+  pre_tasks:
+    - name: Require the dedicated local bootstrap root boundary
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.user_uid | int == 0
+        fail_msg: >-
+          The local bootstrap playbook must run as root through
+          scripts/bootstrap-host.sh; direct non-root execution is unsupported.
+      tags: [always]
   roles:
     - role: local_toolchain

@@ -10,5 +10,9 @@ if [[ ${1:-} == -n && ${2:-} == true ]]; then
   exit
 fi
 if [[ ${1:-} == -k ]]; then exit 0; fi
-if [[ ${1:-} == ln ]]; then exit 0; fi
+if [[ ${1:-} == -n ]]; then
+  shift
+  if [[ ${1:-} == ln || ${1:-} == chown ]]; then exit 0; fi
+fi
+if [[ ${1:-} == ln || ${1:-} == chown ]]; then exit 0; fi
 exec "$@"
