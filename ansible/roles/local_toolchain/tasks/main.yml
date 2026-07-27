@@ -1,0 +1,21 @@
+---
+- name: Require Ubuntu for the local toolchain role
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+    fail_msg: >-
+      The local toolchain bootstrap supports Ubuntu and Ubuntu under WSL only;
+      detected {{ ansible_facts.distribution }}.
+
+- name: Detect WSL kernel
+  ansible.builtin.set_fact:
+    local_toolchain_is_wsl: "{{ 'microsoft' in (ansible_facts.kernel | lower) or 'wsl' in (ansible_facts.kernel | lower) }}"
+
+- name: Install or reuse Docker
+  ansible.builtin.include_tasks: docker.yml
+
+- name: Install OpenTofu
+  ansible.builtin.include_tasks: opentofu.yml
+
+- name: Create local state and secrets directories
+  ansible.builtin.include_tasks: local_directories.yml

@@ -15,7 +15,13 @@ vss run system.info --environment development
 vss run system.health --environment development
 vss run system.info --environment development --dry-run
 vss run system.info --environment development --input request.json
+vss bootstrap check --environment development
+vss bootstrap local --environment development --dry-run
+vss bootstrap verify --environment development
 ```
+
+Bootstrap commands are a nested command family; their host assumptions and
+privilege boundaries are documented in `docs/bootstrap.md`.
 
 The request model is:
 

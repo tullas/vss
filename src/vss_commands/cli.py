@@ -13,13 +13,21 @@ from .runner import CommandRunner, response_json
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vss")
     subparsers = parser.add_subparsers(dest="action", required=True)
+    def add_execution_options(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--environment", required=True)
+        parser.add_argument("--input", type=Path)
+        parser.add_argument("--correlation-id")
+        parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--timeout", type=float)
+
     run = subparsers.add_parser("run")
     run.add_argument("command")
-    run.add_argument("--environment", required=True)
-    run.add_argument("--input", type=Path)
-    run.add_argument("--correlation-id")
-    run.add_argument("--dry-run", action="store_true")
-    run.add_argument("--timeout", type=float)
+    add_execution_options(run)
+    bootstrap = subparsers.add_parser("bootstrap")
+    bootstrap_actions = bootstrap.add_subparsers(dest="bootstrap_action", required=True)
+    for action in ("check", "local", "verify"):
+        action_parser = bootstrap_actions.add_parser(action)
+        add_execution_options(action_parser)
     subparsers.add_parser("list")
     describe = subparsers.add_parser("describe")
     describe.add_argument("command")
@@ -58,8 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     if input_error is not None:
         print(json.dumps({"error": "input must be valid JSON object"}, sort_keys=True, separators=(",", ":")))
         return int(input_error)
+    command_name = args.command if args.action == "run" else f"bootstrap.{args.bootstrap_action}"
     response, exit_code = CommandRunner().run(
-        args.command,
+        command_name,
         args.environment,
         input_data,
         args.correlation_id,

@@ -1,0 +1,8 @@
+---
+local_toolchain_project_root: "{{ playbook_dir }}/../.."
+local_toolchain_state_dir: "{{ local_toolchain_project_root }}/.local/state/development"
+local_toolchain_secrets_dir: "{{ local_toolchain_project_root }}/.local/secrets"
+local_toolchain_secrets_example: "{{ local_toolchain_project_root }}/infrastructure/environments/development/local/development.auto.tfvars.example"
+local_toolchain_docker_package_state: present
+local_toolchain_opentofu_package_state: present
+local_toolchain_environment: development
