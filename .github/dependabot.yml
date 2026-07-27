@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule: {interval: weekly, day: monday}
+    target-branch: main
+    open-pull-requests-limit: 5
+    groups:
+      python-patch-minor:
+        update-types: [patch, minor]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly, day: monday}
+    target-branch: main
+    open-pull-requests-limit: 5
+  - package-ecosystem: terraform
+    directory: /infrastructure/environments/development/local
+    schedule: {interval: weekly, day: monday}
+    target-branch: main
+    open-pull-requests-limit: 3
+  - package-ecosystem: docker
+    directory: /
+    schedule: {interval: weekly, day: monday}
+    target-branch: main
+    open-pull-requests-limit: 3

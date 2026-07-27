@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "python": {
+    "runtime_manifests": ["pyproject.toml", "requirements.txt"],
+    "bootstrap_manifest": "requirements-bootstrap.txt",
+    "development_manifest": "requirements-dev.txt",
+    "build_backend": "setuptools",
+    "transitives": "fully enumerated in requirements/locks/*.lock.txt"
+  },
+  "github_actions": ["actions/checkout", "actions/setup-python", "actions/upload-artifact", "gitleaks/gitleaks-action", "opentofu/setup-opentofu", "actions/dependency-review-action", "github/codeql-action", "aquasecurity/trivy-action", "ossf/scorecard-action"],
+  "containers": ["ubuntu acceptance image", "MinIO runtime image"],
+  "opentofu": ["OpenTofu CLI", "registry.opentofu.org/kreuzwerker/docker"],
+  "apt_repositories": ["Ubuntu archive", "Docker official Ubuntu", "OpenTofu packages"],
+  "host_packages": ["pythonX.Y-venv", "ca-certificates", "curl", "python3-debian", "docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin", "apt-transport-https", "gnupg", "tofu", "wget", "unzip", "tar", "git", "vim", "util-linux"],
+  "ansible": {"collections": [], "modules": ["ansible.builtin.apt", "assert", "command", "copy", "deb822_repository", "debug", "fail", "file", "get_url", "getent", "include_tasks", "meta", "package", "service", "set_fact", "slurp", "stat", "user"]},
+  "external_installers": ["scripts/bootstrap-host.sh", "scripts/acceptance-ubuntu-26.04-image.sh", "ansible/roles/local_toolchain/tasks/docker.yml", "ansible/roles/local_toolchain/tasks/opentofu.yml", ".github/workflows/*.yml"],
+  "generated_artifacts": {"committed_evidence": ["Python locks", "OpenTofu provider lock"], "ci_only": ["CycloneDX SBOM", "SBOM diff", "release candidate", "SLSA-compatible provenance", "sanitized test report"], "never_artifacts": [".env", ".local", "tfvars", "tfstate", "tfplan", "private keys", ".terraform provider binaries"]},
+  "secret_scanning": ["pinned Gitleaks full-history scan", "detect-secrets baseline", "artifact canary/pattern validation"],
+  "initial_gaps": ["APT snapshot and exact host-package pinning deferred", "host SBOM is significant-component inventory rather than full dpkg graph", "external branch ruleset evidence required", "SLSA Level 2 signing and consumer verification deferred"]
+}
