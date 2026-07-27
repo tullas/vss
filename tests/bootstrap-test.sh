@@ -13,5 +13,7 @@ grep -Fq 'ansible.builtin.apt_repository' "$role_dir/tasks/opentofu.yml"
 grep -Fq 'force: false' "$role_dir/tasks/local_directories.yml"
 grep -Fq 'docker info' "$role_dir/tasks/docker.yml"
 grep -Fq 'systemd is not active' "$role_dir/tasks/docker.yml"
+grep -Fq "['running', 'degraded']" "$role_dir/tasks/docker.yml"
+grep -Fq 'local_toolchain_pid1_is_systemd' "$role_dir/tasks/docker.yml"
 
 printf '%s\n' 'bootstrap structure tests passed'

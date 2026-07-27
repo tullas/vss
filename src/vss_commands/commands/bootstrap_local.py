@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 
 from ..models import CommandContext, CommandMetadata, SafeCommandError
 from ..registry import register
-from ._bootstrap_support import repository_root, run_quiet
+from ._bootstrap_support import ansible_failure_summary, repository_root, run_capture, sanitize_text
 
 METADATA = CommandMetadata(
     name="bootstrap.local",
@@ -32,8 +33,17 @@ def execute(context: CommandContext, input_data: dict, dry_run: bool) -> dict:
     ]
     if dry_run:
         command.append("--check")
-    if not run_quiet(command, root):
+    if context.ask_become_pass:
+        command.append("--ask-become-pass")
+    result = run_capture(command, root)
+    if result is None or result.returncode != 0:
+        summary = ansible_failure_summary(result)
+        if context.verbose and result is not None:
+            print(sanitize_text(f"{result.stdout}\n{result.stderr}"), file=sys.stderr)
         raise SafeCommandError(
-            "local toolchain bootstrap failed; verify privilege escalation and WSL systemd before retrying"
+            "local toolchain bootstrap failed; verify privilege escalation and WSL systemd before retrying",
+            {"ansible": summary},
         )
+    if context.verbose and result.stdout:
+        print(sanitize_text(result.stdout), file=sys.stderr)
     return {"environment": context.environment, "dry_run": dry_run, "playbook": "ansible/playbooks/bootstrap-local.yml"}

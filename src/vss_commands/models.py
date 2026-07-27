@@ -18,6 +18,8 @@ class CommandContext:
     environment: str
     configuration: dict[str, Any]
     correlation_id: str
+    verbose: bool = False
+    ask_become_pass: bool = False
 
 
 CommandHandler = Callable[[CommandContext, dict[str, Any], bool], dict[str, Any]]
@@ -25,6 +27,10 @@ CommandHandler = Callable[[CommandContext, dict[str, Any], bool], dict[str, Any]
 
 class SafeCommandError(RuntimeError):
     """Handler failure message approved for inclusion in the response envelope."""
+
+    def __init__(self, message: str, output: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.output = output or {}
 
 
 @dataclass(frozen=True)
