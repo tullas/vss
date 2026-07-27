@@ -13,18 +13,24 @@
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
+    owner: root
+    group: root
     mode: '0755'
 
 - name: Install the OpenTofu release signing key
   ansible.builtin.get_url:
     url: https://get.opentofu.org/opentofu.gpg
     dest: /etc/apt/keyrings/opentofu.gpg
+    owner: root
+    group: root
     mode: '0644'
 
 - name: Download the OpenTofu repository signing key
   ansible.builtin.get_url:
     url: https://packages.opentofu.org/opentofu/tofu/gpgkey
     dest: /etc/apt/keyrings/opentofu-repo.asc
+    owner: root
+    group: root
     mode: '0644'
   register: local_toolchain_opentofu_repo_key
   notify:
@@ -38,6 +44,8 @@
   ansible.builtin.file:
     path: /etc/apt/keyrings/opentofu-repo.gpg
     state: file
+    owner: root
+    group: root
     mode: '0644'
 
 - name: Remove stale packagecloud OpenTofu repository definition
@@ -49,6 +57,8 @@
 - name: Configure the official two-key OpenTofu repository
   ansible.builtin.copy:
     dest: /etc/apt/sources.list.d/opentofu.list
+    owner: root
+    group: root
     mode: '0644'
     content: |
       deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main

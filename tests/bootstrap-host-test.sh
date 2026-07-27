@@ -210,16 +210,28 @@ run_install 3.14 "$sudo_venv" >/dev/null 2>&1
 : >"$test_dir/commands.log"
 run_host_tty >"$test_dir/host.out" 2>&1
 grep -Fq 'sudo -v' "$test_dir/commands.log"
-grep -Fq 'vss bootstrap local --environment development' "$test_dir/commands.log"
+[[ $(grep -Fc 'sudo -v' "$test_dir/commands.log") -eq 1 ]]
+grep -Fq 'sudo -n '"$sudo_venv"'/bin/ansible-playbook' "$test_dir/commands.log"
 ! grep -Fq -- '--ask-become-pass' "$test_dir/commands.log"
 grep -Fq 'sudo -k' "$test_dir/commands.log"
 sudo_line=$(grep -Fn 'sudo -v' "$test_dir/commands.log" | head -n1 | cut -d: -f1)
-ansible_line=$(grep -Fn 'vss bootstrap local --environment development' "$test_dir/commands.log" | head -n1 | cut -d: -f1)
+ansible_line=$(grep -Fn 'sudo -n '"$sudo_venv"'/bin/ansible-playbook' "$test_dir/commands.log" | head -n1 | cut -d: -f1)
 (( sudo_line < ansible_line ))
+grep -Fq '"local_toolchain_developer_user"' "$test_dir/commands.log"
+grep -Fq '"local_toolchain_project_root"' "$test_dir/commands.log"
 keeper_count=$(grep -Fc 'sudo -n true' "$test_dir/commands.log")
 sleep 0.1
 [[ $(grep -Fc 'sudo -n true' "$test_dir/commands.log") -eq $keeper_count ]]
 run_host_tty >/dev/null 2>&1
+
+# A privileged playbook failure is generic, does not leak terminal prompts, and cleans up sudo.
+: >"$test_dir/commands.log"
+status=0
+VSS_TEST_ANSIBLE_FAILS=1 run_host_tty >"$test_dir/ansible-failed.out" 2>&1 || status=$?
+(( status == 70 ))
+grep -Fq 'privileged local toolchain bootstrap failed' "$test_dir/ansible-failed.out"
+grep -Fq 'sudo -k' "$test_dir/commands.log"
+! grep -Eqi '(password:|become password|prompt)' "$test_dir/ansible-failed.out"
 
 # Failed authentication, missing sudo, and a missing terminal stop before Ansible.
 : >"$test_dir/commands.log"
@@ -227,7 +239,7 @@ status=0
 VSS_TEST_SUDO_AUTH_FAILS=1 run_host_tty >"$test_dir/auth-failed.out" 2>&1 || status=$?
 (( status == 77 ))
 grep -Fq 'sudo authentication failed; bootstrap stopped before Ansible' "$test_dir/auth-failed.out"
-! grep -Fq 'vss bootstrap local' "$test_dir/commands.log"
+! grep -Fq 'ansible-playbook' "$test_dir/commands.log"
 status=0
 host_env env VSS_BOOTSTRAP_SUDO_ONLY=1 "$script" >"$test_dir/no-terminal.out" 2>&1 || status=$?
 (( status == 77 ))
@@ -237,6 +249,16 @@ VSS_SUDO_BIN=__vss_missing_sudo__ run_host_tty >"$test_dir/missing-host-sudo.out
 (( status == 77 ))
 grep -Fq 'sudo is required for host changes' "$test_dir/missing-host-sudo.out"
 ! grep -Eqi '(password:|become password|prompt)' "$test_dir/auth-failed.out" "$test_dir/no-terminal.out" "$test_dir/missing-host-sudo.out"
+
+# Identity data comes from passwd/repository ownership, not caller-controlled USER variables.
+: >"$test_dir/commands.log"
+USER=attacker SUDO_USER=attacker run_host_tty >/dev/null 2>&1
+! grep -Fq 'attacker' "$test_dir/commands.log"
+
+# The supported path contains one sudo boundary and no nested sudo configuration.
+! grep -Fq 'bootstrap local --environment development' "$script"
+! grep -Fq -- '--ask-become-pass' "$script"
+grep -Fq 'run_privileged "$venv_dir/bin/ansible-playbook"' "$script"
 
 grep -Fq 'RESTART_REQUIRED' "$script"
 grep -Fq 'bootstrap verify' "$script"

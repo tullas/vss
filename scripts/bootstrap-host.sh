@@ -8,6 +8,7 @@ os_release_file=${VSS_OS_RELEASE_FILE:-/etc/os-release}
 python_bin=${VSS_PYTHON_BIN:-python3}
 if [[ -n ${VSS_VENV_DIR+x} ]]; then venv_dir=$VSS_VENV_DIR; else venv_dir="$project_root/.venv"; fi
 sudo_bin=${VSS_SUDO_BIN:-sudo}
+SUDO=()
 sudo_keeper_pid=
 sudo_preauthenticated=false
 tmp_file=
@@ -42,6 +43,9 @@ chmod 700 "$progress_dir"
 
 log() { printf '%s\n' "$*" >&2; }
 run() { if $verbose; then printf '+ %q ' "$@" >&2; printf '\n' >&2; fi; "$@"; }
+run_privileged() {
+  if (( EUID == 0 )); then run "$@"; else run "${SUDO[@]}" -n "$@"; fi
+}
 stop_sudo_keeper() {
   [[ -n $sudo_keeper_pid ]] || return 0
   kill "$sudo_keeper_pid" 2>/dev/null || true
@@ -95,6 +99,41 @@ preauthenticate_sudo() {
   sudo_preauthenticated=true
   sudo_keeper &
   sudo_keeper_pid=$!
+}
+
+derive_developer_identity() {
+  local passwd_entry repository_uid
+  developer_repository_root=$(realpath -e -- "$project_root")
+  repository_uid=$(stat -c '%u' -- "$developer_repository_root")
+
+  if (( EUID == 0 )); then
+    developer_uid=$repository_uid
+  else
+    developer_uid=$(id -u)
+    [[ $repository_uid == "$developer_uid" ]] || {
+      log 'ERROR: repository ownership does not match the invoking developer'
+      exit 77
+    }
+  fi
+  [[ $developer_uid =~ ^[0-9]+$ ]] || { log 'ERROR: unable to validate the developer uid'; exit 77; }
+  passwd_entry=$(getent passwd "$developer_uid" || true)
+  [[ -n $passwd_entry && $(grep -c '^' <<<"$passwd_entry") -eq 1 ]] || {
+    log 'ERROR: unable to resolve the repository owner in the local passwd database'
+    exit 77
+  }
+  IFS=: read -r developer_user _ passwd_uid developer_gid _ developer_home _ <<<"$passwd_entry"
+  [[ $passwd_uid == "$developer_uid" && $developer_gid =~ ^[0-9]+$ ]] || {
+    log 'ERROR: local passwd identity does not match the repository owner'
+    exit 77
+  }
+  [[ $(id -u "$developer_user") == "$developer_uid" && $(id -g "$developer_user") == "$developer_gid" ]] || {
+    log 'ERROR: developer identity validation failed'
+    exit 77
+  }
+  [[ $developer_home == /* && $developer_home != / && -d $developer_home ]] || {
+    log 'ERROR: developer home directory is invalid'
+    exit 77
+  }
 }
 restart_required() {
   printf 'state=RESTART_REQUIRED\nreason=%s\n' "$1" >"$progress_file"
@@ -334,16 +373,27 @@ if [[ ${VSS_BOOTSTRAP_SUDO_ONLY:-0} == 1 ]]; then
   exit 0
 fi
 
+derive_developer_identity
+
 if [[ ! -L /usr/local/bin/vss || $(readlink -f /usr/local/bin/vss 2>/dev/null || true) != "$venv_dir/bin/vss" ]]; then
-  need_sudo
-  run "${SUDO[@]}" ln -sfn "$venv_dir/bin/vss" /usr/local/bin/vss
+  run_privileged ln -sfn "$venv_dir/bin/vss" /usr/local/bin/vss
+  run_privileged chown -h root:root /usr/local/bin/vss
 fi
 run "$venv_dir/bin/vss" bootstrap check --environment development
-run "$venv_dir/bin/vss" bootstrap local --environment development
+developer_extra_vars=$("$venv_dir/bin/python" -c \
+  'import json,sys; print(json.dumps(dict(zip(("local_toolchain_developer_user", "local_toolchain_developer_uid", "local_toolchain_developer_gid", "local_toolchain_developer_home", "local_toolchain_project_root"), sys.argv[1:]))))' \
+  "$developer_user" "$developer_uid" "$developer_gid" "$developer_home" "$developer_repository_root")
+if ! run_privileged "$venv_dir/bin/ansible-playbook" \
+  -i "$project_root/ansible/inventories/development/hosts.yml" \
+  "$project_root/ansible/playbooks/bootstrap-local.yml" \
+  --extra-vars "$developer_extra_vars"; then
+  log 'ERROR: privileged local toolchain bootstrap failed'
+  exit 70
+fi
+printf '{"schema_version":"1","command":"bootstrap.local","status":"success","environment":"development"}\n'
 
-current_user=${SUDO_USER:-$USER}
-if getent group docker >/dev/null 2>&1 && id -nG "$current_user" | tr ' ' '\n' | grep -Fxq docker; then :
-elif getent group docker | cut -d: -f4 | tr ',' '\n' | grep -Fxq "$current_user"; then
+if getent group docker >/dev/null 2>&1 && id -nG "$developer_user" | tr ' ' '\n' | grep -Fxq docker; then :
+elif getent group docker | cut -d: -f4 | tr ',' '\n' | grep -Fxq "$developer_user"; then
   restart_required docker_group
 fi
 run "$venv_dir/bin/vss" bootstrap verify --environment development

@@ -1,22 +1,38 @@
 ---
-- name: Create local state directory
+- name: Create developer-local directories
   ansible.builtin.file:
-    path: "{{ local_toolchain_state_dir }}"
+    path: "{{ item.path }}"
     state: directory
-    mode: '0700'
-  become: false
+    owner: "{{ local_toolchain_developer_uid }}"
+    group: "{{ local_toolchain_developer_gid }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ local_toolchain_project_root }}/.local", mode: '0700'}
+    - {path: "{{ local_toolchain_project_root }}/.local/bootstrap", mode: '0700'}
+    - {path: "{{ local_toolchain_project_root }}/.local/state", mode: '0700'}
+    - {path: "{{ local_toolchain_state_dir }}", mode: '0700'}
+    - {path: "{{ local_toolchain_secrets_dir }}", mode: '0700'}
+  tags: [local_directories]
 
-- name: Create local secrets directory
+- name: Preserve developer ownership below local state and secrets
   ansible.builtin.file:
-    path: "{{ local_toolchain_secrets_dir }}"
+    path: "{{ item }}"
     state: directory
-    mode: '0700'
-  become: false
+    owner: "{{ local_toolchain_developer_uid }}"
+    group: "{{ local_toolchain_developer_gid }}"
+    recurse: true
+  loop:
+    - "{{ local_toolchain_project_root }}/.local/bootstrap"
+    - "{{ local_toolchain_project_root }}/.local/state"
+    - "{{ local_toolchain_secrets_dir }}"
+  tags: [local_directories]
 
 - name: Copy safe local secrets example without overwriting
   ansible.builtin.copy:
     src: "{{ local_toolchain_secrets_example }}"
     dest: "{{ local_toolchain_secrets_dir }}/development.auto.tfvars.example"
+    owner: "{{ local_toolchain_developer_uid }}"
+    group: "{{ local_toolchain_developer_gid }}"
     mode: '0600'
     force: false
-  become: false
+  tags: [local_directories]

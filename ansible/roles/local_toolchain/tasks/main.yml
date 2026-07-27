@@ -1,4 +1,44 @@
 ---
+- name: Require validated developer identity inputs
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.user_uid | int == 0
+      - local_toolchain_developer_user | length > 0
+      - local_toolchain_developer_uid | string is match('^[0-9]+$')
+      - local_toolchain_developer_gid | string is match('^[0-9]+$')
+      - local_toolchain_developer_home is match('^/.+')
+      - local_toolchain_project_root is match('^/.+')
+    fail_msg: The local toolchain requires a validated original developer identity.
+  tags: [always]
+
+- name: Resolve the original developer from the operating system
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ local_toolchain_developer_user }}"
+  tags: [always]
+
+- name: Inspect supplied and expected repository roots
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ local_toolchain_project_root }}"
+    - "{{ playbook_dir }}/../.."
+  register: local_toolchain_repository_stats
+  tags: [always]
+
+- name: Validate the developer identity and repository root after escalation
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.getent_passwd[local_toolchain_developer_user][1] | int == local_toolchain_developer_uid | int
+      - ansible_facts.getent_passwd[local_toolchain_developer_user][2] | int == local_toolchain_developer_gid | int
+      - ansible_facts.getent_passwd[local_toolchain_developer_user][4] == local_toolchain_developer_home
+      - local_toolchain_repository_stats.results[0].stat.isdir | default(false)
+      - local_toolchain_repository_stats.results[0].stat.uid | int == local_toolchain_developer_uid | int
+      - local_toolchain_repository_stats.results[0].stat.dev == local_toolchain_repository_stats.results[1].stat.dev
+      - local_toolchain_repository_stats.results[0].stat.inode == local_toolchain_repository_stats.results[1].stat.inode
+    fail_msg: Developer identity or repository root validation failed after privilege escalation.
+  tags: [always]
+
 - name: Require Ubuntu for the local toolchain role
   ansible.builtin.assert:
     that:
@@ -19,3 +59,4 @@
 
 - name: Create local state and secrets directories
   ansible.builtin.include_tasks: local_directories.yml
+  tags: [local_directories]

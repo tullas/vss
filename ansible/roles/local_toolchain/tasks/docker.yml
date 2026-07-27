@@ -58,6 +58,8 @@
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
+    owner: root
+    group: root
     mode: '0755'
   when: not local_toolchain_docker_available
 
@@ -65,6 +67,8 @@
   ansible.builtin.get_url:
     url: https://download.docker.com/linux/ubuntu/gpg
     dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
     mode: '0644'
   when: not local_toolchain_docker_available
 
@@ -103,15 +107,17 @@
 
 - name: Ensure the bootstrap user can access the managed Docker daemon
   ansible.builtin.user:
-    name: "{{ local_toolchain_user }}"
+    name: "{{ local_toolchain_developer_user }}"
     groups: docker
     append: true
   register: local_toolchain_docker_group
-  when: not local_toolchain_docker_available
+  when:
+    - not local_toolchain_docker_available
+    - local_toolchain_developer_uid | int != 0
 
 - name: Report Docker group session boundary  # noqa no-handler
   ansible.builtin.debug:
     msg: >-
-      Docker group membership changed for {{ local_toolchain_user }}. A new
+      Docker group membership changed for {{ local_toolchain_developer_user }}. A new
       login session or WSL restart is required before Docker is accessible.
   when: local_toolchain_docker_group is changed
