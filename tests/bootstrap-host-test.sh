@@ -35,6 +35,7 @@ bootstrap_env() {
 
 run_phase0() { bootstrap_env "$1" "$test_dir/.venv" VSS_BOOTSTRAP_PHASE0_ONLY "${@:2}"; }
 run_venv() { bootstrap_env "$1" "$test_dir/.venv" VSS_BOOTSTRAP_VENV_ONLY "${@:2}"; }
+run_install() { bootstrap_env "$1" "$2" VSS_BOOTSTRAP_INSTALL_ONLY "${@:3}"; }
 reset_case() { rm -rf -- "$test_dir/.venv"; : >"$test_dir/commands.log"; touch "$test_dir/venv.available"; }
 make_existing_venv() {
   mkdir -p "$test_dir/.venv/bin"
@@ -78,6 +79,21 @@ run_venv 3.14 >/dev/null
 after=$(stat -c '%i' "$test_dir/.venv")
 [[ $before == "$after" ]]
 ! grep -Fq 'venv 3.14' "$test_dir/commands.log"
+
+# Installed venv tools are discovered without global Ansible or activation.
+custom_venv="$test_dir/custom/managed-venv"
+rm -rf -- "$custom_venv"
+system_path=/usr/bin:/bin
+output=$(PATH="$system_path" run_install 3.14 "$custom_venv")
+grep -Fq '"state":"TOOLCHAIN_READY"' <<<"$output"
+for executable in python pip vss ansible-playbook; do
+  [[ -x $custom_venv/bin/$executable ]]
+done
+[[ $(PATH="$custom_venv/bin:$system_path" command -v ansible-playbook) == "$custom_venv/bin/ansible-playbook" ]]
+before=$(stat -c '%i' "$custom_venv")
+PATH="$system_path" run_install 3.14 "$custom_venv" >/dev/null
+after=$(stat -c '%i' "$custom_venv")
+[[ $before == "$after" ]]
 
 # Existing directory without Python is recovered automatically.
 reset_case
