@@ -219,6 +219,11 @@ if ! $venv_was_healthy; then
 fi
 venv_healthy "$venv_dir" || { log "ERROR: VSS virtual environment verification failed ($venv_health_reason)"; exit 69; }
 
+# VSS commands discover their managed tools (including Ansible) through PATH.
+# Export the validated environment before invoking any VSS entry point so users
+# never need to activate the virtual environment themselves.
+export PATH="$venv_dir/bin:$PATH"
+
 # Internal boundary for managed-venv recovery and clean-image acceptance tests.
 if [[ ${VSS_BOOTSTRAP_VENV_ONLY:-0} == 1 ]]; then
   printf '{"state":"VENV_READY","python_version":"%s"}\n' "$python_version"
@@ -232,6 +237,26 @@ fi
 
 run "$venv_dir/bin/python" -m pip install --disable-pip-version-check -r requirements-bootstrap.txt
 run "$venv_dir/bin/python" -m pip install --disable-pip-version-check --no-deps -e .
+
+verify_venv_executable() {
+  local executable=$1 expected="$venv_dir/bin/$1" discovered
+  [[ -x $expected ]] || { log "ERROR: required VSS virtual environment executable is unavailable: $executable"; exit 69; }
+  discovered=$(command -v -- "$executable" 2>/dev/null || true)
+  [[ $discovered == "$expected" ]] || {
+    log "ERROR: required executable does not resolve from the VSS virtual environment: $executable"
+    exit 69
+  }
+}
+for executable in python pip vss ansible-playbook; do
+  verify_venv_executable "$executable"
+done
+
+# Internal boundary used by clean-image and command-isolation tests.
+if [[ ${VSS_BOOTSTRAP_INSTALL_ONLY:-0} == 1 ]]; then
+  printf '{"state":"TOOLCHAIN_READY","python_version":"%s"}\n' "$python_version"
+  exit 0
+fi
+
 if [[ ! -L /usr/local/bin/vss || $(readlink -f /usr/local/bin/vss 2>/dev/null || true) != "$venv_dir/bin/vss" ]]; then
   need_sudo
   run "${SUDO[@]}" ln -sfn "$venv_dir/bin/vss" /usr/local/bin/vss

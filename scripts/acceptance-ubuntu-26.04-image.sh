@@ -28,5 +28,9 @@ docker run --rm \
     VSS_BOOTSTRAP_VENV_ONLY=1 ./scripts/bootstrap-host.sh
     after_inode=$(stat -c %i .venv)
     test "$before_inode" = "$after_inode"
+    test -z "$(command -v ansible-playbook || true)"
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      VSS_BOOTSTRAP_INSTALL_ONLY=1 ./scripts/bootstrap-host.sh
+    test -x .venv/bin/ansible-playbook
   '
 printf 'Ubuntu 26.04 clean-image phase-0 acceptance passed\n'

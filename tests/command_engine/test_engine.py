@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -126,6 +128,21 @@ class CommandEngineTests(unittest.TestCase):
         self.assertEqual(response["output"]["ansible"]["failed_task"], "local_toolchain : Enable Docker")
         encoded = json.dumps(response)
         self.assertNotIn("dont-leak", encoded)
+
+    def test_bootstrap_local_discovers_ansible_from_managed_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ansible = Path(directory) / "ansible-playbook"
+            ansible.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            ansible.chmod(0o755)
+            completed = subprocess.CompletedProcess(args=[str(ansible)], returncode=0, stdout="", stderr="")
+            with (
+                patch.dict(os.environ, {"PATH": directory}),
+                patch("vss_commands.commands.bootstrap_local.run_capture", return_value=completed) as run_capture,
+            ):
+                response, code = CommandRunner().run("bootstrap.local", "development")
+        self.assertEqual(code, ExitCode.SUCCESS)
+        self.assertEqual(response["status"], "success")
+        self.assertEqual(run_capture.call_args.args[0][0], str(ansible))
 
     def test_success_and_generated_correlation_id(self) -> None:
         response, code = CommandRunner().run("system.info", "development")

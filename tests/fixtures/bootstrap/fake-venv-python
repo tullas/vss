@@ -12,6 +12,12 @@ if [[ ${1:-} == -c ]]; then
 fi
 if [[ ${1:-} == -m && ${2:-} == pip ]]; then
   [[ ! -e $venv_root/.pip-missing ]]
+  if [[ ${3:-} == install ]]; then
+    for executable in pip vss ansible-playbook; do
+      printf '#!/usr/bin/env bash\nexit 0\n' >"$venv_root/bin/$executable"
+      chmod +x "$venv_root/bin/$executable"
+    done
+  fi
   exit
 fi
 if [[ ${1:-} == -m && ${2:-} == ensurepip ]]; then
