@@ -18,7 +18,7 @@ bootstrap_env() {
   env \
     PATH="$fixtures:$PATH" \
     VSS_OS_RELEASE_FILE="$fixtures/ubuntu-os-release" \
-    VSS_IS_WSL=false \
+    VSS_IS_WSL="${VSS_IS_WSL:-false}" \
     VSS_PID1=systemd \
     VSS_PYTHON_BIN="$fixtures/fake-python" \
     VSS_TEST_PYTHON_VERSION="$version" \
@@ -39,7 +39,7 @@ host_env() {
   env \
     PATH="$fixtures:$PATH" \
     VSS_OS_RELEASE_FILE="$fixtures/ubuntu-os-release" \
-    VSS_IS_WSL=false \
+    VSS_IS_WSL="${VSS_IS_WSL:-false}" \
     VSS_PID1=systemd \
     VSS_PYTHON_BIN="$fixtures/fake-python" \
     VSS_TEST_PYTHON_VERSION=3.14 \
@@ -217,7 +217,9 @@ grep -Fq 'sudo -k' "$test_dir/commands.log"
 sudo_line=$(grep -Fn 'sudo -v' "$test_dir/commands.log" | head -n1 | cut -d: -f1)
 ansible_line=$(grep -Fn 'sudo -n '"$sudo_venv"'/bin/ansible-playbook' "$test_dir/commands.log" | head -n1 | cut -d: -f1)
 (( sudo_line < ansible_line ))
-grep -Fq '"local_toolchain_developer_user"' "$test_dir/commands.log"
+for identity_field in user uid gid home; do
+  grep -Fq "\"local_toolchain_developer_${identity_field}\"" "$test_dir/commands.log"
+done
 grep -Fq '"local_toolchain_project_root"' "$test_dir/commands.log"
 keeper_count=$(grep -Fc 'sudo -n true' "$test_dir/commands.log")
 sleep 0.1
@@ -254,6 +256,48 @@ grep -Fq 'sudo is required for host changes' "$test_dir/missing-host-sudo.out"
 : >"$test_dir/commands.log"
 USER=attacker SUDO_USER=attacker run_host_tty >/dev/null 2>&1
 ! grep -Fq 'attacker' "$test_dir/commands.log"
+
+# A database-only Docker group assignment requires a new login session and
+# stops before bootstrap.verify. WSL prints its exact supported restart action.
+developer_name=$(id -un)
+: >"$test_dir/commands.log"
+status=0
+VSS_TEST_DOCKER_GROUP_MEMBERS="$developer_name" VSS_TEST_ACTIVE_GROUP_IDS="$(id -g)" \
+  VSS_IS_WSL=true run_host_tty >"$test_dir/docker-restart.out" 2>&1 || status=$?
+(( status == 24 ))
+grep -Fq '"state":"RESTART_REQUIRED","reason":"docker_group"' "$test_dir/docker-restart.out"
+grep -Fq 'Run from Windows PowerShell:' "$test_dir/docker-restart.out"
+grep -Fq 'wsl --shutdown' "$test_dir/docker-restart.out"
+! grep -Fq 'vss bootstrap verify' "$test_dir/commands.log"
+
+# Active supplementary membership proceeds through the non-sudo Docker probe
+# and verification. A second bootstrap remains idempotently successful.
+: >"$test_dir/commands.log"
+VSS_TEST_DOCKER_GROUP_MEMBERS="$developer_name" VSS_TEST_ACTIVE_GROUP_IDS="$(id -g) 988" \
+  run_host_tty >"$test_dir/docker-active.out" 2>&1
+grep -Fq '"docker_group_active":true,"docker_info_accessible":true' "$test_dir/docker-active.out"
+grep -Fq 'docker info' "$test_dir/commands.log"
+grep -Fq 'vss bootstrap verify' "$test_dir/commands.log"
+VSS_TEST_DOCKER_GROUP_MEMBERS="$developer_name" VSS_TEST_ACTIVE_GROUP_IDS="$(id -g) 988" \
+  run_host_tty >"$test_dir/docker-second.out" 2>&1
+grep -Fq '"state":"COMPLETE"' "$test_dir/docker-second.out"
+
+# Root's active docker group never stands in for the original developer's
+# session, even when the group id appears in root's supplementary group list.
+status=0
+VSS_TEST_DOCKER_GROUP_MEMBERS="$developer_name" VSS_TEST_ACTIVE_GROUP_IDS="0 988" \
+  VSS_TEST_EFFECTIVE_UID=0 run_host_tty >"$test_dir/docker-root.out" 2>&1 || status=$?
+(( status == 24 ))
+grep -Fq '"reason":"docker_group"' "$test_dir/docker-root.out"
+
+# After the WSL login boundary activates docker, --resume completes normally.
+status=0
+VSS_TEST_DOCKER_GROUP_MEMBERS="$developer_name" VSS_TEST_ACTIVE_GROUP_IDS="$(id -g)" \
+  VSS_IS_WSL=true run_host_tty >/dev/null 2>&1 || status=$?
+(( status == 24 ))
+VSS_TEST_DOCKER_GROUP_MEMBERS="$developer_name" VSS_TEST_ACTIVE_GROUP_IDS="$(id -g) 988" \
+  VSS_IS_WSL=true host_env script -qec "$script --resume" /dev/null >"$test_dir/docker-resume.out" 2>&1
+grep -Fq '"state":"COMPLETE"' "$test_dir/docker-resume.out"
 
 # The supported path contains one sudo boundary and no nested sudo configuration.
 ! grep -Fq 'bootstrap local --environment development' "$script"

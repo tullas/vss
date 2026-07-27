@@ -10,6 +10,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from vss_commands import CommandRunner, ExitCode
+from vss_commands.commands.bootstrap_verify import CheckResult
 from vss_commands.registry import get_command
 from vss_commands.runner import response_json
 
@@ -107,10 +108,140 @@ class CommandEngineTests(unittest.TestCase):
         self.assertTrue(response["output"]["checks"]["docker"]["daemon_accessible"])
 
     def test_bootstrap_verify_missing_tool_fails_without_leaking_values(self) -> None:
-        with patch("vss_commands.commands._bootstrap_support.shutil.which", return_value=None):
+        repository = CheckResult(True, 0, "repository")
+        with (
+            patch("vss_commands.commands.bootstrap_verify.shutil.which", return_value=None),
+            patch("vss_commands.commands.bootstrap_verify._repository_check", return_value=repository),
+        ):
             response, code = CommandRunner().run("bootstrap.verify", "development")
         self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertEqual(response["output"]["failure"], "docker_cli_missing")
+        self.assertEqual(
+            response["output"]["checks"],
+            {
+                "docker_cli": False,
+                "docker_info": False,
+                "tofu_version": False,
+                "repository": True,
+                "iac_validate": False,
+            },
+        )
+        self.assertEqual(response["output"]["diagnostics"][0]["return_code"], 127)
         self.assertNotIn("password", json.dumps(response).lower())
+
+    def test_bootstrap_verify_distinguishes_docker_daemon_unavailable(self) -> None:
+        docker = subprocess.CompletedProcess(["docker", "info"], 1, "", "cannot connect to the Docker daemon")
+        tofu = subprocess.CompletedProcess(["tofu", "version"], 0, "OpenTofu v1.9.0", "")
+        iac = subprocess.CompletedProcess(["iac-local", "validate"], 0, "", "")
+        repository = CheckResult(True, 0, "repository")
+        with (
+            patch("vss_commands.commands.bootstrap_verify.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch("vss_commands.commands.bootstrap_verify.run_capture", side_effect=[docker, tofu, iac]),
+            patch("vss_commands.commands.bootstrap_verify._repository_check", return_value=repository),
+        ):
+            response, code = CommandRunner().run("bootstrap.verify", "development")
+        self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertEqual(response["output"]["failure"], "docker_daemon_stopped")
+        self.assertEqual(response["output"]["next_action"], "start Docker")
+
+    def test_bootstrap_verify_distinguishes_docker_socket_permission(self) -> None:
+        secret = "VSS_PASSWORD=super-secret-value"
+        docker = subprocess.CompletedProcess(["docker", "info"], 1, "", f"permission denied; {secret}")
+        tofu = subprocess.CompletedProcess(["tofu", "version"], 0, "OpenTofu v1.9.0", "")
+        iac = subprocess.CompletedProcess(["iac-local", "validate"], 0, "state contains another-secret", "")
+        repository = CheckResult(True, 0, "repository")
+        with (
+            patch("vss_commands.commands.bootstrap_verify.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch("vss_commands.commands.bootstrap_verify.run_capture", side_effect=[docker, tofu, iac]),
+            patch("vss_commands.commands.bootstrap_verify._repository_check", return_value=repository),
+        ):
+            response, code = CommandRunner().run("bootstrap.verify", "development")
+        encoded = json.dumps(response)
+        self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertEqual(response["output"]["failure"], "docker_socket_permission_denied")
+        self.assertIn("--resume", response["errors"][0])
+        self.assertNotIn("super-secret-value", encoded)
+        self.assertNotIn("another-secret", encoded)
+
+    def test_bootstrap_verify_distinguishes_opentofu_unavailable(self) -> None:
+        docker = subprocess.CompletedProcess(["docker", "info"], 0, "", "")
+        repository = CheckResult(True, 0, "repository")
+        with (
+            patch(
+                "vss_commands.commands.bootstrap_verify.shutil.which",
+                side_effect=lambda name: "/usr/bin/docker" if name == "docker" else None,
+            ),
+            patch("vss_commands.commands.bootstrap_verify.run_capture", return_value=docker),
+            patch("vss_commands.commands.bootstrap_verify._repository_check", return_value=repository),
+        ):
+            response, code = CommandRunner().run("bootstrap.verify", "development")
+        self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertEqual(response["output"]["failure"], "opentofu_missing")
+        self.assertEqual(response["output"]["next_action"], "rerun bootstrap local")
+
+    def test_bootstrap_verify_reports_iac_validation_failure_safely(self) -> None:
+        completed = [
+            subprocess.CompletedProcess(["docker", "info"], 0, "", ""),
+            subprocess.CompletedProcess(["tofu", "version"], 0, "OpenTofu v1.9.0", ""),
+            subprocess.CompletedProcess(
+                ["iac-local", "validate"], 7, "private state value: leak-me", "API_TOKEN=leak-me-too"
+            ),
+        ]
+        repository = CheckResult(True, 0, "repository")
+        with (
+            patch("vss_commands.commands.bootstrap_verify.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch("vss_commands.commands.bootstrap_verify.run_capture", side_effect=completed),
+            patch("vss_commands.commands.bootstrap_verify._repository_check", return_value=repository),
+        ):
+            response, code = CommandRunner().run("bootstrap.verify", "development")
+        encoded = json.dumps(response)
+        self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertEqual(response["output"]["failure"], "iac_validation_failed")
+        self.assertEqual(response["output"]["next_action"], "inspect IaC validation")
+        diagnostic = response["output"]["diagnostics"][0]
+        self.assertEqual(diagnostic["return_code"], 7)
+        self.assertEqual(diagnostic["executable"], "scripts/iac-local.sh validate")
+        self.assertNotIn("leak-me", encoded)
+
+    def test_bootstrap_verify_reports_required_repository_path_missing(self) -> None:
+        completed = [
+            subprocess.CompletedProcess(["docker", "info"], 0, "", ""),
+            subprocess.CompletedProcess(["tofu", "version"], 0, "", ""),
+        ]
+        missing = CheckResult(False, 2, "repository", "required repository path is missing")
+        with (
+            patch("vss_commands.commands.bootstrap_verify.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch("vss_commands.commands.bootstrap_verify.run_capture", side_effect=completed),
+            patch("vss_commands.commands.bootstrap_verify._repository_check", return_value=missing),
+        ):
+            response, code = CommandRunner().run("bootstrap.verify", "development")
+        self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertEqual(response["output"]["failure"], "repository_missing")
+
+    def test_bootstrap_verify_success_reports_all_safe_check_booleans(self) -> None:
+        completed = [
+            subprocess.CompletedProcess(["docker", "info"], 0, "", ""),
+            subprocess.CompletedProcess(["tofu", "version"], 0, "OpenTofu v1.9.0", ""),
+            subprocess.CompletedProcess(["iac-local", "validate"], 0, "", ""),
+        ]
+        repository = CheckResult(True, 0, "repository")
+        with (
+            patch("vss_commands.commands.bootstrap_verify.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch("vss_commands.commands.bootstrap_verify.run_capture", side_effect=completed),
+            patch("vss_commands.commands.bootstrap_verify._repository_check", return_value=repository),
+        ):
+            response, code = CommandRunner().run("bootstrap.verify", "development")
+        self.assertEqual(code, ExitCode.SUCCESS)
+        self.assertEqual(
+            response["output"]["checks"],
+            {
+                "docker_cli": True,
+                "docker_info": True,
+                "tofu_version": True,
+                "repository": True,
+                "iac_validate": True,
+            },
+        )
 
     def test_bootstrap_local_propagates_safe_ansible_diagnostics(self) -> None:
         failed = subprocess.CompletedProcess(

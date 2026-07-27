@@ -1,3 +1,7 @@
 #!/usr/bin/env bash
 if [[ ${1:-} == passwd ]]; then exec /usr/bin/getent "$@"; fi
+if [[ ${1:-} == group && ${2:-} == docker && -n ${VSS_TEST_DOCKER_GROUP_MEMBERS+x} ]]; then
+  printf 'docker:x:%s:%s\n' "${VSS_TEST_DOCKER_GROUP_GID:-988}" "$VSS_TEST_DOCKER_GROUP_MEMBERS"
+  exit 0
+fi
 exit 1

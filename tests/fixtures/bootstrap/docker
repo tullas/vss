@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'docker %s\n' "$*" >>"${VSS_TEST_COMMAND_LOG:?}"
+if [[ ${1:-} == info ]]; then
+  exit "${VSS_TEST_DOCKER_INFO_RC:-0}"
+fi
+exit 0

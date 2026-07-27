@@ -392,10 +392,34 @@ if ! run_privileged "$venv_dir/bin/ansible-playbook" \
 fi
 printf '{"schema_version":"1","command":"bootstrap.local","status":"success","environment":"development"}\n'
 
-if getent group docker >/dev/null 2>&1 && id -nG "$developer_user" | tr ' ' '\n' | grep -Fxq docker; then :
-elif getent group docker | cut -d: -f4 | tr ',' '\n' | grep -Fxq "$developer_user"; then
+docker_group_entry=$(getent group docker 2>/dev/null || true)
+developer_listed_in_docker_group=false
+docker_group_active=false
+docker_info_accessible=false
+process_uid=$EUID
+if [[ -n ${VSS_BOOTSTRAP_TEST_ROOT:-} && -n ${VSS_TEST_EFFECTIVE_UID:-} ]]; then
+  process_uid=$VSS_TEST_EFFECTIVE_UID
+fi
+if [[ -n $docker_group_entry && $(grep -c '^' <<<"$docker_group_entry") -eq 1 ]]; then
+  IFS=: read -r docker_group_name _ docker_group_gid docker_group_members <<<"$docker_group_entry"
+  if [[ $docker_group_name == docker && $docker_group_gid =~ ^[0-9]+$ ]] &&
+    tr ',' '\n' <<<"$docker_group_members" | grep -Fxq "$developer_user"; then
+    developer_listed_in_docker_group=true
+  fi
+  # Supplementary groups belong to the current process. Querying `id USER`
+  # would only re-read the group database and would hide the login boundary.
+  if (( process_uid == developer_uid )) && id -G | tr ' ' '\n' | grep -Fxq "$docker_group_gid"; then
+    docker_group_active=true
+  fi
+fi
+if $developer_listed_in_docker_group && ! $docker_group_active; then
   restart_required docker_group
 fi
+if (( process_uid == developer_uid )) && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  docker_info_accessible=true
+fi
+printf '{"state":"POSTINSTALL_CHECK","developer_in_docker_group":%s,"docker_group_active":%s,"docker_info_accessible":%s}\n' \
+  "$developer_listed_in_docker_group" "$docker_group_active" "$docker_info_accessible"
 run "$venv_dir/bin/vss" bootstrap verify --environment development
 printf 'state=COMPLETE\n' >"$progress_file"
 chmod 600 "$progress_file"
