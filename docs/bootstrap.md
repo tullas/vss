@@ -18,7 +18,13 @@ vss bootstrap verify --environment development
 `check` is read-only. It reports WSL and systemd detection, Docker CLI and
 daemon status, OpenTofu version, and conflicts on ports 9000 and 9001.
 
-`local` invokes `ansible/playbooks/bootstrap-local.yml`. It reuses an already
+`local` invokes `ansible/playbooks/bootstrap-local.yml`. The supported
+`bootstrap-host.sh` path first lets native `sudo -v` authenticate directly on
+the controlling terminal, validates the resulting ticket, and keeps it alive
+only for the lifetime of bootstrap. It then runs Ansible without
+`--ask-become-pass`; Ansible's existing `become: true` tasks consume the cached
+ticket. The password is never captured, stored, piped, inspected, or included
+in VSS output. The command reuses an already
 working Docker daemon. If Docker is unavailable, it requires active systemd;
 on WSL without systemd it stops and explains how to enable systemd in
 `/etc/wsl.conf` and restart WSL. It uses signed APT keyrings for the official
@@ -29,8 +35,9 @@ prints credentials.
 On failure, the JSON response includes only a short sanitized Ansible summary
 (failed task, safe error message, and return code). `--verbose` additionally
 writes sanitized Ansible diagnostics to stderr while preserving the response
-envelope on stdout. `--ask-become-pass` lets Ansible prompt interactively; the
-password is never stored or included in output.
+envelope on stdout. Direct advanced use of `vss bootstrap local
+--ask-become-pass` remains available, but is not part of the workstation
+runbook.
 
 ## Python and ansible-core compatibility
 
@@ -61,8 +68,9 @@ not apply infrastructure.
 ## Assumptions and privilege boundaries
 
 The playbook targets Ubuntu and uses `become: true` for package and service
-operations. A user must have working privilege escalation; otherwise Ansible
-reports the failure and no bootstrap completion is claimed. WSL Docker Engine
+operations. A user must have working interactive sudo authentication;
+phase 0 stops before Ansible if `sudo -v` fails or no terminal is attached.
+WSL Docker Engine
 installation requires systemd. Docker Desktop with WSL integration is treated
 as an already accessible daemon and is reused without attempting Windows-side
 changes.
