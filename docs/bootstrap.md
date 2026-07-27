@@ -10,6 +10,7 @@ OpenTofu remains responsible for creating the local MinIO platform.
 ```bash
 vss bootstrap check --environment development
 vss bootstrap local --environment development
+vss bootstrap local --environment development --verbose --ask-become-pass
 vss bootstrap verify --environment development
 ```
 
@@ -23,6 +24,12 @@ on WSL without systemd it stops and explains how to enable systemd in
 Docker and OpenTofu repositories. It never installs or controls Docker Desktop
 on Windows, adds users to privileged groups, runs OpenTofu apply/destroy, or
 prints credentials.
+
+On failure, the JSON response includes only a short sanitized Ansible summary
+(failed task, safe error message, and return code). `--verbose` additionally
+writes sanitized Ansible diagnostics to stderr while preserving the response
+envelope on stdout. `--ask-become-pass` lets Ansible prompt interactively; the
+password is never stored or included in output.
 
 The role creates `.local/state/development` and `.local/secrets`, and copies
 the safe secrets example only when the destination does not exist. Existing

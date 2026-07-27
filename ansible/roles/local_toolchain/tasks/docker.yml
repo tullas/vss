@@ -16,11 +16,23 @@
   ansible.builtin.set_fact:
     local_toolchain_docker_available: "{{ local_toolchain_docker_cli.rc | default(1) == 0 and local_toolchain_docker_info.rc | default(1) == 0 }}"
 
+- name: Read PID 1 identity when Docker is unavailable
+  ansible.builtin.slurp:
+    src: /proc/1/comm
+  register: local_toolchain_pid1
+  when: not local_toolchain_docker_available
+
 - name: Check systemd when Docker is unavailable  # noqa command-instead-of-module
   ansible.builtin.command: systemctl is-system-running
   register: local_toolchain_systemd
   changed_when: false
   failed_when: false
+  when: not local_toolchain_docker_available
+
+- name: Set systemd readiness facts
+  ansible.builtin.set_fact:
+    local_toolchain_pid1_is_systemd: "{{ (local_toolchain_pid1.content | b64decode | trim) == 'systemd' }}"
+    local_toolchain_systemd_state: "{{ local_toolchain_systemd.stdout | default('unavailable') | trim | lower }}"
   when: not local_toolchain_docker_available
 
 - name: Stop when Docker cannot be managed without systemd
@@ -30,7 +42,7 @@
       /etc/wsl.conf (for WSL), restart WSL, and run this command again.
   when:
     - not local_toolchain_docker_available
-    - local_toolchain_systemd.stdout | default('') != 'active'
+    - not local_toolchain_pid1_is_systemd or local_toolchain_systemd_state not in ['running', 'degraded']
 
 - name: Install Docker repository prerequisites
   ansible.builtin.apt:

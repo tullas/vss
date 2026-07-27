@@ -44,6 +44,50 @@ class CommandEngineTests(unittest.TestCase):
         self.assertTrue(response["output"]["checks"]["platform"]["is_wsl"])
         self.assertFalse(response["output"]["checks"]["systemd"]["active"])
 
+    def test_systemd_running_is_usable_when_pid1_is_systemd(self) -> None:
+        with (
+            patch("vss_commands.commands._bootstrap_support.shutil.which", return_value="/usr/bin/systemctl"),
+            patch("vss_commands.commands._bootstrap_support._pid1_name", return_value="systemd"),
+            patch("vss_commands.commands._bootstrap_support._run", return_value=(True, "running")),
+        ):
+            from vss_commands.commands._bootstrap_support import systemd_status
+
+            self.assertEqual(systemd_status(), {"active": True, "status": "running", "pid1": "systemd"})
+
+    def test_wsl_with_systemd_pid1_reports_ready(self) -> None:
+        with (
+            patch("vss_commands.commands._bootstrap_support.platform.release", return_value="5.15-microsoft-standard-WSL2"),
+            patch(
+                "vss_commands.commands._bootstrap_support.shutil.which",
+                side_effect=lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
+            ),
+            patch("vss_commands.commands._bootstrap_support._pid1_name", return_value="systemd"),
+            patch("vss_commands.commands._bootstrap_support._run", return_value=(True, "running")),
+        ):
+            from vss_commands.commands._bootstrap_support import bootstrap_report
+
+            report = bootstrap_report()
+        self.assertTrue(report["platform"]["is_wsl"])
+        self.assertTrue(report["systemd"]["active"])
+
+    def test_systemd_degraded_is_usable_despite_nonzero_status(self) -> None:
+        with (
+            patch("vss_commands.commands._bootstrap_support.shutil.which", return_value="/usr/bin/systemctl"),
+            patch("vss_commands.commands._bootstrap_support._pid1_name", return_value="systemd"),
+            patch("vss_commands.commands._bootstrap_support._run", return_value=(False, "degraded")),
+        ):
+            from vss_commands.commands._bootstrap_support import systemd_status
+
+            self.assertTrue(systemd_status()["active"])
+            self.assertEqual(systemd_status()["status"], "degraded")
+
+    def test_systemd_is_unavailable_without_systemctl(self) -> None:
+        with patch("vss_commands.commands._bootstrap_support.shutil.which", return_value=None):
+            from vss_commands.commands._bootstrap_support import systemd_status
+
+            self.assertEqual(systemd_status()["status"], "unavailable")
+            self.assertFalse(systemd_status()["active"])
+
     def test_bootstrap_check_reuses_accessible_docker_daemon(self) -> None:
         def which(name: str) -> str | None:
             return f"/usr/bin/{name}" if name in {"docker", "tofu", "systemctl"} else None
@@ -65,6 +109,23 @@ class CommandEngineTests(unittest.TestCase):
             response, code = CommandRunner().run("bootstrap.verify", "development")
         self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
         self.assertNotIn("password", json.dumps(response).lower())
+
+    def test_bootstrap_local_propagates_safe_ansible_diagnostics(self) -> None:
+        failed = subprocess.CompletedProcess(
+            args=["ansible-playbook"],
+            returncode=1,
+            stdout='TASK [local_toolchain : Enable Docker] ***\nfatal: [localhost]: FAILED! => {"msg":"Missing privilege credential", "credential":"dont-leak"}',
+            stderr="",
+        )
+        with (
+            patch("vss_commands.commands.bootstrap_local.shutil.which", return_value="/usr/bin/ansible-playbook"),
+            patch("vss_commands.commands.bootstrap_local.run_capture", return_value=failed),
+        ):
+            response, code = CommandRunner().run("bootstrap.local", "development")
+        self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertEqual(response["output"]["ansible"]["failed_task"], "local_toolchain : Enable Docker")
+        encoded = json.dumps(response)
+        self.assertNotIn("dont-leak", encoded)
 
     def test_success_and_generated_correlation_id(self) -> None:
         response, code = CommandRunner().run("system.info", "development")

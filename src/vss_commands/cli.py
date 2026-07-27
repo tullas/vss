@@ -19,6 +19,8 @@ def _parser() -> argparse.ArgumentParser:
         parser.add_argument("--correlation-id")
         parser.add_argument("--dry-run", action="store_true")
         parser.add_argument("--timeout", type=float)
+        parser.add_argument("--verbose", action="store_true")
+        parser.add_argument("--ask-become-pass", action="store_true")
 
     run = subparsers.add_parser("run")
     run.add_argument("command")
@@ -74,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
         args.correlation_id,
         args.dry_run,
         args.timeout,
+        args.verbose,
+        args.ask_become_pass,
     )
     print(response_json(response))
     return int(exit_code)

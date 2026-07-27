@@ -38,6 +38,8 @@ class CommandRunner:
         correlation_id: str | None = None,
         dry_run: bool = False,
         timeout_seconds: float | None = None,
+        verbose: bool = False,
+        ask_become_pass: bool = False,
     ) -> tuple[dict[str, Any], ExitCode]:
         started_at = utc_now()
         started_clock = time.monotonic()
@@ -82,7 +84,7 @@ class CommandRunner:
         if dry_run and not registered.metadata.supports_dry_run:
             return finish("error", ExitCode.INVALID_INPUT, {}, ["command does not support dry-run"])
 
-        context = CommandContext(environment, configuration, correlation)
+        context = CommandContext(environment, configuration, correlation, verbose, ask_become_pass)
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = executor.submit(registered.handler, context, payload, dry_run)
         try:
@@ -91,7 +93,7 @@ class CommandRunner:
         except concurrent.futures.TimeoutError:
             return finish("error", ExitCode.TIMEOUT, {}, ["command timed out"])
         except SafeCommandError as exc:
-            return finish("error", ExitCode.EXECUTION_FAILURE, {}, [str(exc)])
+            return finish("error", ExitCode.EXECUTION_FAILURE, exc.output, [str(exc)])
         except Exception:
             return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["command execution failed"])
         finally:
