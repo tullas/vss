@@ -27,25 +27,25 @@ fi
 case $action in
   init)
     mkdir -p "$state_dir"
-    "$iac_bin" -chdir="$root_dir" init
+    "$iac_bin" -chdir="$root_dir" init -input=false
     ;;
   validate)
-    "$iac_bin" -chdir="$root_dir" init -backend=false
+    "$iac_bin" -chdir="$root_dir" init -backend=false -input=false
     "$iac_bin" -chdir="$root_dir" validate
     ;;
   plan|plan-destroy)
     [[ -f $secrets_file ]] || { printf 'missing ignored secrets file: %s\n' "$secrets_file" >&2; exit 66; }
     mkdir -p "$state_dir"
-    "$iac_bin" -chdir="$root_dir" init
+    "$iac_bin" -chdir="$root_dir" init -input=false
     destroy_flag=()
     [[ $action == plan-destroy ]] && destroy_flag=(-destroy)
-    "$iac_bin" -chdir="$root_dir" plan -state="$state_file" -var-file="$secrets_file" "${destroy_flag[@]}"
+    "$iac_bin" -chdir="$root_dir" plan -input=false -state="$state_file" -var-file="$secrets_file" "${destroy_flag[@]}"
     ;;
   apply)
     [[ -f $secrets_file ]] || { printf 'missing ignored secrets file: %s\n' "$secrets_file" >&2; exit 66; }
     mkdir -p "$state_dir"
-    "$iac_bin" -chdir="$root_dir" init
-    "$iac_bin" -chdir="$root_dir" apply -state="$state_file" -var-file="$secrets_file" "${approval_flag[@]}"
+    "$iac_bin" -chdir="$root_dir" init -input=false
+    "$iac_bin" -chdir="$root_dir" apply -input=false -state="$state_file" -var-file="$secrets_file" "${approval_flag[@]}"
     "$iac_bin" -chdir="$root_dir" output -state="$state_file" -json platform_contract
     ;;
   status)
@@ -67,8 +67,8 @@ case $action in
     ;;
   destroy)
     [[ -f $secrets_file ]] || { printf 'missing ignored secrets file: %s\n' "$secrets_file" >&2; exit 66; }
-    "$iac_bin" -chdir="$root_dir" init
-    "$iac_bin" -chdir="$root_dir" destroy -state="$state_file" -var-file="$secrets_file" "${approval_flag[@]}"
+    "$iac_bin" -chdir="$root_dir" init -input=false
+    "$iac_bin" -chdir="$root_dir" destroy -input=false -state="$state_file" -var-file="$secrets_file" "${approval_flag[@]}"
     printf '{"destroyed":true}\n'
     ;;
 esac

@@ -101,10 +101,12 @@ def run_quiet(command: list[str], cwd: Path, timeout: float = 120.0) -> bool:
 
 
 _SECRET_PATTERN = re.compile(r"(?i)(password|secret|token|api[_-]?key|private[_-]?key)(\s*[:=]\s*)([^\s,}]+)")
+_ANSI_PATTERN = re.compile(r"(?:\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B\[[0-?]*[ -/]*[@-~])")
 
 
 def sanitize_text(value: str, limit: int = 4000) -> str:
-    redacted = _SECRET_PATTERN.sub(r"\1\2[REDACTED]", value)
+    without_ansi = _ANSI_PATTERN.sub("", value)
+    redacted = _SECRET_PATTERN.sub(r"\1\2[REDACTED]", without_ansi)
     return " ".join(redacted.split())[:limit]
 
 
