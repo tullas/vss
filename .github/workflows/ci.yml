@@ -103,3 +103,5 @@ jobs:
           name: bash-test-report
           path: bash-test-report.txt
           if-no-files-found: error
+      - name: Test phase 0 on clean Ubuntu 26.04
+        run: scripts/acceptance-ubuntu-26.04-image.sh
