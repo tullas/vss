@@ -6,13 +6,32 @@ if [[ ${1:-} == -c && ${2:-} == pass ]]; then
   [[ ! -e $venv_root/.python-fails ]]
   exit
 fi
+if [[ ${1:-} == -c && ${2:-} == *"print(f"* ]]; then
+  printf '%s\n' "${VSS_TEST_PYTHON_VERSION:?}"
+  exit 0
+fi
 if [[ ${1:-} == -c ]]; then
+  if [[ ${2:-} == *ansible.release* ]]; then
+    [[ -f $venv_root/.ansible-version ]] || exit 1
+    cat "$venv_root/.ansible-version"
+    exit 0
+  fi
   [[ ! -e $venv_root/.unsupported ]]
   exit
 fi
 if [[ ${1:-} == -m && ${2:-} == pip ]]; then
   [[ ! -e $venv_root/.pip-missing ]]
   if [[ ${3:-} == install ]]; then
+    case ${VSS_TEST_PYTHON_VERSION:?} in
+      3.11) selected_ansible_version=2.19.9 ;;
+      3.12|3.13|3.14) selected_ansible_version=2.21.2 ;;
+      *) exit 69 ;;
+    esac
+    installed_ansible_version=$(cat "$venv_root/.ansible-version" 2>/dev/null || true)
+    if [[ $installed_ansible_version != "$selected_ansible_version" ]]; then
+      printf 'ansible-core %s -> %s\n' "${installed_ansible_version:-not-installed}" "$selected_ansible_version" >>"${VSS_TEST_COMMAND_LOG:?}"
+      printf '%s\n' "$selected_ansible_version" >"$venv_root/.ansible-version"
+    fi
     for executable in pip vss ansible-playbook; do
       printf '#!/usr/bin/env bash\nexit 0\n' >"$venv_root/bin/$executable"
       chmod +x "$venv_root/bin/$executable"
