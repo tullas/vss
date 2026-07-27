@@ -76,14 +76,14 @@ jobs:
         image:
           - docker.io/library/ubuntu@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
           - docker.io/minio/minio@sha256:391d1d45fdbe79944cb6de9337b073864bb9ee38c4c24280bfb39572e925af08
-          - docker.io/aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Run digest-pinned Trivy image scan
+      - name: Install checksum-verified Trivy
+        run: scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"
+      - name: Run Trivy image scan
         run: >-
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
-          docker.io/aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
-          image --exit-code 1 --ignore-unfixed --severity HIGH,CRITICAL '${{ matrix.image }}'
+          "$RUNNER_TEMP/vss-trivy/trivy" image --exit-code 1 --ignore-unfixed
+          --severity HIGH,CRITICAL '${{ matrix.image }}'
 
   iac-scan:
     name: IaC and Dockerfile scan
@@ -91,11 +91,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Run digest-pinned Trivy configuration scan
+      - name: Install checksum-verified Trivy
+        run: scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"
+      - name: Run Trivy configuration scan
         run: >-
-          docker run --rm -v "$PWD:/work" -w /work
-          docker.io/aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
-          config --exit-code 1 --severity HIGH,CRITICAL --skip-dirs .venv --skip-dirs .terraform /work
+          "$RUNNER_TEMP/vss-trivy/trivy" config --exit-code 1 --severity HIGH,CRITICAL
+          --skip-dirs .venv --skip-dirs .terraform .
 
   static-analysis:
     name: CodeQL static analysis
