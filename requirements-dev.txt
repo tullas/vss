@@ -1,4 +1,4 @@
 -r requirements.txt
-ansible-core==2.21.2
+ansible-core==2.19.11
 ansible-lint==26.6.0
-pip-audit==2.9.0
+pip-audit==2.10.1
