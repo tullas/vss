@@ -174,6 +174,16 @@ class SupplyChainPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(SC.PolicyFailure, "prohibited"):
                 SC.validate_licenses(root)
 
+    def test_unreviewed_direct_dependency_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_json(root / "security/components.yml", {"components": [component("safe", "safe", "pypi", "1")]})
+            for manifest in ("requirements.txt", "requirements-bootstrap.txt", "requirements-dev.txt"):
+                (root / manifest).write_text("safe==1\n" if manifest == "requirements.txt" else "", encoding="utf-8")
+            (root / "requirements.txt").write_text("safe==1\nunreviewed-package==2.0\n", encoding="utf-8")
+            with self.assertRaisesRegex(SC.PolicyFailure, "unreviewed direct dependency: unreviewed-package"):
+                SC.validate_direct_dependencies(root)
+
     def test_prohibited_component_without_exception_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
