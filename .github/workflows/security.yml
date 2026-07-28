@@ -1,0 +1,173 @@
+name: Security Supply Chain
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: Supply-chain policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/runtime.lock.txt
+      - run: python3 scripts/security/validate-supply-chain.py
+      - run: python -m unittest discover -s tests/security -p 'test_*.py'
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+        with:
+          fail-on-severity: high
+          deny-licenses: AGPL-3.0, SSPL-1.0, BUSL-1.1
+
+  python-vulnerability:
+    name: Python vulnerability scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/development.lock.txt
+      - run: pip-audit --require-hashes -r requirements/locks/runtime.lock.txt
+      - run: python3 scripts/security/validate-python-licenses.py
+
+  bootstrap-python311-license:
+    name: Bootstrap Python 3.11 license scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/bootstrap-py311.lock.txt
+      - run: python3 scripts/security/validate-python-licenses.py --lock requirements/locks/bootstrap-py311.lock.txt
+
+  container-scan:
+    name: Container image scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - docker.io/library/ubuntu@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
+          - docker.io/versity/versitygw@sha256:ef1c6bf0180abd9583da8a0466b3cba1cfc1ed368afebdf7280c0774081d2c82
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install checksum-verified Trivy
+        run: scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"
+      - name: Run Trivy image scan
+        run: >-
+          "$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln
+          --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json"
+          '${{ matrix.image }}'
+      - name: Enforce container vulnerability policy
+        run: >-
+          python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}'
+          --report "$RUNNER_TEMP/trivy-report.json"
+
+  iac-scan:
+    name: IaC and Dockerfile scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install checksum-verified Trivy
+        run: scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"
+      - name: Run Trivy configuration scan
+        run: >-
+          "$RUNNER_TEMP/vss-trivy/trivy" config --exit-code 1 --severity HIGH,CRITICAL
+          --skip-dirs .venv --skip-dirs .terraform .
+
+  static-analysis:
+    name: CodeQL static analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: github/codeql-action/init@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
+        with:
+          languages: python
+      - uses: github/codeql-action/analyze@3b0bd1d116c0bde30213346b22d4f634d96a2fb0 # v3
+
+  scorecard:
+    name: OpenSSF Scorecard signal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: false
+
+  sbom-provenance:
+    name: SBOM and Level 1-compatible provenance
+    needs: [policy, python-vulnerability, bootstrap-python311-license, container-scan, iac-scan, static-analysis]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install schema validator from controlled lock
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/development.lock.txt
+      - name: Build release candidate evidence
+        run: scripts/security/build-release-candidate.sh dist/security-evidence
+      - name: Build SBOM dependency diff
+        shell: bash
+        run: |
+          cp dist/security-evidence/vss.cdx.json /tmp/base.cdx.json
+          if [[ '${{ github.event_name }}' == pull_request ]]; then
+            git worktree add --detach /tmp/vss-base '${{ github.event.pull_request.base.sha }}'
+            if [[ -f /tmp/vss-base/scripts/security/generate-sbom.py ]]; then
+              python3 /tmp/vss-base/scripts/security/generate-sbom.py --root /tmp/vss-base --output /tmp/base.cdx.json
+            else
+              printf '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[]}\n' >/tmp/base.cdx.json
+            fi
+          fi
+          python3 scripts/security/sbom-diff.py /tmp/base.cdx.json dist/security-evidence/vss.cdx.json --output dist/security-evidence/vss-sbom-diff.json
+          python3 scripts/security/validate-artifacts.py dist/security-evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: security-release-evidence-${{ github.sha }}
+          path: dist/security-evidence/
+          if-no-files-found: error
+          retention-days: 30

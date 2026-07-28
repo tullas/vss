@@ -36,7 +36,7 @@ output "object_storage_endpoint" {
 }
 
 output "object_storage_health_endpoint" {
-  description = "MinIO liveness endpoint."
+  description = "Object-storage liveness endpoint."
   value       = module.platform.object_storage_health_endpoint
 }
 
@@ -51,6 +51,6 @@ output "volume_id" {
 }
 
 output "container_id" {
-  description = "MinIO container identifier."
+  description = "Object-storage container identifier."
   value       = module.platform.object_storage_container_id
 }

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema_version", "components"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "ecosystem", "purpose", "version", "source", "license", "owner", "maintenance_status", "upstream_security_policy", "provenance", "scorecard", "transitive_dependency_considerations", "network_privilege_behavior", "replaceability", "eol_support", "upgrade_rollback", "approval_status", "approver", "review_date"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$"},
+          "approval_status": {"enum": ["approved", "review-required", "prohibited"]},
+          "review_date": {"type": "string", "format": "date"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

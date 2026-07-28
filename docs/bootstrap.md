@@ -4,7 +4,7 @@ The bootstrap commands prepare an Ubuntu or Ubuntu-under-WSL workstation for
 the ADR-0009 local provider. Git and Python 3.11 through 3.14 are trusted
 prerequisites. The bootstrap installs a compatible Ansible version, then
 Ansible installs Docker Engine and OpenTofu only when needed;
-OpenTofu remains responsible for creating the local MinIO platform.
+OpenTofu remains responsible for creating the local S3-compatible platform.
 
 ## Commands
 

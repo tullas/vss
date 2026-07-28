@@ -49,6 +49,7 @@
     name:
       - ca-certificates
       - curl
+      - gnupg
       - python3-debian
     state: present
     update_cache: true
@@ -84,6 +85,19 @@
     enabled: true
   when: not local_toolchain_docker_available
   notify: Refresh APT cache
+
+- name: Inspect Docker repository key fingerprint
+  ansible.builtin.command: gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc
+  register: local_toolchain_docker_key
+  changed_when: false
+  when: not local_toolchain_docker_available
+
+- name: Require the approved Docker repository key
+  ansible.builtin.assert:
+    that:
+      - local_toolchain_docker_key_fingerprint in local_toolchain_docker_key.stdout
+    fail_msg: Docker repository signing key fingerprint is not approved.
+  when: not local_toolchain_docker_available
 
 - name: Install Docker Engine packages
   ansible.builtin.apt:

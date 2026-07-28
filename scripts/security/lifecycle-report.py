@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import datetime as dt
+import json
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[2]
+today = dt.datetime.now(dt.timezone.utc).date()
+components = json.loads((root / "security/components.yml").read_text(encoding="utf-8"))["components"]
+exceptions = json.loads((root / "security/exceptions.yml").read_text(encoding="utf-8"))["exceptions"]
+stale = []
+for item in components:
+    reviewed = dt.date.fromisoformat(item["review_date"])
+    if (today - reviewed).days > 180:
+        stale.append({"component": item["id"], "days_since_review": (today - reviewed).days})
+expiring = []
+expired = []
+for item in exceptions:
+    expiry = dt.date.fromisoformat(item["expiry_date"])
+    if (expiry - today).days <= 30:
+        expiring.append({"exception": item["id"], "days_to_expiry": (expiry - today).days})
+    if expiry < today:
+        expired.append({"exception": item["id"], "expired_on": expiry.isoformat()})
+eol = [{"component": item["id"], "support_information": item["eol_support"]} for item in components]
+print(json.dumps({"schema_version": "1.0", "generated_date": today.isoformat(), "stale_component_reviews": stale, "component_eol_support": eol, "expiring_exceptions": expiring, "expired_exceptions": expired, "external_reports": ["pip-audit results", "pip outdated results", "GitHub security workflow failures", "dependency/security PR age report"]}, indent=2, sort_keys=True))
+if expired:
+    raise SystemExit("expired security exceptions found")

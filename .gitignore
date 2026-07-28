@@ -5,6 +5,8 @@ config/environments/*.env
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
+dist/
 
 # Ansible inventories and vaults are environment-specific and may contain secrets.
 ansible/inventories/*/hosts.yml

@@ -19,7 +19,7 @@ output "object_storage_health_endpoint" {
 }
 
 output "object_storage_container_id" {
-  description = "MinIO container identifier."
+  description = "Object-storage container identifier."
   value       = module.object_storage.container_id
 }
 

@@ -4,13 +4,13 @@ output "endpoint" {
 }
 
 output "health_endpoint" {
-  description = "MinIO liveness endpoint."
-  value       = "http://127.0.0.1:${var.api_port}/minio/health/live"
+  description = "Object-storage liveness endpoint."
+  value       = "http://127.0.0.1:${var.api_port}/health"
 }
 
 output "container_id" {
-  description = "MinIO Docker container identifier."
-  value       = docker_container.minio.id
+  description = "Object-storage Docker container identifier."
+  value       = docker_container.object_storage.id
 }
 
 output "volume_id" {

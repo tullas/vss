@@ -29,7 +29,7 @@ class IaCContractTests(unittest.TestCase):
             "services": {
                 "object_storage": {
                     "endpoint": "http://127.0.0.1:9000",
-                    "health_endpoint": "http://127.0.0.1:9000/minio/health/live",
+                    "health_endpoint": "http://127.0.0.1:9000/health",
                 }
             },
             "resource_ids": {"network": "network-id", "volume": "volume-id", "container": "container-id"},

@@ -1,0 +1,6 @@
+[allowlist]
+description = "Public APT signing-key fingerprints are identifiers, not credentials"
+regexTarget = "line"
+regexes = [
+  '''local_toolchain_(?:docker|opentofu|opentofu_repo)_key_fingerprint:\s*[0-9A-F]{40}''',
+]

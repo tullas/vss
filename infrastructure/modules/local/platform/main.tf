@@ -12,11 +12,10 @@ resource "docker_network" "platform" {
 module "object_storage" {
   source = "../object_storage"
 
-  name_prefix   = local.name_prefix
-  network_name  = docker_network.platform.name
-  volume_name   = local.volume
-  root_user     = var.minio_root_user
-  root_password = var.minio_root_password
-  api_port      = var.api_port
-  console_port  = var.console_port
+  name_prefix  = local.name_prefix
+  network_name = docker_network.platform.name
+  volume_name  = local.volume
+  access_key   = var.minio_root_user
+  secret_key   = var.minio_root_password
+  api_port     = var.api_port
 }

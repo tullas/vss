@@ -15,13 +15,13 @@ variable "environment" {
 }
 
 variable "minio_root_user" {
-  description = "MinIO root username, supplied through an ignored local tfvars file."
+  description = "S3 root access key, supplied through an ignored local tfvars file. The legacy variable name is retained for compatibility."
   type        = string
   sensitive   = true
 }
 
 variable "minio_root_password" {
-  description = "MinIO root password, supplied through an ignored local tfvars file."
+  description = "S3 root secret key, supplied through an ignored local tfvars file. The legacy variable name is retained for compatibility."
   type        = string
   sensitive   = true
 }
@@ -30,10 +30,4 @@ variable "api_port" {
   description = "Host port for the S3-compatible API."
   type        = number
   default     = 9000
-}
-
-variable "console_port" {
-  description = "Host port for the MinIO console."
-  type        = number
-  default     = 9001
 }
