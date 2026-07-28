@@ -9,13 +9,13 @@ variable "environment" {
 }
 
 variable "minio_root_user" {
-  description = "MinIO root username."
+  description = "S3 root access key. The legacy variable name is retained for configuration compatibility."
   type        = string
   sensitive   = true
 }
 
 variable "minio_root_password" {
-  description = "MinIO root password."
+  description = "S3 root secret key. The legacy variable name is retained for configuration compatibility."
   type        = string
   sensitive   = true
 }
@@ -24,10 +24,4 @@ variable "api_port" {
   description = "Host port for the S3-compatible API."
   type        = number
   default     = 9000
-}
-
-variable "console_port" {
-  description = "Host port for the MinIO console."
-  type        = number
-  default     = 9001
 }

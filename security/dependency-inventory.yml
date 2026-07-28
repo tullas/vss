@@ -8,7 +8,7 @@
     "transitives": "fully enumerated in requirements/locks/*.lock.txt"
   },
   "github_actions": ["actions/checkout", "actions/setup-python", "actions/upload-artifact", "gitleaks/gitleaks-action", "opentofu/setup-opentofu", "actions/dependency-review-action", "github/codeql-action", "ossf/scorecard-action"],
-  "containers": ["ubuntu acceptance image", "MinIO runtime image"],
+  "containers": ["ubuntu acceptance image", "VersityGW local-development runtime image"],
   "opentofu": ["OpenTofu CLI", "registry.opentofu.org/kreuzwerker/docker"],
   "apt_repositories": ["Ubuntu archive", "Docker official Ubuntu", "OpenTofu packages"],
   "host_packages": ["pythonX.Y-venv", "ca-certificates", "curl", "python3-debian", "docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin", "apt-transport-https", "gnupg", "tofu", "wget", "unzip", "tar", "git", "vim", "util-linux"],

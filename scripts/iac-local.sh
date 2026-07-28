@@ -56,12 +56,12 @@ case $action in
     ;;
   health)
     command -v "$docker_bin" >/dev/null 2>&1 || { printf 'Docker is unavailable; health check skipped\n' >&2; exit 69; }
-    container_name='vss-development-minio'
+    container_name='vss-development-object-storage'
     status=$("$docker_bin" inspect --format '{{.State.Health.Status}}' "$container_name" 2>/dev/null || true)
     if [[ $status == healthy ]]; then
-      printf '{"health":{"service":"minio","status":"healthy"}}\n'
+      printf '{"health":{"service":"object_storage","status":"healthy"}}\n'
     else
-      printf 'MinIO health: %s\n' "${status:-unavailable}" >&2
+      printf 'Object-storage health: %s\n' "${status:-unavailable}" >&2
       exit 1
     fi
     ;;

@@ -13,20 +13,20 @@ variable "volume_name" {
   type        = string
 }
 
-variable "minio_image" {
-  description = "Pinned MinIO image reference."
+variable "object_storage_image" {
+  description = "Pinned VersityGW image reference."
   type        = string
-  default     = "docker.io/minio/minio@sha256:391d1d45fdbe79944cb6de9337b073864bb9ee38c4c24280bfb39572e925af08"
+  default     = "docker.io/versity/versitygw@sha256:ef1c6bf0180abd9583da8a0466b3cba1cfc1ed368afebdf7280c0774081d2c82"
 }
 
-variable "root_user" {
-  description = "MinIO root username, supplied at runtime."
+variable "access_key" {
+  description = "S3 root access key, supplied at runtime."
   type        = string
   sensitive   = true
 }
 
-variable "root_password" {
-  description = "MinIO root password, supplied at runtime."
+variable "secret_key" {
+  description = "S3 root secret key, supplied at runtime."
   type        = string
   sensitive   = true
 }
@@ -35,10 +35,4 @@ variable "api_port" {
   description = "Host port for the S3-compatible API."
   type        = number
   default     = 9000
-}
-
-variable "console_port" {
-  description = "Host port for the MinIO console."
-  type        = number
-  default     = 9001
 }

@@ -97,6 +97,19 @@ class SupplyChainPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "digest evidence is missing"):
                 CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
 
+    def test_platform_manifest_and_config_digest_binding_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image, report = self._container_scan_fixture(root)
+            registry = json.loads((root / "security/components.yml").read_text(encoding="utf-8"))
+            registry["components"][0]["scan_image_id"] = "sha256:" + "b" * 64
+            write_json(root / "security/components.yml", registry)
+            value = json.loads(report.read_text(encoding="utf-8"))
+            value["Metadata"]["ImageID"] = "sha256:" + "b" * 64
+            write_json(report, value)
+            result = CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+            self.assertTrue(result["exception"])
+
     def test_expired_container_exception_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -129,7 +142,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
             write_json(root / "security/components.yml", {"components": []})
             path = root / "infrastructure/modules/local/object_storage/variables.tf"
             path.parent.mkdir(parents=True)
-            path.write_text('variable "minio_image" { default = "minio/minio:latest" }', encoding="utf-8")
+            path.write_text('variable "object_storage_image" { default = "object-storage:latest" }', encoding="utf-8")
             script = root / "scripts/acceptance-ubuntu-26.04-image.sh"
             script.parent.mkdir(parents=True)
             script.write_text("readonly image='ubuntu:26.04'\n", encoding="utf-8")
@@ -144,7 +157,7 @@ class SupplyChainPolicyTests(unittest.TestCase):
             write_json(root / "security/components.yml", {"components": [component("accepted", "accepted", "oci", "digest", source=accepted)]})
             path = root / "infrastructure/modules/local/object_storage/variables.tf"
             path.parent.mkdir(parents=True)
-            path.write_text(f'variable "minio_image" {{ default = "{unreviewed}" }}', encoding="utf-8")
+            path.write_text(f'variable "object_storage_image" {{ default = "{unreviewed}" }}', encoding="utf-8")
             script = root / "scripts/acceptance-ubuntu-26.04-image.sh"
             script.parent.mkdir(parents=True)
             script.write_text(f"readonly image='{accepted}'\ndocker run --rm --mount \"type=bind,source=$project_root,target=/source,readonly\" \"$image\" bash -ceu true\n", encoding="utf-8")

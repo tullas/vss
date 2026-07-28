@@ -6,5 +6,4 @@ module "platform" {
   minio_root_user     = var.minio_root_user
   minio_root_password = var.minio_root_password
   api_port            = var.api_port
-  console_port        = var.console_port
 }

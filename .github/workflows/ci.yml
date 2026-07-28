@@ -71,6 +71,8 @@ jobs:
             fi
             tofu -chdir="$environment" validate
           done < <(find infrastructure/environments -type f -name '*.tf' -printf '%h\n' | sort -u)
+      - name: Test hardened object-storage lifecycle and S3 contract
+        run: scripts/acceptance-object-storage.sh
 
   test:
     name: Test

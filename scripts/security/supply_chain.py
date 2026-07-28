@@ -137,7 +137,7 @@ def validate_actions(root: Path) -> None:
 
 def validate_images(root: Path) -> None:
     variables = (root / "infrastructure/modules/local/object_storage/variables.tf").read_text(encoding="utf-8")
-    production_match = re.search(r'variable "minio_image".*?default\s*=\s*"([^"]+)"', variables, re.DOTALL)
+    production_match = re.search(r'variable "object_storage_image".*?default\s*=\s*"([^"]+)"', variables, re.DOTALL)
     if not production_match or not DIGEST_RE.fullmatch(production_match.group(1)):
         raise PolicyFailure("mutable production image reference")
     acceptance = (root / "scripts/acceptance-ubuntu-26.04-image.sh").read_text(encoding="utf-8")

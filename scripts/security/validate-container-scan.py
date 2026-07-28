@@ -41,7 +41,8 @@ def validate(root: Path, image: str, report_path: Path, today: dt.date | None = 
     if component is None:
         raise ValueError("container image is not registered")
     metadata = report.get("Metadata")
-    if not isinstance(metadata, dict) or metadata.get("ImageID") != component.get("version"):
+    expected_image_id = component.get("scan_image_id", component.get("version"))
+    if not isinstance(metadata, dict) or metadata.get("ImageID") != expected_image_id:
         raise ValueError("container scan digest evidence is missing")
     repo_digests = metadata.get("RepoDigests")
     if not isinstance(repo_digests, list) or not any(isinstance(item, str) and item.endswith("@" + str(component.get("version"))) for item in repo_digests):
