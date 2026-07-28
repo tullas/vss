@@ -20,7 +20,7 @@ export VSS_CONTRACT_SECRET_KEY="$(openssl rand -hex 24)"
 printf 'minio_root_user = "%s"\nminio_root_password = "%s"\n' \
   "$VSS_CONTRACT_ACCESS_KEY" "$VSS_CONTRACT_SECRET_KEY" >"$vars_file"
 
-tofu -chdir="$environment_root" init -backend=false -input=false -lockfile=readonly >/dev/null
+tofu -chdir="$environment_root" init -backend=false -input=false -lockfile=readonly -reconfigure >/dev/null
 tofu -chdir="$environment_root" apply -auto-approve -input=false \
   -state="$state_file" -var-file="$vars_file" >/dev/null
 

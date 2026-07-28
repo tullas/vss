@@ -44,7 +44,9 @@ def component(component_id: str, name: str, ecosystem: str, version: str, licens
 class SupplyChainPolicyTests(unittest.TestCase):
     def _container_scan_fixture(self, root: Path) -> tuple[str, Path]:
         image = "docker.io/library/ubuntu@sha256:" + "a" * 64
-        write_json(root / "security/components.yml", {"components": [component("ubuntu", "ubuntu", "oci", "sha256:" + "a" * 64, source=image)]})
+        fixture_component = component("ubuntu", "ubuntu", "oci", "sha256:" + "a" * 64, source=image)
+        fixture_component["scan_image_id"] = "sha256:" + "a" * 64
+        write_json(root / "security/components.yml", {"components": [fixture_component]})
         finding = {"VulnerabilityID": "CVE-2026-0001", "PkgName": "stdlib", "Severity": "HIGH"}
         report = root / "report.json"
         write_json(report, {
