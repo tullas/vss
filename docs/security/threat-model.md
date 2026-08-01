@@ -43,6 +43,16 @@ operators/agents.
   digest revalidation before import, deny-by-default runtime policy, input
   schemas, append-only structured audit records, and adversarial tests. Local
   audit files are not tamper-proof and remain a residual risk.
+- Repository-controlled workflow YAML to the M2.2 sequential interpreter and
+  operation adapters. Abuse: unsafe YAML construction, path or symlink escape,
+  expression/shell injection, arbitrary operation selection, recursive or
+  excessive execution, secret-bearing audit data, or bypass of per-operation
+  controls. Mitigation: safe YAML loading, a strict versioned schema, fixed
+  built-in discovery root, canonical containment and digest revalidation, a
+  two-operation code allowlist, bounded step counts and timeouts, no
+  interpolation/includes/conditions, stop-on-failure semantics, M2.1 policy
+  enforcement for capabilities, existing command validation for the legacy
+  adapter, and structured input-free audit events.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,

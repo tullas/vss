@@ -1,0 +1,19 @@
+schema_version: "1"
+name: runtime-smoke
+version: 1.0.0
+description: Exercise the runtime kernel and existing bootstrap readiness adapter.
+runtime_api_version: "1"
+execution_policy:
+  mode: sequential
+  stop_on_failure: true
+steps:
+  - id: runtime-info
+    operation: system.info
+    input: {}
+    timeout_seconds: 10
+    continue_on_error: false
+  - id: bootstrap-readiness
+    operation: bootstrap.check
+    input: {}
+    timeout_seconds: 30
+    continue_on_error: false
