@@ -21,7 +21,7 @@ class SDKValidationError(ValueError):
     pass
 
 
-def _validate_json(value: Any, *, maximum_bytes: int) -> None:
+def validate_json_value(value: Any, *, maximum_bytes: int) -> None:
     nodes = 0
 
     def visit(item: Any, depth: int) -> None:
@@ -74,7 +74,7 @@ def _validate_schema(value: Any, schema: dict[str, Any], kind: str) -> None:
 
 
 def validate_input(value: Any, schema: dict[str, Any]) -> dict[str, Any]:
-    _validate_json(value, maximum_bytes=MAX_INPUT_BYTES)
+    validate_json_value(value, maximum_bytes=MAX_INPUT_BYTES)
     _validate_schema(value, schema, "input")
     if not isinstance(value, dict):
         raise SDKValidationError("capability input must be an object")
@@ -82,7 +82,7 @@ def validate_input(value: Any, schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_output(value: Any, schema: dict[str, Any]) -> dict[str, Any]:
-    _validate_json(value, maximum_bytes=MAX_OUTPUT_BYTES)
+    validate_json_value(value, maximum_bytes=MAX_OUTPUT_BYTES)
     _validate_schema(value, schema, "output")
     if not isinstance(value, dict):
         raise SDKValidationError("capability output must be an object")

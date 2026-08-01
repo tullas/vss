@@ -8,7 +8,7 @@ from typing import Any, Mapping
 def _freeze(value: Any) -> Any:
     if isinstance(value, dict):
         return MappingProxyType({key: _freeze(item) for key, item in value.items()})
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return tuple(_freeze(item) for item in value)
     return value
 
@@ -27,3 +27,7 @@ class CapabilityExecutionContext:
     command_identity: str
     authorized_permissions: tuple[str, ...]
     safe_configuration: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "authorized_permissions", tuple(self.authorized_permissions))
+        object.__setattr__(self, "safe_configuration", _freeze(dict(self.safe_configuration)))

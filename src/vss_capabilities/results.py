@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from vss_commands.exit_codes import ExitCode
+from .constants import MAX_OUTPUT_BYTES
+from .validation import validate_json_value
 
 
 def _safe_message(message: str) -> str:
@@ -31,6 +33,15 @@ class SafeCapabilityError:
 class CapabilityResult:
     output: dict[str, Any]
     error: SafeCapabilityError | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.output, dict):
+            raise TypeError("capability result output must be an object")
+        validate_json_value(self.output, maximum_bytes=MAX_OUTPUT_BYTES)
+        if self.error is not None and not isinstance(self.error, SafeCapabilityError):
+            raise TypeError("capability result error must be a SafeCapabilityError")
+        if self.error is not None and self.output:
+            raise ValueError("failed capability results cannot include output")
 
     @classmethod
     def success(cls, output: dict[str, Any]) -> "CapabilityResult":

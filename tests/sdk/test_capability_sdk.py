@@ -122,6 +122,27 @@ class CapabilitySDKTests(unittest.TestCase):
             self.assertEqual(code, ExitCode.SUCCESS)
             self.assertEqual(response["output"], {"value": "safe"})
 
+    def test_context_defensively_freezes_constructor_inputs(self) -> None:
+        from vss_capabilities import CapabilityExecutionContext
+
+        configuration = {"nested": {"items": ["one"]}}
+        permissions = ["network"]
+        context = CapabilityExecutionContext(
+            environment="development",
+            correlation_id="correlation",
+            execution_id="execution",
+            capability_identity="runtime.echo",
+            command_identity="runtime.echo",
+            authorized_permissions=permissions,
+            safe_configuration=configuration,
+        )
+        configuration["nested"]["items"].append("two")
+        permissions.append("secrets")
+        self.assertEqual(context.authorized_permissions, ("network",))
+        self.assertEqual(context.safe_configuration["nested"]["items"], ("one",))
+        with self.assertRaises(TypeError):
+            context.safe_configuration["nested"]["new"] = "value"
+
     def test_arbitrary_result_and_raw_exception_are_normalized(self) -> None:
         handlers = (
             "def execute(context, input_data, dry_run):\n    return object()\nexecute.sdk_api_version = '1'\nexecute.capability_identity = 'runtime.echo'\nexecute.command_identity = 'runtime.echo'\n",
@@ -140,6 +161,14 @@ class CapabilitySDKTests(unittest.TestCase):
                 self.assertEqual(response["output"], {})
                 self.assertNotIn("must-not-leak", json.dumps(response))
                 self.assertNotIn("must-not-leak", json.dumps(harness.audit_records()))
+
+    def test_capability_result_rejects_unsafe_values_at_construction(self) -> None:
+        with self.assertRaises((TypeError, ValueError)):
+            CapabilityResult.success({"value": object()})
+        with self.assertRaises(ValueError):
+            CapabilityResult.success({"value": "x" * 4097})
+        with self.assertRaises(ValueError):
+            CapabilityResult(output={"value": "partial"}, error=SafeCapabilityError("failed"))
 
     def test_typed_safe_failure_uses_named_exit_code(self) -> None:
         error = SafeCapabilityError("request was safely rejected", ExitCode.INVALID_INPUT)

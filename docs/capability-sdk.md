@@ -23,6 +23,8 @@ Controller owns status, timestamps, correlation, exit-code normalization, and
 audit.
 
 Raw exceptions become the fixed `capability execution failed` diagnostic.
+`CapabilityResult` rejects unsafe output at construction, and the Runtime
+Controller independently validates it again against the command output schema.
 Arbitrary Python objects, non-finite numbers, oversized strings or documents,
 excessive nesting, excessive item counts, and schema-invalid output fail closed.
 Audit records never contain capability input or output.
