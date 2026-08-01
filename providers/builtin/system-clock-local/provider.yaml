@@ -1,0 +1,10 @@
+schema_version: "1"
+provider_api_version: "1"
+provider_type: clock
+name: local
+version: 1.0.0
+identity: system.clock.local
+implementation: implementation.py:create_provider
+implementation_identity: vss.local-clock
+lifecycle_status: active
+source: trusted_builtin

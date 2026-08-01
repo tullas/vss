@@ -14,6 +14,7 @@ class CapabilityManifest:
     description: str
     runtime_api_version: str
     sdk_api_version: str | None
+    required_providers: tuple[dict[str, str], ...]
     entry_point: str
     commands: tuple[dict[str, Any], ...]
     permissions: tuple[str, ...]

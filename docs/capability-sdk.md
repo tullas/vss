@@ -38,11 +38,18 @@ Audit records never contain capability input or output.
 - capability and command identities;
 - the immutable tuple of authorized permissions; and
 - an immutable safe-configuration view.
+- a narrow, non-enumerable provider accessor containing only independently
+  authorized provider contracts.
 
 M2.3 supplies an empty configuration view because no capability-specific safe
 configuration contract has been admitted. The context does not expose
 `os.environ`, raw secrets, provider credentials, filesystem handles, the Docker
 socket, repository writes, subprocess launchers, or audit sinks.
+
+M2.4 adds `context.providers.get_clock()` for capabilities whose manifest
+declares the exact clock requirement and whose execution policy independently
+approves it. The accessor does not expose the provider registry, selection,
+configuration, implementation paths, credentials, or unrelated providers.
 
 Python cannot sandbox trusted code running in the same process. A malicious
 built-in can import Python modules and circumvent object-level conventions.

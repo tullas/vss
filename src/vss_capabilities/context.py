@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
+
+from vss_providers.contracts import ClockProvider
+
+
+class ProviderAccessor(Protocol):
+    def get_clock(self) -> ClockProvider: ...
 
 
 def _freeze(value: Any) -> Any:
@@ -27,6 +33,7 @@ class CapabilityExecutionContext:
     command_identity: str
     authorized_permissions: tuple[str, ...]
     safe_configuration: Mapping[str, Any]
+    providers: ProviderAccessor | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "authorized_permissions", tuple(self.authorized_permissions))

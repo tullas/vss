@@ -79,6 +79,17 @@ vss run runtime.echo --environment development --input input.json
 
 See `docs/capability-sdk.md` for the supported built-in authoring contract.
 
+M2.4 adds the provider-neutral `runtime.time` capability without changing the
+existing envelope or command engine:
+
+```bash
+vss run runtime.time --environment development
+```
+
+Its provider requirement is resolved statically, independently authorized, and
+exposed only through the narrow SDK context accessor described in
+`docs/provider-abstraction.md`.
+
 ## Deferred functionality
 
 The runtime does not include autonomous or multi-agent planning, provider

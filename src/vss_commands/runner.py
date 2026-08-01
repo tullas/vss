@@ -16,7 +16,7 @@ from .exit_codes import ExitCode
 from .models import CommandContext, SafeCommandError
 from .registry import get_command
 
-RUNTIME_CAPABILITY_COMMANDS = frozenset({"system.info", "runtime.echo"})
+RUNTIME_CAPABILITY_COMMANDS = frozenset({"system.info", "runtime.echo", "runtime.time"})
 
 
 def utc_now() -> str:

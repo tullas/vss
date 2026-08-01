@@ -54,6 +54,16 @@ def load_manifest(path: Path, schema_path: Path) -> tuple[CapabilityManifest, st
     command_names = [command["name"] for command in value["commands"]]
     if len(command_names) != len(set(command_names)):
         raise InvalidManifest("capability manifest contains duplicate commands")
+    required_providers = value.get("required_providers", [])
+    provider_identities = [requirement["identity"] for requirement in required_providers]
+    provider_types = [requirement["type"] for requirement in required_providers]
+    if len(provider_identities) != len(set(provider_identities)) or len(provider_types) != len(set(provider_types)):
+        raise InvalidManifest("capability manifest contains duplicate provider requirements")
+    requests_provider_access = "provider_access" in value["permissions"]
+    if required_providers and not requests_provider_access:
+        raise InvalidManifest("required providers need the provider_access permission")
+    if requests_provider_access and not required_providers:
+        raise InvalidManifest("provider_access permission requires a scoped provider requirement")
     manifest = CapabilityManifest(
         schema_version=value["schema_version"],
         namespace=value["namespace"],
@@ -62,6 +72,7 @@ def load_manifest(path: Path, schema_path: Path) -> tuple[CapabilityManifest, st
         description=value["description"],
         runtime_api_version=value["runtime_api_version"],
         sdk_api_version=sdk_api_version,
+        required_providers=tuple(required_providers),
         entry_point=value["entry_point"],
         commands=tuple(value["commands"]),
         permissions=tuple(value["permissions"]),

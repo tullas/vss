@@ -19,6 +19,13 @@ from vss_capabilities import (
     validate_output,
 )
 from vss_commands.exit_codes import ExitCode
+from vss_providers import (
+    LOCAL_CLOCK_IDENTITY,
+    ProviderAccess,
+    ProviderFailure,
+    ProviderRegistry,
+    ProviderSelector,
+)
 from .audit import AuditLogger
 from .errors import (
     CapabilityExecutionFailure,
@@ -47,12 +54,20 @@ class RuntimeController:
         root: Path | None = None,
         policy: RuntimePolicy | None = None,
         audit_logger: AuditLogger | None = None,
+        provider_registry: ProviderRegistry | None = None,
     ) -> None:
         self.root = (root or repository_root()).resolve()
         builtins_root = self.root / "capabilities"
         self.registry = CapabilityRegistry(builtins_root, self.root / "schemas/capability-manifest-v1.schema.json")
         self.loader = CapabilityLoader(builtins_root)
-        self.policy = policy or RuntimePolicy()
+        self.policy = policy or RuntimePolicy(
+            allowed_builtin_permissions=("provider_access",),
+            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY,),
+        )
+        self.provider_registry = provider_registry or ProviderRegistry(
+            self.root / "providers/builtin", self.root / "schemas/provider-v1.schema.json"
+        )
+        self.provider_selector = ProviderSelector(self.provider_registry)
         self.audit = audit_logger or AuditLogger(self.root / ".local/runtime/audit", trusted_root=self.root)
 
     def _source_commit(self) -> str | None:
@@ -84,6 +99,7 @@ class RuntimeController:
         authorization = "not_evaluated"
         manifest_digest: str | None = None
         source_commit = self._source_commit()
+        provider_audit: list[dict[str, Any]] = []
         output: dict[str, Any] = {}
         errors: list[str] = []
         status = "error"
@@ -103,9 +119,32 @@ class RuntimeController:
                 raise InvalidCapabilityInput(f"invalid input: {validation_errors[0].message}")
             if dry_run and not command_record["supports_dry_run"]:
                 raise InvalidCapabilityInput("command does not support dry-run")
+            registrations = []
+            for requirement in capability.manifest.required_providers:
+                provider_record = {
+                    "type": requirement["type"],
+                    "identity": requirement["identity"],
+                    "version": None,
+                    "authorization": "not_evaluated",
+                }
+                provider_audit.append(provider_record)
+                registration = self.provider_selector.registration(requirement)
+                provider_record["version"] = registration.metadata.version
+                registrations.append(registration)
             permissions = capability.manifest.permissions
             authorized = self.policy.authorize(permissions)
+            self.policy.authorize_providers(
+                requirement["identity"] for requirement in capability.manifest.required_providers
+            )
+            for provider_record in provider_audit:
+                provider_record["authorization"] = "approved"
             authorization = "approved"
+            provider_access = ProviderAccess()
+            for registration in registrations:
+                if registration.metadata.provider_type == "clock":
+                    provider_access = ProviderAccess(
+                        clock=self.provider_registry.initialize(registration),
+                    )
             if capability.manifest.sdk_api_version is not None:
                 try:
                     validate_input(input_data, command_record["input_schema"])
@@ -121,6 +160,7 @@ class RuntimeController:
                     # M2.3 exposes no configuration keys until an explicit safe
                     # configuration contract is admitted for a capability.
                     safe_configuration=freeze_configuration({}),
+                    providers=provider_access,
                 )
             else:
                 context = ExecutionContext(
@@ -141,6 +181,8 @@ class RuntimeController:
             except concurrent.futures.TimeoutError as exc:
                 future.cancel()
                 raise RuntimeTimeout("command timed out") from exc
+            except ProviderFailure:
+                raise
             except Exception as exc:
                 raise CapabilityExecutionFailure("capability execution failed") from exc
             finally:
@@ -173,11 +215,13 @@ class RuntimeController:
                 output = result
                 status = "success"
                 exit_code = ExitCode.SUCCESS
-        except RuntimeFailure as exc:
+        except (RuntimeFailure, ProviderFailure) as exc:
             exit_code = exc.exit_code
             errors = [str(exc)]
-            if exc.category == "permission_denied":
+            if exc.category in ("permission_denied", "provider_access_denied"):
                 authorization = "denied"
+                for provider_record in provider_audit:
+                    provider_record["authorization"] = "denied"
         except Exception:
             exit_code = ExitCode.INTERNAL_ERROR
             errors = ["runtime internal failure"]
@@ -210,6 +254,8 @@ class RuntimeController:
             "manifest_sha256": manifest_digest,
             "source_commit": source_commit,
         }
+        if provider_audit:
+            audit_record["providers"] = provider_audit
         try:
             self.audit.append(audit_record)
         except RuntimeInternalFailure as exc:
