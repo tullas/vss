@@ -1,0 +1,82 @@
+schema_version: "1"
+namespace: bootstrap
+name: check
+version: 1.0.0
+description: Inspect local Docker, OpenTofu, WSL, systemd, and port readiness.
+runtime_api_version: "1"
+sdk_api_version: "1"
+entry_point: handler.py:execute
+commands:
+  - name: bootstrap.check
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [environment, dry_run, checks]
+      properties:
+        environment:
+          type: string
+        dry_run:
+          type: boolean
+        checks:
+          type: object
+          additionalProperties: false
+          required: [platform, systemd, docker, opentofu, ports]
+          properties:
+            platform:
+              type: object
+              additionalProperties: false
+              required: [system, release, is_wsl]
+              properties:
+                system: {type: string}
+                release: {type: string}
+                is_wsl: {type: boolean}
+            systemd:
+              type: object
+              additionalProperties: false
+              required: [active, status, pid1]
+              properties:
+                active: {type: boolean}
+                status: {type: string}
+                pid1: {type: string}
+            docker:
+              type: object
+              additionalProperties: false
+              required: [cli_available, version, daemon_accessible, daemon_version]
+              properties:
+                cli_available: {type: boolean}
+                version: {type: [string, "null"]}
+                daemon_accessible: {type: boolean}
+                daemon_version: {type: [string, "null"]}
+            opentofu:
+              type: object
+              additionalProperties: false
+              required: [available, version]
+              properties:
+                available: {type: boolean}
+                version: {type: [string, "null"]}
+            ports:
+              type: object
+              additionalProperties: false
+              required: ["9000", "9001"]
+              properties:
+                "9000": {$ref: "#/$defs/port_status"}
+                "9001": {$ref: "#/$defs/port_status"}
+      $defs:
+        port_status:
+          type: object
+          additionalProperties: false
+          required: [conflict, available]
+          properties:
+            conflict: {type: [boolean, "null"]}
+            available: {type: [boolean, "null"]}
+            status: {enum: [unavailable]}
+    supports_dry_run: true
+permissions:
+  - filesystem_read
+  - subprocess
+compatibility:
+  python: ">=3.11,<3.15"
+lifecycle_status: active

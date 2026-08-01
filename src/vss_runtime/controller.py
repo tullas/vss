@@ -35,6 +35,7 @@ from .errors import (
     RuntimeTimeout,
 )
 from .loader import CapabilityLoader
+from .host_inspection import HostInspector
 from .models import ExecutionContext
 from .policy import RuntimePolicy
 from .registry import CapabilityRegistry
@@ -55,6 +56,7 @@ class RuntimeController:
         policy: RuntimePolicy | None = None,
         audit_logger: AuditLogger | None = None,
         provider_registry: ProviderRegistry | None = None,
+        host_inspector: HostInspector | None = None,
     ) -> None:
         self.root = (root or repository_root()).resolve()
         builtins_root = self.root / "capabilities"
@@ -63,11 +65,15 @@ class RuntimeController:
         self.policy = policy or RuntimePolicy(
             allowed_builtin_permissions=("provider_access",),
             allowed_provider_identities=(LOCAL_CLOCK_IDENTITY,),
+            allowed_capability_permissions={
+                "bootstrap.check": ("filesystem_read", "subprocess"),
+            },
         )
         self.provider_registry = provider_registry or ProviderRegistry(
             self.root / "providers/builtin", self.root / "schemas/provider-v1.schema.json"
         )
         self.provider_selector = ProviderSelector(self.provider_registry)
+        self.host_inspector = host_inspector or HostInspector()
         self.audit = audit_logger or AuditLogger(self.root / ".local/runtime/audit", trusted_root=self.root)
 
     def _source_commit(self) -> str | None:
@@ -100,6 +106,7 @@ class RuntimeController:
         manifest_digest: str | None = None
         source_commit = self._source_commit()
         provider_audit: list[dict[str, Any]] = []
+        execution_id = uuid.uuid4().hex
         output: dict[str, Any] = {}
         errors: list[str] = []
         status = "error"
@@ -132,7 +139,7 @@ class RuntimeController:
                 provider_record["version"] = registration.metadata.version
                 registrations.append(registration)
             permissions = capability.manifest.permissions
-            authorized = self.policy.authorize(permissions)
+            authorized = self.policy.authorize(permissions, capability.manifest.identity)
             self.policy.authorize_providers(
                 requirement["identity"] for requirement in capability.manifest.required_providers
             )
@@ -153,7 +160,7 @@ class RuntimeController:
                 context = CapabilityExecutionContext(
                     environment=environment,
                     correlation_id=correlation_id,
-                    execution_id=uuid.uuid4().hex,
+                    execution_id=execution_id,
                     capability_identity=capability.manifest.identity,
                     command_identity=command,
                     authorized_permissions=authorized,
@@ -161,6 +168,12 @@ class RuntimeController:
                     # configuration contract is admitted for a capability.
                     safe_configuration=freeze_configuration({}),
                     providers=provider_access,
+                    host_inspection=(
+                        self.host_inspector
+                        if capability.manifest.identity == "bootstrap.check"
+                        and set(authorized) == {"filesystem_read", "subprocess"}
+                        else None
+                    ),
                 )
             else:
                 context = ExecutionContext(
@@ -244,6 +257,7 @@ class RuntimeController:
             "schema_version": "1",
             "timestamp": completed_at,
             "correlation_id": correlation_id,
+            "execution_id": execution_id,
             "capability": capability_identity,
             "command": command,
             "status": status,

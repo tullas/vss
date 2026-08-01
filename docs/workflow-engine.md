@@ -2,7 +2,7 @@
 
 VSS M2.2 adds a minimal sequential interpreter for trusted, repository-owned
 workflows. It builds on the M2.1 Runtime Kernel without changing existing
-commands or migrating another command into a capability.
+commands. M2.5 changes only the implementation route for `bootstrap.check`.
 
 ## Trusted workflow model
 
@@ -25,8 +25,8 @@ outside the fixed allowlist.
 M2.2 supports exactly:
 
 - `system.info`, executed through the M2.1 Runtime Controller;
-- `bootstrap.check`, executed through a narrow adapter over the existing
-  `CommandRunner`.
+- `bootstrap.check`, executed through the Runtime Controller as the M2.5
+  SDK-authored built-in capability.
 
 Workflow YAML cannot select Python functions, modules, executables, command-line
 arguments, environment variables, external files, or remote sources. The
@@ -79,7 +79,8 @@ vss workflow run runtime-smoke --environment development --correlation-id exampl
 ```
 
 `runtime-smoke` invokes `system.info` and then `bootstrap.check`, exactly once
-each and in that order.
+each and in that order. Both operations now share manifest validation, runtime
+policy authorization, capability invocation, and capability audit behavior.
 
 ## Deferred functionality
 

@@ -11,6 +11,10 @@ class ProviderAccessor(Protocol):
     def get_clock(self) -> ClockProvider: ...
 
 
+class HostInspectionAccessor(Protocol):
+    def bootstrap_check(self) -> Mapping[str, Any]: ...
+
+
 def _freeze(value: Any) -> Any:
     if isinstance(value, dict):
         return MappingProxyType({key: _freeze(item) for key, item in value.items()})
@@ -34,6 +38,7 @@ class CapabilityExecutionContext:
     authorized_permissions: tuple[str, ...]
     safe_configuration: Mapping[str, Any]
     providers: ProviderAccessor | None = None
+    host_inspection: HostInspectionAccessor | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "authorized_permissions", tuple(self.authorized_permissions))

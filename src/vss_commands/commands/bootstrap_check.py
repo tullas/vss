@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from ..models import CommandContext, CommandMetadata
 from ..registry import register
-from ._bootstrap_support import bootstrap_report
 
 METADATA = CommandMetadata(
     name="bootstrap.check",
@@ -15,4 +14,7 @@ METADATA = CommandMetadata(
 
 @register(METADATA)
 def execute(context: CommandContext, input_data: dict, dry_run: bool) -> dict:
-    return {"environment": context.environment, "dry_run": dry_run, "checks": bootstrap_report()}
+    # CommandRunner routes this registered legacy name through RuntimeController.
+    # Keeping the registration preserves discovery and CLI compatibility; direct
+    # handler invocation is deliberately unsupported to prevent audit bypass.
+    raise RuntimeError("bootstrap.check must be invoked through CommandRunner")
