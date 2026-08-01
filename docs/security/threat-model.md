@@ -53,6 +53,16 @@ operators/agents.
   interpolation/includes/conditions, stop-on-failure semantics, M2.1 policy
   enforcement for capabilities, existing command validation for the legacy
   adapter, and structured input-free audit events.
+- Repository-controlled SDK-authored capability code to the in-process M2.3
+  handler contract. Trusted code may still be defective: it can return unsafe
+  objects, raise exceptions, accidentally disclose data, or assume permissions
+  it was not granted. Mitigation: immutable bounded contexts, an empty safe
+  configuration view by default, typed results and errors, strict JSON size and
+  depth limits, input/output schemas, manifest-to-handler identity/version
+  binding, deny-by-default policy, controller-only acceptance tests, filtered
+  exceptions, and input-free audit records. These contracts reduce accidental
+  privilege and disclosure; they are not process isolation and cannot contain
+  malicious built-in Python.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,

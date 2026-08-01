@@ -1,0 +1,29 @@
+schema_version: "1"
+namespace: runtime
+name: echo
+version: 1.0.0
+description: Echo one bounded JSON value through the Capability SDK.
+runtime_api_version: "1"
+sdk_api_version: "1"
+entry_point: handler.py:execute
+commands:
+  - name: runtime.echo
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value:
+          type: [string, number, integer, boolean, object, array, "null"]
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value:
+          type: [string, number, integer, boolean, object, array, "null"]
+    supports_dry_run: false
+permissions: []
+compatibility:
+  python: ">=3.11,<3.15"
+lifecycle_status: active

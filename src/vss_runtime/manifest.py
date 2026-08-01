@@ -11,9 +11,10 @@ from jsonschema import Draft202012Validator
 
 from .errors import IncompatibleRuntimeAPI, InvalidManifest
 from .models import CapabilityManifest
+from vss_capabilities import MANIFEST_SCHEMA_VERSION, RUNTIME_API_VERSION, SDK_API_VERSION
 
-SUPPORTED_SCHEMA_VERSION = "1"
-SUPPORTED_RUNTIME_API_VERSION = "1"
+SUPPORTED_SCHEMA_VERSION = MANIFEST_SCHEMA_VERSION
+SUPPORTED_RUNTIME_API_VERSION = RUNTIME_API_VERSION
 IDENTITY_SEGMENT = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 ENTRY_POINT = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\.py:[A-Za-z][A-Za-z0-9_]*$")
 
@@ -43,6 +44,9 @@ def load_manifest(path: Path, schema_path: Path) -> tuple[CapabilityManifest, st
         raise InvalidManifest("unsupported capability manifest schema version")
     if value["runtime_api_version"] != SUPPORTED_RUNTIME_API_VERSION:
         raise IncompatibleRuntimeAPI("unsupported runtime API version")
+    sdk_api_version = value.get("sdk_api_version")
+    if sdk_api_version is not None and sdk_api_version != SDK_API_VERSION:
+        raise IncompatibleRuntimeAPI("unsupported capability SDK API version")
     if not IDENTITY_SEGMENT.fullmatch(value["namespace"]) or not IDENTITY_SEGMENT.fullmatch(value["name"]):
         raise InvalidManifest("capability identity is unsafe")
     if not ENTRY_POINT.fullmatch(value["entry_point"]):
@@ -57,6 +61,7 @@ def load_manifest(path: Path, schema_path: Path) -> tuple[CapabilityManifest, st
         version=value["version"],
         description=value["description"],
         runtime_api_version=value["runtime_api_version"],
+        sdk_api_version=sdk_api_version,
         entry_point=value["entry_point"],
         commands=tuple(value["commands"]),
         permissions=tuple(value["permissions"]),

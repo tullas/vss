@@ -3,12 +3,21 @@ from __future__ import annotations
 import concurrent.futures
 import subprocess
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from vss_capabilities import (
+    CapabilityExecutionContext,
+    CapabilityResult,
+    SDKValidationError,
+    freeze_configuration,
+    validate_input,
+    validate_output,
+)
 from vss_commands.exit_codes import ExitCode
 from .audit import AuditLogger
 from .errors import (
@@ -97,16 +106,33 @@ class RuntimeController:
             permissions = capability.manifest.permissions
             authorized = self.policy.authorize(permissions)
             authorization = "approved"
-            context = ExecutionContext(
-                environment=environment,
-                configuration=configuration,
-                correlation_id=correlation_id,
-                declared_permissions=permissions,
-                authorized_permissions=authorized,
-                source_commit=source_commit,
-                verbose=verbose,
-                ask_become_pass=ask_become_pass,
-            )
+            if capability.manifest.sdk_api_version is not None:
+                try:
+                    validate_input(input_data, command_record["input_schema"])
+                except SDKValidationError as exc:
+                    raise InvalidCapabilityInput(str(exc)) from exc
+                context = CapabilityExecutionContext(
+                    environment=environment,
+                    correlation_id=correlation_id,
+                    execution_id=uuid.uuid4().hex,
+                    capability_identity=capability.manifest.identity,
+                    command_identity=command,
+                    authorized_permissions=authorized,
+                    # M2.3 exposes no configuration keys until an explicit safe
+                    # configuration contract is admitted for a capability.
+                    safe_configuration=freeze_configuration({}),
+                )
+            else:
+                context = ExecutionContext(
+                    environment=environment,
+                    configuration=configuration,
+                    correlation_id=correlation_id,
+                    declared_permissions=permissions,
+                    authorized_permissions=authorized,
+                    source_commit=source_commit,
+                    verbose=verbose,
+                    ask_become_pass=ask_become_pass,
+                )
             handler = self.loader.load(capability)
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             future = executor.submit(handler, context, input_data, dry_run)
@@ -119,17 +145,34 @@ class RuntimeController:
                 raise CapabilityExecutionFailure("capability execution failed") from exc
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
-            if not isinstance(result, dict):
+            if capability.manifest.sdk_api_version is not None:
+                if not isinstance(result, CapabilityResult):
+                    raise CapabilityExecutionFailure("capability returned an invalid SDK result")
+                if result.error is not None:
+                    output = {}
+                    errors = [result.error.message]
+                    status = "error"
+                    exit_code = result.error.exit_code
+                    result = None
+                else:
+                    try:
+                        result = validate_output(result.output, command_record["output_schema"])
+                    except SDKValidationError as exc:
+                        raise CapabilityExecutionFailure("capability returned an invalid result") from exc
+            elif not isinstance(result, dict):
                 raise CapabilityExecutionFailure("capability returned an invalid result")
-            output_errors = sorted(
-                Draft202012Validator(command_record["output_schema"]).iter_errors(result),
-                key=lambda error: list(error.path),
-            )
-            if output_errors:
-                raise CapabilityExecutionFailure("capability returned an invalid result")
-            output = result
-            status = "success"
-            exit_code = ExitCode.SUCCESS
+            if result is None:
+                pass
+            else:
+                output_errors = sorted(
+                    Draft202012Validator(command_record["output_schema"]).iter_errors(result),
+                    key=lambda error: list(error.path),
+                )
+                if output_errors:
+                    raise CapabilityExecutionFailure("capability returned an invalid result")
+                output = result
+                status = "success"
+                exit_code = ExitCode.SUCCESS
         except RuntimeFailure as exc:
             exit_code = exc.exit_code
             errors = [str(exc)]
