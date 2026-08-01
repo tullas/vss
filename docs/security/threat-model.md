@@ -63,6 +63,19 @@ operators/agents.
   exceptions, and input-free audit records. These contracts reduce accidental
   privilege and disclosure; they are not process isolation and cannot contain
   malicious built-in Python.
+- Repository-controlled provider metadata and implementation code to the M2.4
+  provider boundary. Abuse: provider substitution, malicious or defective
+  implementation code, compromised dependencies, credential misuse, overbroad
+  capability access, unsafe provider output, or direct implementation
+  instantiation. Mitigation: strict safe-loaded manifests, fixed built-in roots,
+  path and symlink containment, manifest and implementation digests, approved
+  implementation identity and source classification, static selection, exact
+  provider requirements, independent deny-by-default authorization,
+  non-enumerable narrow handles, output normalization, input-free provider audit
+  metadata, and adversarial tests. The local clock has no dependencies or
+  credentials. Built-in Python providers remain trusted in-process code and are
+  not sandboxed; these controls do not contain a malicious reviewed provider or
+  capability that deliberately imports implementation modules.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,
