@@ -1,7 +1,8 @@
 # Runtime Kernel M2.1
 
-VSS M2.1 introduces a minimal capability-oriented execution path beside the
-existing command engine. Only `system.info` uses this path. All command names,
+VSS M2.1 introduced a minimal capability-oriented execution path beside the
+existing command engine. M2.3 adds the SDK-authored `runtime.echo` capability
+without migrating other commands. All existing command names,
 CLI forms, response fields, correlation-ID behavior, and existing handlers
 remain compatible; the current command registry is still authoritative for CLI
 command discovery.
@@ -70,9 +71,17 @@ The built-in handler adapts the existing `system.info` command handler, so its
 domain output remains unchanged while execution passes through discovery,
 validation, authorization, invocation, normalization, and audit.
 
+The SDK reference capability uses the same controller and envelope:
+
+```bash
+vss run runtime.echo --environment development --input input.json
+```
+
+See `docs/capability-sdk.md` for the supported built-in authoring contract.
+
 ## Deferred functionality
 
-M2.1 does not include workflows, autonomous or multi-agent planning, provider
-implementations, capability SDK scaffolding, remote or third-party plugins,
+The runtime does not include autonomous or multi-agent planning, provider
+implementations, SDK scaffolding, remote or third-party plugins,
 package downloads, distributed events, persistent databases, marketplace
 behavior, or media-production functionality.

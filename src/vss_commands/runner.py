@@ -16,6 +16,8 @@ from .exit_codes import ExitCode
 from .models import CommandContext, SafeCommandError
 from .registry import get_command
 
+RUNTIME_CAPABILITY_COMMANDS = frozenset({"system.info", "runtime.echo"})
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -72,7 +74,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -82,7 +84,7 @@ class CommandRunner:
         payload = input_data if input_data is not None else {}
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
-        if command == "system.info":
+        if command in RUNTIME_CAPABILITY_COMMANDS:
             from vss_runtime import RuntimeController
 
             runtime_controller = self._runtime_controller or RuntimeController()

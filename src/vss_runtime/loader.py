@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 from pathlib import Path
 
+from vss_capabilities import SDK_API_VERSION
+
 from .errors import InvalidManifest, RuntimeInternalFailure
 from .models import CapabilityHandler, RegisteredCapability
 
@@ -37,4 +39,17 @@ class CapabilityLoader:
         handler = getattr(module, function_name, None)
         if not callable(handler):
             raise InvalidManifest("capability handler is unavailable")
+        handler_sdk_version = getattr(handler, "sdk_api_version", None)
+        if capability.manifest.sdk_api_version is not None:
+            if handler_sdk_version != capability.manifest.sdk_api_version:
+                raise InvalidManifest("capability manifest and handler SDK versions do not match")
+            if handler_sdk_version != SDK_API_VERSION:
+                raise InvalidManifest("capability handler uses an unsupported SDK API version")
+            if getattr(handler, "capability_identity", None) != capability.manifest.identity:
+                raise InvalidManifest("capability manifest and handler identities do not match")
+            commands = {command["name"] for command in capability.manifest.commands}
+            if getattr(handler, "command_identity", None) not in commands:
+                raise InvalidManifest("capability manifest and handler commands do not match")
+        elif handler_sdk_version is not None:
+            raise InvalidManifest("SDK handler requires an sdk_api_version manifest declaration")
         return handler
