@@ -30,7 +30,7 @@ class CommandEngineTests(unittest.TestCase):
             self.assertTrue(command.metadata.supports_dry_run)
 
     def test_bootstrap_check_reports_missing_tools_without_changes(self) -> None:
-        with patch("vss_commands.commands._bootstrap_support.shutil.which", return_value=None):
+        with patch("vss_runtime.host_inspection.shutil.which", return_value=None):
             response, code = CommandRunner().run("bootstrap.check", "development")
         self.assertEqual(code, ExitCode.SUCCESS)
         self.assertFalse(response["output"]["checks"]["docker"]["cli_available"])
@@ -39,8 +39,8 @@ class CommandEngineTests(unittest.TestCase):
 
     def test_bootstrap_check_detects_systemd_disabled_wsl(self) -> None:
         with (
-            patch("vss_commands.commands._bootstrap_support.platform.release", return_value="5.15.90-microsoft-standard-WSL2"),
-            patch("vss_commands.commands._bootstrap_support.shutil.which", return_value=None),
+            patch("vss_runtime.host_inspection.platform.release", return_value="5.15.90-microsoft-standard-WSL2"),
+            patch("vss_runtime.host_inspection.shutil.which", return_value=None),
         ):
             response, code = CommandRunner().run("bootstrap.check", "development")
         self.assertEqual(code, ExitCode.SUCCESS)
@@ -49,9 +49,9 @@ class CommandEngineTests(unittest.TestCase):
 
     def test_systemd_running_is_usable_when_pid1_is_systemd(self) -> None:
         with (
-            patch("vss_commands.commands._bootstrap_support.shutil.which", return_value="/usr/bin/systemctl"),
-            patch("vss_commands.commands._bootstrap_support._pid1_name", return_value="systemd"),
-            patch("vss_commands.commands._bootstrap_support._run", return_value=(True, "running")),
+            patch("vss_runtime.host_inspection.shutil.which", return_value="/usr/bin/systemctl"),
+            patch("vss_runtime.host_inspection.HostInspector._pid1_name", return_value="systemd"),
+            patch("vss_runtime.host_inspection.HostInspector._run", return_value=(True, "running")),
         ):
             from vss_commands.commands._bootstrap_support import systemd_status
 
@@ -59,13 +59,13 @@ class CommandEngineTests(unittest.TestCase):
 
     def test_wsl_with_systemd_pid1_reports_ready(self) -> None:
         with (
-            patch("vss_commands.commands._bootstrap_support.platform.release", return_value="5.15-microsoft-standard-WSL2"),
+            patch("vss_runtime.host_inspection.platform.release", return_value="5.15-microsoft-standard-WSL2"),
             patch(
-                "vss_commands.commands._bootstrap_support.shutil.which",
+                "vss_runtime.host_inspection.shutil.which",
                 side_effect=lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
             ),
-            patch("vss_commands.commands._bootstrap_support._pid1_name", return_value="systemd"),
-            patch("vss_commands.commands._bootstrap_support._run", return_value=(True, "running")),
+            patch("vss_runtime.host_inspection.HostInspector._pid1_name", return_value="systemd"),
+            patch("vss_runtime.host_inspection.HostInspector._run", return_value=(True, "running")),
         ):
             from vss_commands.commands._bootstrap_support import bootstrap_report
 
@@ -75,9 +75,9 @@ class CommandEngineTests(unittest.TestCase):
 
     def test_systemd_degraded_is_usable_despite_nonzero_status(self) -> None:
         with (
-            patch("vss_commands.commands._bootstrap_support.shutil.which", return_value="/usr/bin/systemctl"),
-            patch("vss_commands.commands._bootstrap_support._pid1_name", return_value="systemd"),
-            patch("vss_commands.commands._bootstrap_support._run", return_value=(False, "degraded")),
+            patch("vss_runtime.host_inspection.shutil.which", return_value="/usr/bin/systemctl"),
+            patch("vss_runtime.host_inspection.HostInspector._pid1_name", return_value="systemd"),
+            patch("vss_runtime.host_inspection.HostInspector._run", return_value=(False, "degraded")),
         ):
             from vss_commands.commands._bootstrap_support import systemd_status
 
@@ -85,7 +85,7 @@ class CommandEngineTests(unittest.TestCase):
             self.assertEqual(systemd_status()["status"], "degraded")
 
     def test_systemd_is_unavailable_without_systemctl(self) -> None:
-        with patch("vss_commands.commands._bootstrap_support.shutil.which", return_value=None):
+        with patch("vss_runtime.host_inspection.shutil.which", return_value=None):
             from vss_commands.commands._bootstrap_support import systemd_status
 
             self.assertEqual(systemd_status()["status"], "unavailable")
@@ -96,12 +96,12 @@ class CommandEngineTests(unittest.TestCase):
             return f"/usr/bin/{name}" if name in {"docker", "tofu", "systemctl"} else None
 
         with (
-            patch("vss_commands.commands._bootstrap_support.shutil.which", side_effect=which),
+            patch("vss_runtime.host_inspection.shutil.which", side_effect=which),
             patch(
-                "vss_commands.commands._bootstrap_support._run",
+                "vss_runtime.host_inspection.HostInspector._run",
                 side_effect=[(True, "systemd"), (True, "Docker version 27.0"), (True, "27.0") , (True, "OpenTofu v1.9.0")],
             ),
-            patch("vss_commands.commands._bootstrap_support.socket.socket"),
+            patch("vss_runtime.host_inspection.socket.socket"),
         ):
             response, code = CommandRunner().run("bootstrap.check", "development")
         self.assertEqual(code, ExitCode.SUCCESS)
@@ -145,7 +145,7 @@ class CommandEngineTests(unittest.TestCase):
         self.assertEqual(response["output"]["next_action"], "start Docker")
 
     def test_bootstrap_verify_distinguishes_docker_socket_permission(self) -> None:
-        secret = "VSS_PASSWORD=super-secret-value"
+        secret = "VSS_PASSWORD=super-secret-value"  # pragma: allowlist secret
         docker = subprocess.CompletedProcess(["docker", "info"], 1, "", f"permission denied; {secret}")
         tofu = subprocess.CompletedProcess(["tofu", "version"], 0, "OpenTofu v1.9.0", "")
         iac = subprocess.CompletedProcess(["iac-local", "validate"], 0, "state contains another-secret", "")

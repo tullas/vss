@@ -216,7 +216,7 @@ class RuntimeKernelTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
         self.assertEqual(
             set(json.loads(lines[0])),
-            {"schema_version", "timestamp", "correlation_id", "capability", "command", "status", "exit_code", "duration_ms", "declared_permissions", "authorization", "manifest_sha256", "source_commit"},
+            {"schema_version", "timestamp", "correlation_id", "execution_id", "capability", "command", "status", "exit_code", "duration_ms", "declared_permissions", "authorization", "manifest_sha256", "source_commit"},
         )
 
     def test_audit_write_failure_cannot_return_success(self) -> None:

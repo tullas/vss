@@ -1,8 +1,8 @@
 # Runtime Kernel M2.1
 
 VSS M2.1 introduced a minimal capability-oriented execution path beside the
-existing command engine. M2.3 adds the SDK-authored `runtime.echo` capability
-without migrating other commands. All existing command names,
+existing command engine. M2.3 added the SDK-authored `runtime.echo` capability,
+and M2.5 migrates only the read-only `bootstrap.check` operation. All existing command names,
 CLI forms, response fields, correlation-ID behavior, and existing handlers
 remain compatible; the current command registry is still authoritative for CLI
 command discovery.
@@ -35,8 +35,10 @@ permission categories fail closed.
 
 Runtime policy is independent of manifest declarations. The effective
 permission set is the intersection of known declarations and permissions
-explicitly allowed by policy. The initial policy allows no effect permissions;
-therefore the built-in `system.info` manifest declares none. Known but
+explicitly allowed by policy. Capability-specific policy admits
+`filesystem_read` and `subprocess` only for the trusted `bootstrap.check`
+built-in; generic policy does not grant them. `system.info` still declares
+none. Known but
 unapproved permissions return named exit code `PERMISSION_DENIED` (`13`) before
 handler execution. Unknown permissions make the manifest invalid.
 
@@ -45,7 +47,7 @@ handler execution. Unknown permissions make the manifest invalid.
 Every attempted runtime execution appends one structured JSON Lines record to
 `.local/runtime/audit/executions.jsonl`. The directory is ignored by Git and is
 mode `0700`; the file is mode `0600` where supported. Records contain UTC time,
-correlation ID, capability and command identities, outcome, exit code, duration,
+correlation and execution IDs, capability and command identities, outcome, exit code, duration,
 declared permissions, authorization result, validated manifest digest, and the
 current source commit when Git metadata is available. Inputs, configuration,
 environment-variable values, secrets, raw exceptions, and unnecessary host
@@ -89,6 +91,20 @@ vss run runtime.time --environment development
 Its provider requirement is resolved statically, independently authorized, and
 exposed only through the narrow SDK context accessor described in
 `docs/provider-abstraction.md`.
+
+M2.5 supports both the unchanged legacy CLI and direct runtime form:
+
+```bash
+vss bootstrap check --environment development
+vss run bootstrap.check --environment development
+```
+
+Both resolve the same SDK-authored built-in and produce one capability audit
+record. The handler receives a narrow runtime-owned host-inspection contract;
+it never receives a generic subprocess launcher, filesystem handle, environment
+mapping, Docker socket, or provider registry. `bootstrap.local`,
+`bootstrap.verify`, platform, secrets, and other privileged operations remain
+on the legacy command engine.
 
 ## Deferred functionality
 

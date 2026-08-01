@@ -37,9 +37,10 @@ Audit records never contain capability input or output.
 - correlation and execution IDs;
 - capability and command identities;
 - the immutable tuple of authorized permissions; and
-- an immutable safe-configuration view.
+- an immutable safe-configuration view;
 - a narrow, non-enumerable provider accessor containing only independently
-  authorized provider contracts.
+  authorized provider contracts; and
+- for `bootstrap.check` only, a narrow runtime-owned host-inspection accessor.
 
 M2.3 supplies an empty configuration view because no capability-specific safe
 configuration contract has been admitted. The context does not expose
@@ -50,6 +51,12 @@ M2.4 adds `context.providers.get_clock()` for capabilities whose manifest
 declares the exact clock requirement and whose execution policy independently
 approves it. The accessor does not expose the provider registry, selection,
 configuration, implementation paths, credentials, or unrelated providers.
+
+M2.5 adds `context.host_inspection.bootstrap_check()` only when the exact
+`bootstrap.check` identity has declared and received authorization for
+`filesystem_read` and `subprocess`. It is separate from provider abstraction
+and exposes no generic subprocess, executable selection, arguments, shell,
+filesystem handle, environment mapping, or arbitrary port selection.
 
 Python cannot sandbox trusted code running in the same process. A malicious
 built-in can import Python modules and circumvent object-level conventions.
@@ -107,9 +114,10 @@ tests and do not demonstrate manifest, policy, output, or audit enforcement.
 
 ## Deferred scope
 
-Automatic scaffolding is deferred to keep M2.3 narrow and avoid repository
+Automatic scaffolding is deferred to keep the SDK narrow and avoid repository
 write semantics. Authors manually add a directory, manifest, handler, and
 controller-backed test. External SDK publication, dependency resolution, hot
 reload, dynamic downloads, remote plugins, marketplaces, signed bundles,
-providers, workflow retries or parallelism, and command migrations are also
+providers and workflow retries or parallelism are also deferred. Only
+`bootstrap.check` has migrated; all other legacy-command migrations remain
 deferred.

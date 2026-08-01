@@ -76,6 +76,16 @@ operators/agents.
   credentials. Built-in Python providers remain trusted in-process code and are
   not sandboxed; these controls do not contain a malicious reviewed provider or
   capability that deliberately imports implementation modules.
+- Runtime-owned M2.5 host inspection to approved local executable and socket
+  probes. Abuse: arbitrary executable or argument selection, shell injection,
+  PATH substitution, permission inflation, raw subprocess disclosure, or
+  capability bypass of audit. Mitigation: a single non-enumerable
+  `bootstrap_check()` context method, exact capability-scoped permissions,
+  fixed executable and argument allowlists, resolved approved system paths,
+  empty subprocess environments, fixed loopback ports, bounded normalized
+  version output, controller-only invocation, and input/output-free audit
+  records. This boundary constrains defective trusted code; in-process Python
+  remains unsandboxed.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,
