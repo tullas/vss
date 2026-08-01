@@ -13,7 +13,10 @@ class SafeClockHandle:
     __slots__ = ("__provider",)
 
     def __init__(self, provider: ClockProvider) -> None:
-        self.__provider = provider
+        object.__setattr__(self, "_SafeClockHandle__provider", provider)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("clock provider handle is immutable")
 
     def now_utc(self) -> UtcTimestamp:
         try:
@@ -48,7 +51,10 @@ class ProviderAccess:
         self,
         clock: ClockProvider | None = None,
     ) -> None:
-        self.__clock = SafeClockHandle(clock) if clock is not None else None
+        object.__setattr__(self, "_ProviderAccess__clock", SafeClockHandle(clock) if clock is not None else None)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("provider access is immutable")
 
     def get_clock(self) -> SafeClockHandle:
         if self.__clock is None:

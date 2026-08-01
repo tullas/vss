@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+from dataclasses import dataclass
 from pathlib import Path
 
 from .constants import (
@@ -16,10 +17,14 @@ from .manifest import load_provider_manifest
 from .models import RegisteredProvider
 
 
+@dataclass(frozen=True, slots=True)
 class ProviderRegistry:
-    def __init__(self, builtins_root: Path, schema_path: Path) -> None:
-        self.builtins_root = builtins_root.resolve()
-        self.schema_path = schema_path.resolve()
+    builtins_root: Path
+    schema_path: Path
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "builtins_root", self.builtins_root.resolve())
+        object.__setattr__(self, "schema_path", self.schema_path.resolve())
 
     def discover(self) -> dict[str, RegisteredProvider]:
         providers: dict[str, RegisteredProvider] = {}
@@ -85,11 +90,11 @@ class ProviderRegistry:
         return implementation
 
 
+@dataclass(frozen=True, slots=True)
 class ProviderSelector:
     """Static M2.4 selection; configuration and fallback are deliberately absent."""
 
-    def __init__(self, registry: ProviderRegistry) -> None:
-        self.registry = registry
+    registry: ProviderRegistry
 
     def registration(self, requirement: dict) -> RegisteredProvider:
         if requirement["type"] != CLOCK_PROVIDER_TYPE:

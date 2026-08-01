@@ -100,6 +100,8 @@ class ProviderAbstractionTests(unittest.TestCase):
         )
         with self.assertRaises(FrozenInstanceError):
             metadata.version = "changed"
+        with self.assertRaises(FrozenInstanceError):
+            registry.builtins_root = self.root
 
     def test_deterministic_fake_provider_uses_production_controller_path(self) -> None:
         self.use_fake_clock()
@@ -116,6 +118,11 @@ class ProviderAbstractionTests(unittest.TestCase):
         self.assertEqual((timestamp.value, monotonic.seconds), ("2030-01-02T03:04:05.678Z", 42.5))
         with self.assertRaises(FrozenInstanceError):
             monotonic.seconds = 0
+        with self.assertRaises(AttributeError):
+            handle._SafeClockHandle__provider = object()
+        access = ProviderAccess(clock=registry.initialize(registration))
+        with self.assertRaises(AttributeError):
+            access._ProviderAccess__clock = None
 
     def test_runtime_time_audit_has_only_safe_provider_metadata(self) -> None:
         self.use_fake_clock()
