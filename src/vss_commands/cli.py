@@ -50,6 +50,15 @@ def _parser() -> argparse.ArgumentParser:
     subparsers.add_parser("list")
     describe = subparsers.add_parser("describe")
     describe.add_argument("command")
+    workflow = subparsers.add_parser("workflow")
+    workflow_actions = workflow.add_subparsers(dest="workflow_action", required=True)
+    workflow_actions.add_parser("list")
+    workflow_describe = workflow_actions.add_parser("describe")
+    workflow_describe.add_argument("workflow_name")
+    workflow_run = workflow_actions.add_parser("run")
+    workflow_run.add_argument("workflow_name")
+    workflow_run.add_argument("--environment", required=True)
+    workflow_run.add_argument("--correlation-id")
     return parser
 
 
@@ -80,6 +89,25 @@ def main(argv: list[str] | None = None) -> int:
             return int(ExitCode.UNKNOWN_COMMAND)
         print(json.dumps(command.metadata.__dict__, sort_keys=True, separators=(",", ":")))
         return int(ExitCode.SUCCESS)
+    if args.action == "workflow":
+        from vss_workflows import WorkflowController
+        from vss_workflows.errors import WorkflowFailure
+
+        controller = WorkflowController()
+        try:
+            if args.workflow_action == "list":
+                print(json.dumps(controller.list_workflows(), sort_keys=True, separators=(",", ":")))
+                return int(ExitCode.SUCCESS)
+            if args.workflow_action == "describe":
+                description = controller.describe_workflow(args.workflow_name)
+                print(json.dumps(description, sort_keys=True, separators=(",", ":")))
+                return int(ExitCode.SUCCESS)
+            result, exit_code = controller.run(args.workflow_name, args.environment, args.correlation_id)
+            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+            return int(exit_code)
+        except WorkflowFailure as exc:
+            print(json.dumps({"error": str(exc)}, sort_keys=True, separators=(",", ":")))
+            return int(exc.exit_code)
 
     input_data, input_error = _read_input(args.input)
     if input_error is not None:
