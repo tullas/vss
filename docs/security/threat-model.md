@@ -34,7 +34,20 @@ operators/agents.
   injection, capability escalation or autonomous risk acceptance. Mitigation:
   argv execution, schemas, timeouts, explicit capability authorization,
   independent approval and deny-by-default future plugin admission.
+- Repository-controlled capability manifest to the M2.1 Runtime Kernel and
+  built-in handler. Abuse: unsafe YAML construction, malformed or substituted
+  manifests, path/symlink escape, arbitrary module import, permission
+  escalation, secret disclosure, or audit injection/tampering. Mitigation:
+  safe YAML loading, strict versioned schemas, fixed built-in discovery root,
+  canonical containment checks, constrained local entry points, manifest
+  digest revalidation before import, deny-by-default runtime policy, input
+  schemas, append-only structured audit records, and adversarial tests. Local
+  audit files are not tamper-proof and remain a residual risk.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,
 scanner-database availability, and unsigned provenance consumer verification.
+Signed capability bundles, revocation, external trust roots, isolation for
+third-party code, and third-party capability provenance remain deferred;
+dynamic third-party capability installation is prohibited until those controls
+are designed and validated.

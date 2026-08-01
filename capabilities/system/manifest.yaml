@@ -1,0 +1,19 @@
+schema_version: "1"
+namespace: system
+name: info
+version: 1.0.0
+description: Return safe runtime and VSS environment information.
+runtime_api_version: "1"
+entry_point: handler.py:execute
+commands:
+  - name: system.info
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+    supports_dry_run: true
+permissions: []
+compatibility:
+  python: ">=3.11,<3.15"
+lifecycle_status: active
