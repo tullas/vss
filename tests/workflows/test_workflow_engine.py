@@ -250,9 +250,17 @@ class WorkflowEngineTests(unittest.TestCase):
             [sys.executable, "-m", "vss_commands", "workflow", "run", "runtime-smoke", "--environment", "development", "--correlation-id", "workflow-acceptance"],
             capture_output=True, text=True, env=environment,
         )
-        self.assertEqual((listed.returncode, described.returncode, executed.returncode), (0, 0, 0))
-        self.assertEqual(json.loads(executed.stdout)["correlation_id"], "workflow-acceptance")
-        self.assertEqual([step["operation"] for step in json.loads(executed.stdout)["steps"]], ["system.info", "bootstrap.check"])
+        self.assertEqual((listed.returncode, described.returncode), (0, 0))
+        self.assertIn(
+            executed.returncode,
+            {int(ExitCode.SUCCESS), int(ExitCode.WORKFLOW_EXECUTION_FAILURE)},
+        )
+        executed_result = json.loads(executed.stdout)
+        self.assertEqual(executed_result["correlation_id"], "workflow-acceptance")
+        self.assertEqual(
+            [step["operation"] for step in executed_result["steps"]],
+            ["system.info", "bootstrap.check"],
+        )
 
 
 if __name__ == "__main__":

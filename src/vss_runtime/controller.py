@@ -216,6 +216,11 @@ class RuntimeController:
                         raise CapabilityExecutionFailure("capability returned an invalid result") from exc
             elif not isinstance(result, dict):
                 raise CapabilityExecutionFailure("capability returned an invalid result")
+            else:
+                try:
+                    result = validate_output(result, command_record["output_schema"])
+                except SDKValidationError as exc:
+                    raise CapabilityExecutionFailure("capability returned an invalid result") from exc
             if result is None:
                 pass
             else:

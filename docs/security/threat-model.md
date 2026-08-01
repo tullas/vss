@@ -51,8 +51,8 @@ operators/agents.
   built-in discovery root, canonical containment and digest revalidation, a
   two-operation code allowlist, bounded step counts and timeouts, no
   interpolation/includes/conditions, stop-on-failure semantics, M2.1 policy
-  enforcement for capabilities, existing command validation for the legacy
-  adapter, and structured input-free audit events.
+  enforcement for both allowlisted capabilities, bounded result normalization,
+  and structured input-free audit events.
 - Repository-controlled SDK-authored capability code to the in-process M2.3
   handler contract. Trusted code may still be defective: it can return unsafe
   objects, raise exceptions, accidentally disclose data, or assume permissions

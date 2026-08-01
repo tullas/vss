@@ -194,6 +194,17 @@ class RuntimeKernelTests(unittest.TestCase):
         self.assertEqual(record["exit_code"], ExitCode.EXECUTION_FAILURE)
         self.assertNotIn("secret-value", json.dumps(record))
 
+    def test_legacy_capability_output_is_bounded_and_json_safe(self) -> None:
+        self.write_capability(
+            handler="def execute(context, input_data, dry_run):\n"
+            "    return {'unsafe': object()}\n"
+        )
+        response, code = self.run_controller()
+        self.assertEqual(code, ExitCode.EXECUTION_FAILURE)
+        self.assertEqual(response["output"], {})
+        self.assertEqual(response["errors"], ["capability returned an invalid result"])
+        self.assertEqual(self.audit_records()[0]["status"], "error")
+
     def test_timeout_uses_existing_named_exit_code(self) -> None:
         self.write_capability(
             handler="import time\ndef execute(context, input_data, dry_run):\n    time.sleep(0.1)\n    return {}\n"

@@ -1,7 +1,7 @@
 schema_version: "1"
 name: runtime-smoke
 version: 1.0.0
-description: Exercise the runtime kernel and existing bootstrap readiness adapter.
+description: Exercise the runtime kernel with system and bootstrap capabilities.
 runtime_api_version: "1"
 execution_policy:
   mode: sequential
