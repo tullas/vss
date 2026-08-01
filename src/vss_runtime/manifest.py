@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+import yaml
+from jsonschema import Draft202012Validator
+
+from .errors import IncompatibleRuntimeAPI, InvalidManifest
+from .models import CapabilityManifest
+
+SUPPORTED_SCHEMA_VERSION = "1"
+SUPPORTED_RUNTIME_API_VERSION = "1"
+IDENTITY_SEGMENT = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+ENTRY_POINT = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\.py:[A-Za-z][A-Za-z0-9_]*$")
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InvalidManifest("capability manifest schema is unavailable") from exc
+    if not isinstance(value, dict):
+        raise InvalidManifest("capability manifest schema is invalid")
+    return value
+
+
+def load_manifest(path: Path, schema_path: Path) -> tuple[CapabilityManifest, str]:
+    try:
+        content = path.read_bytes()
+        value = yaml.safe_load(content)
+    except (OSError, yaml.YAMLError) as exc:
+        raise InvalidManifest("capability manifest is malformed") from exc
+    if not isinstance(value, dict):
+        raise InvalidManifest("capability manifest must be an object")
+    errors = sorted(Draft202012Validator(_load_json(schema_path)).iter_errors(value), key=lambda error: list(error.path))
+    if errors:
+        raise InvalidManifest(f"capability manifest is invalid: {errors[0].message}")
+    if value["schema_version"] != SUPPORTED_SCHEMA_VERSION:
+        raise InvalidManifest("unsupported capability manifest schema version")
+    if value["runtime_api_version"] != SUPPORTED_RUNTIME_API_VERSION:
+        raise IncompatibleRuntimeAPI("unsupported runtime API version")
+    if not IDENTITY_SEGMENT.fullmatch(value["namespace"]) or not IDENTITY_SEGMENT.fullmatch(value["name"]):
+        raise InvalidManifest("capability identity is unsafe")
+    if not ENTRY_POINT.fullmatch(value["entry_point"]):
+        raise InvalidManifest("capability entry point is unsafe")
+    command_names = [command["name"] for command in value["commands"]]
+    if len(command_names) != len(set(command_names)):
+        raise InvalidManifest("capability manifest contains duplicate commands")
+    manifest = CapabilityManifest(
+        schema_version=value["schema_version"],
+        namespace=value["namespace"],
+        name=value["name"],
+        version=value["version"],
+        description=value["description"],
+        runtime_api_version=value["runtime_api_version"],
+        entry_point=value["entry_point"],
+        commands=tuple(value["commands"]),
+        permissions=tuple(value["permissions"]),
+        compatibility=value["compatibility"],
+        lifecycle_status=value["lifecycle_status"],
+    )
+    return manifest, hashlib.sha256(content).hexdigest()

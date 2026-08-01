@@ -31,6 +31,9 @@ def _safe_error(message: str) -> str:
 
 
 class CommandRunner:
+    def __init__(self, runtime_controller=None) -> None:
+        self._runtime_controller = runtime_controller
+
     def run(
         self,
         command: str,
@@ -79,6 +82,23 @@ class CommandRunner:
         payload = input_data if input_data is not None else {}
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
+        if command == "system.info":
+            from vss_runtime import RuntimeController
+
+            runtime_controller = self._runtime_controller or RuntimeController()
+            return runtime_controller.run(
+                command=command,
+                environment=environment,
+                configuration=configuration,
+                input_data=payload,
+                correlation_id=correlation,
+                started_at=started_at,
+                started_clock=started_clock,
+                dry_run=dry_run,
+                timeout_seconds=timeout_seconds,
+                verbose=verbose,
+                ask_become_pass=ask_become_pass,
+            )
         errors = sorted(Draft202012Validator(registered.metadata.input_schema).iter_errors(payload), key=lambda e: list(e.path))
         if errors:
             return finish("error", ExitCode.INVALID_INPUT, {}, [f"invalid input: {errors[0].message}"])
