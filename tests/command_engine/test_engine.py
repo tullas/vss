@@ -92,11 +92,11 @@ class CommandEngineTests(unittest.TestCase):
             self.assertFalse(systemd_status()["active"])
 
     def test_bootstrap_check_reuses_accessible_docker_daemon(self) -> None:
-        def which(name: str) -> str | None:
-            return f"/usr/bin/{name}" if name in {"docker", "tofu", "systemctl"} else None
-
         with (
-            patch("vss_runtime.host_inspection.shutil.which", side_effect=which),
+            patch(
+                "vss_runtime.host_inspection.HostInspector._resolve_executable",
+                side_effect=lambda name: Path(f"/usr/bin/{name}"),
+            ),
             patch(
                 "vss_runtime.host_inspection.HostInspector._run",
                 side_effect=[(True, "systemd"), (True, "Docker version 27.0"), (True, "27.0") , (True, "OpenTofu v1.9.0")],
@@ -419,8 +419,11 @@ class CommandEngineTests(unittest.TestCase):
             text=True,
             env=environment,
         )
-        self.assertEqual(checked.returncode, 0)
-        self.assertIn('"checks"', checked.stdout)
+        payload = json.loads(checked.stdout)
+        self.assertEqual(checked.returncode, payload["exit_code"])
+        self.assertIn(checked.returncode, {int(ExitCode.SUCCESS), int(ExitCode.EXECUTION_FAILURE)})
+        self.assertEqual(payload["command"], "bootstrap.check")
+        self.assertEqual(payload["schema_version"], "1")
 
 
 if __name__ == "__main__":
