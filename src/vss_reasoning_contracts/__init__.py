@@ -1,4 +1,4 @@
-from .canonicalization import canonical_bytes, canonical_digest
+from .canonicalization import canonical_bytes, canonical_digest, load_json_document
 from .errors import (
     ContractDisabled,
     IncompatibleContract,
@@ -29,6 +29,7 @@ __all__ = [
     "ValidatedSemanticResult",
     "canonical_bytes",
     "canonical_digest",
+    "load_json_document",
     "validate_request",
     "validate_result",
 ]

@@ -95,8 +95,9 @@ operators/agents.
   evidence references treated as source access, registration treated as
   authorization, or sensitive error disclosure. Implemented mitigation: four
   exact repository-contained non-symlink schema paths; Draft 2020-12 schema and
-  identity checks; no external references, imports, plugins, environment or CLI
-  schema overrides; immutable registry/schema snapshots and validated values;
+  identity checks; no caller-selected schema root; no external or cyclic
+  references, duplicate JSON keys, imports, plugins, environment or CLI schema
+  overrides; immutable registry/schema snapshots and validated values;
   exact-version task/family resolution; one typed payload; strict unknown-field,
   size, depth, node, integer and JSON-type bounds; deterministic canonical
   digests; qualified non-authorizing confidence; inert evidence identifiers;

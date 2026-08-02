@@ -25,7 +25,8 @@ lifecycle states fail closed.
 
 Schemas are regular non-symlink files beneath the repository `schemas/`
 directory. Loading rejects path escape, identity mismatch, unsupported dialect,
-malformed schema, and external or remote references. The registry retains an
+malformed schema, duplicate keys, cyclic references, and external or remote
+references. Callers cannot supply a schema root. The registry retains an
 immutable parsed snapshot and SHA-256 digest for each admitted schema, so later
 filesystem substitution cannot mutate an existing invocation.
 
@@ -53,6 +54,9 @@ evidence identifiers. They contain no plan, executable operation, capability,
 workflow, approval, provider tool call, secret, source-access grant, or
 implementation path.
 
+Each option's satisfied and unsatisfied constraint references must resolve to a
+declared common constraint and cannot contradict one another.
+
 Common sections compose typed bounded facts, assumptions, unknowns,
 constraints, evidence references, confidence, and limitations. Claimed facts
 are not established as truth by schema validation. Evidence references use an
@@ -79,12 +83,18 @@ Unsupported Python objects, tuples, sets, bytes, file handles, datetimes,
 custom objects, recursive/excessively deep content, huge integers, and
 non-finite numbers are rejected rather than stringified.
 
+The mapping validation API accepts already-decoded JSON-compatible values. For
+text or bytes, `load_json_document` is the supported decoder and rejects
+duplicate object keys rather than silently retaining the last value.
+
 ## Compatibility, canonicalization, and errors
 
 M3.1 supports exact versions only. It performs no downgrade, translation,
 unknown-field dropping, family substitution, or lifecycle defaulting.
 Canonical JSON uses UTF-8, sorted keys, compact separators, and rejects
-unsupported objects. SHA-256 digests cover schema bytes, the deterministic
+unsupported objects. Unicode code points are preserved without normalization;
+canonically equivalent spellings therefore have distinct digests. SHA-256
+digests cover schema bytes, the deterministic
 registry snapshot, and validated request/result envelopes. Digests provide
 integrity evidence only—not signatures, authenticity, approval, or authority.
 
@@ -98,7 +108,7 @@ no public reasoning CLI. Safe errors do not echo payload contents.
 From the repository root:
 
 ```bash
-PYTHONPATH=src python -c 'import json, pathlib; from vss_reasoning_contracts import SemanticContractRegistry, validate_request, validate_result; root=pathlib.Path.cwd(); registry=SemanticContractRegistry.built_in(root); fixtures=root/"tests/fixtures/reasoning"; request=validate_request(json.loads((fixtures/"generate-options-valid.json").read_text()), registry); result=validate_result(json.loads((fixtures/"option-set-valid.json").read_text()), registry); print(request.digest, result.digest, registry.digest)'
+PYTHONPATH=src python -c 'import pathlib; from vss_reasoning_contracts import SemanticContractRegistry, load_json_document, validate_request, validate_result; root=pathlib.Path.cwd(); registry=SemanticContractRegistry.built_in(); fixtures=root/"tests/fixtures/reasoning"; request=validate_request(load_json_document((fixtures/"generate-options-valid.json").read_bytes()), registry); result=validate_result(load_json_document((fixtures/"option-set-valid.json").read_bytes()), registry); print(request.digest, result.digest, registry.digest)'
 ```
 
 This validates and prints deterministic integrity digests. It does not generate

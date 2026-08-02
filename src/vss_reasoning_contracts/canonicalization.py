@@ -15,7 +15,32 @@ from .constants import (
     MAX_STRING_LENGTH,
     MAX_TOTAL_NODES,
 )
-from .errors import UnsafeSemanticContent
+from .errors import InvalidSemanticInput, UnsafeSemanticContent
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise InvalidSemanticInput("JSON document contains duplicate object keys")
+        value[key] = item
+    return value
+
+
+def load_json_document(document: str | bytes) -> Any:
+    """Decode JSON without silently accepting duplicate keys or non-finite values."""
+    if type(document) not in (str, bytes):
+        raise InvalidSemanticInput("JSON document must be text or bytes")
+    try:
+        return json.loads(
+            document,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                UnsafeSemanticContent("JSON document contains a non-finite number")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InvalidSemanticInput("JSON document is invalid") from exc
 
 
 def validate_json_value(value: Any, *, maximum_bytes: int) -> None:
@@ -28,29 +53,39 @@ def validate_json_value(value: Any, *, maximum_bytes: int) -> None:
             raise UnsafeSemanticContent("semantic value contains too many items")
         if depth > MAX_NESTING_DEPTH:
             raise UnsafeSemanticContent("semantic value exceeds the nesting limit")
-        if item is None or isinstance(item, bool):
+        if item is None or type(item) is bool:
             return
-        if isinstance(item, int):
+        if type(item) is int:
             if abs(item) > MAX_INTEGER_ABS:
-                raise UnsafeSemanticContent("semantic value contains an oversized integer")
+                raise UnsafeSemanticContent(
+                    "semantic value contains an oversized integer"
+                )
             return
-        if isinstance(item, float):
+        if type(item) is float:
             if not math.isfinite(item):
-                raise UnsafeSemanticContent("semantic value contains a non-finite number")
+                raise UnsafeSemanticContent(
+                    "semantic value contains a non-finite number"
+                )
             return
-        if isinstance(item, str):
+        if type(item) is str:
             if len(item) > MAX_STRING_LENGTH:
-                raise UnsafeSemanticContent("semantic value contains an oversized string")
+                raise UnsafeSemanticContent(
+                    "semantic value contains an oversized string"
+                )
             return
-        if isinstance(item, list):
+        if type(item) is list:
             if len(item) > MAX_LIST_ITEMS:
-                raise UnsafeSemanticContent("semantic value contains too many list items")
+                raise UnsafeSemanticContent(
+                    "semantic value contains too many list items"
+                )
             for child in item:
                 visit(child, depth + 1)
             return
-        if isinstance(item, dict):
+        if type(item) is dict:
             if len(item) > MAX_OBJECT_PROPERTIES:
-                raise UnsafeSemanticContent("semantic value contains too many object fields")
+                raise UnsafeSemanticContent(
+                    "semantic value contains too many object fields"
+                )
             for key, child in item.items():
                 if not isinstance(key, str):
                     raise UnsafeSemanticContent("semantic object keys must be strings")
@@ -69,7 +104,11 @@ def canonical_bytes(value: Any) -> bytes:
     plain = thaw_json(value)
     try:
         return json.dumps(
-            plain, allow_nan=False, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            plain,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise UnsafeSemanticContent("semantic value is not canonical JSON") from exc
@@ -80,18 +119,18 @@ def canonical_digest(value: Any) -> str:
 
 
 def freeze_json(value: Any) -> Any:
-    if isinstance(value, dict):
+    if type(value) is dict:
         return MappingProxyType({key: freeze_json(item) for key, item in value.items()})
-    if isinstance(value, list):
+    if type(value) is list:
         return tuple(freeze_json(item) for item in value)
     return value
 
 
 def thaw_json(value: Any) -> Any:
-    if isinstance(value, Mapping):
+    if type(value) is dict or isinstance(value, MappingProxyType):
         return {key: thaw_json(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if type(value) in (list, tuple):
         return [thaw_json(item) for item in value]
-    if value is None or isinstance(value, (bool, int, float, str)):
+    if value is None or type(value) in (bool, int, float, str):
         return value
     raise UnsafeSemanticContent("semantic value contains an unsupported immutable type")

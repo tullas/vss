@@ -39,29 +39,35 @@ class ContractRegistration:
     deprecated_after: str | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ValidatedSemanticRequest:
     value: Mapping[str, Any]
     digest: str
 
     @classmethod
-    def from_value(cls, value: dict[str, Any]) -> "ValidatedSemanticRequest":
+    def _from_validated_value(cls, value: dict[str, Any]) -> "ValidatedSemanticRequest":
         frozen = freeze_json(value)
-        return cls(frozen, canonical_digest(frozen))
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "value", frozen)
+        object.__setattr__(instance, "digest", canonical_digest(frozen))
+        return instance
 
     def to_json_value(self) -> dict[str, Any]:
         return thaw_json(self.value)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ValidatedSemanticResult:
     value: Mapping[str, Any]
     digest: str
 
     @classmethod
-    def from_value(cls, value: dict[str, Any]) -> "ValidatedSemanticResult":
+    def _from_validated_value(cls, value: dict[str, Any]) -> "ValidatedSemanticResult":
         frozen = freeze_json(value)
-        return cls(frozen, canonical_digest(frozen))
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "value", frozen)
+        object.__setattr__(instance, "digest", canonical_digest(frozen))
+        return instance
 
     def to_json_value(self) -> dict[str, Any]:
         return thaw_json(self.value)
