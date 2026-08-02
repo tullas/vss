@@ -132,6 +132,32 @@ operators/agents.
   in-process code, local JSONL audit remains development-only, and process
   isolation, durable production audit, Knowledge Packages, Plan IR, approvals,
   external providers and all execution remain deferred.
+- Repository-owned M3.3 performance profiles and fixed fixture to the shared
+  M3.2 Gateway, development audit reader, metrics, and local report writer.
+  Abuse: profile or arbitrary-command injection, report path escape or symlink
+  overwrite, unbounded submission or benchmark denial of service,
+  request/result or audit association mix-up, correlation collision, partial
+  completion reported as success, semantic payload or environment leakage,
+  malformed/non-finite metrics, divide-by-zero or wall-clock misuse, executor
+  and descriptor leaks, failure contamination, and laptop results presented as
+  production evidence. Implemented mitigation: three exact immutable profiles;
+  hard request, concurrency, outstanding-work, duration, stress and endurance
+  ceilings; no numeric, provider, strategy, command, network or implementation
+  override; independent per-request data and identities; the real Gateway and
+  normal validation/policy/audit path; monotonic durations; tested nearest-rank
+  percentiles and measured-phase throughput; bounded offset-based audit
+  selection with rotation/truncation/partial-tail detection and exact terminal
+  event, implementation, status, execution and request association; serialized
+  complete in-process JSONL appends; allowlisted environment
+  and approximate resource metadata; strict 256 KiB payload-free report schema;
+  fixed ignored output root, restrictive modes, symlink rejection and atomic
+  no-clobber placement; safe errors; and structural CI gates without brittle
+  latency SLOs.
+  The report digest is integrity evidence only and successful measurement grants
+  no authority or production certification. Production admission control,
+  multi-process audit locking, durable audit/state, process isolation,
+  distributed workers, autoscaling, cloud validation, external-provider and
+  movie-media performance remain deferred.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,

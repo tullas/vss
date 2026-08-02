@@ -18,6 +18,7 @@ from .registry import get_command
 
 RUNTIME_CAPABILITY_COMMANDS = frozenset({"system.info", "runtime.echo", "runtime.time", "bootstrap.check"})
 REASONING_COMMAND = "reasoning.generate-options"
+PERFORMANCE_COMMAND = "performance.reasoning"
 
 
 def utc_now() -> str:
@@ -34,9 +35,10 @@ def _safe_error(message: str) -> str:
 
 
 class CommandRunner:
-    def __init__(self, runtime_controller=None, reasoning_gateway=None) -> None:
+    def __init__(self, runtime_controller=None, reasoning_gateway=None, performance_harness=None) -> None:
         self._runtime_controller = runtime_controller
         self._reasoning_gateway = reasoning_gateway
+        self._performance_harness = performance_harness
 
     def run(
         self,
@@ -76,7 +78,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command != REASONING_COMMAND:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND}:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -86,6 +88,34 @@ class CommandRunner:
         payload = input_data if input_data is not None else {}
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
+        if command == PERFORMANCE_COMMAND:
+            from vss_performance import (
+                InvalidPerformanceProfile,
+                PerformanceCorrectnessFailure,
+                PerformanceHarness,
+                PerformanceReportFailure,
+                PerformanceTimeout,
+            )
+
+            if frozenset(payload) != {"profile", "include_endurance"}:
+                return finish("error", ExitCode.INVALID_INPUT, {}, ["performance input is invalid"])
+            harness = self._performance_harness or PerformanceHarness()
+            try:
+                summary, _ = harness.run(
+                    payload["profile"], environment=environment, dry_run=dry_run,
+                    include_endurance=payload["include_endurance"],
+                )
+                return finish("success", ExitCode.SUCCESS, summary, [])
+            except InvalidPerformanceProfile:
+                return finish("error", ExitCode.INVALID_INPUT, {}, ["performance profile is invalid"])
+            except PerformanceTimeout:
+                return finish("error", ExitCode.TIMEOUT, {}, ["performance run timed out"])
+            except PerformanceCorrectnessFailure:
+                return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["performance correctness validation failed"])
+            except PerformanceReportFailure:
+                return finish("error", ExitCode.INTERNAL_ERROR, {}, ["performance report failed"])
+            except Exception:
+                return finish("error", ExitCode.INTERNAL_ERROR, {}, ["performance run failed"])
         if command == REASONING_COMMAND:
             from vss_reasoning import (
                 CandidateGenerationFailure,
