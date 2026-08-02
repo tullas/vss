@@ -86,6 +86,25 @@ operators/agents.
   version output, controller-only invocation, and input/output-free audit
   records. This boundary constrains defective trusted code; in-process Python
   remains unsandboxed.
+- Repository-owned M3.1 semantic schemas and fixed registry metadata to inert
+  validated request/result objects. Abuse: contract or schema substitution,
+  version downgrade, universal-object growth, extension-bag or multiple-payload
+  injection, identity/payload mismatch, dynamic registration or arbitrary
+  schema/module loading, provider-native or prompt-field injection, oversized
+  or recursive objects, post-validation mutation, false confidence authority,
+  evidence references treated as source access, registration treated as
+  authorization, or sensitive error disclosure. Implemented mitigation: four
+  exact repository-contained non-symlink schema paths; Draft 2020-12 schema and
+  identity checks; no external references, imports, plugins, environment or CLI
+  schema overrides; immutable registry/schema snapshots and validated values;
+  exact-version task/family resolution; one typed payload; strict unknown-field,
+  size, depth, node, integer and JSON-type bounds; deterministic canonical
+  digests; qualified non-authorizing confidence; inert evidence identifiers;
+  safe payload-free errors; and adversarial tests. Schema and registry digests
+  prove recorded integrity, not signatures, authenticity, authorization, or
+  truth. Provider invocation, Knowledge Package resolution, Plan IR, approval,
+  execution, signing, third-party registration and production audit are not
+  implemented and remain governed by later milestones and accepted ADRs.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,

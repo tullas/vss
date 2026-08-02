@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vss.semantic_request/1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "correlation_id", "task_identity", "task_version", "required_result_family", "required_result_version", "lifecycle_mode", "data_classification", "permitted_purpose", "budget", "payload"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "request_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "correlation_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "task_identity": {"const": "generate_options"},
+    "task_version": {"const": "1"},
+    "required_result_family": {"const": "option_set"},
+    "required_result_version": {"const": "1"},
+    "lifecycle_mode": {"const": "validation"},
+    "data_classification": {"enum": ["public", "internal", "confidential", "restricted"]},
+    "permitted_purpose": {"type": "string", "minLength": 1, "maxLength": 256},
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maximum_duration_ms", "maximum_result_bytes"],
+      "properties": {
+        "maximum_duration_ms": {"type": "integer", "minimum": 1, "maximum": 300000},
+        "maximum_result_bytes": {"type": "integer", "minimum": 1, "maximum": 65536}
+      }
+    },
+    "payload": {"type": "object"}
+  }
+}
