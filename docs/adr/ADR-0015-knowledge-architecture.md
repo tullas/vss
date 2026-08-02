@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -65,6 +65,11 @@ Only the Knowledge Layer prepares Knowledge Packages. It governs source
 registration, retrieval authorization, purpose limitation, minimization,
 classification, freshness, provenance, redaction, package construction,
 retention, revocation, and integrity evidence.
+
+Retrieval authorization and package construction occur only within policy and
+resource authority approved by Runtime. The Knowledge Layer has no independent
+authorization root and cannot enlarge the source scope, purpose, classification
+ceiling, budget, retention, or provider eligibility granted by Runtime policy.
 
 The Knowledge Layer is not a second Runtime. It cannot authorize capability
 execution, approve operations, select execution capabilities, invoke workflows,
@@ -158,6 +163,12 @@ and only one payload family and version. Unknown types or versions, unknown
 fields, identity/payload mismatches, multiple unrelated payloads, untyped data
 bags, and arbitrary extension objects fail closed. Composition is semantic and
 does not prescribe a programming-language inheritance hierarchy.
+
+Every item family has a stable identity, schema identity and version, explicit
+size and structural bounds, lifecycle state, compatibility rules, conformance
+requirements, security review, accountable owner, and deprecation and
+retirement metadata. A new family changes its own registered contract rather
+than adding optional source-specific fields to the common envelope.
 
 ### Knowledge Package
 
@@ -456,6 +467,15 @@ package builders, retrieval strategies, and item contracts remain unsupported.
 Future third-party support requires separate architecture for signing,
 provenance, trust roots, isolation, revocation, upgrade policy, compatibility,
 and incident response.
+
+Production operation is not justified by deterministic fixtures, cooperative
+thread cancellation, local JSON Lines audit, or trusted in-process Python.
+Before sensitive, effectful, long-running, or production-scale knowledge work,
+separate accepted designs and implementations must address process or worker
+isolation, enforceable cancellation, durable and integrity-protected audit,
+production storage, connector credential scope, privacy and residency,
+revocation propagation, incident response, and package signing or encryption
+where classification and threat analysis require them.
 
 ## Alternatives Considered
 
