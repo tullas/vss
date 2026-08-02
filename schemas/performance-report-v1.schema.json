@@ -92,6 +92,45 @@
     "status": {"enum": ["success", "failed"]},
     "started_at": {"$ref": "#/$defs/timestamp"}, "completed_at": {"$ref": "#/$defs/timestamp"}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"configuration": {"properties": {"dry_run": {"const": true}}}}},
+      "then": {"properties": {"semantic_validation": {"properties": {
+        "expected_content_digest": {"type": "null"},
+        "observed_content_digests": {"maxItems": 0},
+        "expected_option_count": {"type": "null"}
+      }}}}
+    },
+    {
+      "if": {"properties": {"configuration": {"properties": {"dry_run": {"const": false}}}, "status": {"const": "success"}}},
+      "then": {"properties": {"semantic_validation": {"properties": {
+        "expected_content_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "observed_content_digests": {"minItems": 1, "maxItems": 1},
+        "digest_match": {"const": true},
+        "expected_option_count": {"type": "integer"}
+      }}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "success"}}},
+      "then": {"properties": {
+        "counters": {"properties": {
+          "failures": {"const": 0}, "timeouts": {"const": 0},
+          "cancellations": {"const": 0}, "audit_failures": {"const": 0},
+          "semantic_mismatches": {"const": 0}
+        }},
+        "audit_validation": {"properties": {
+          "enabled": {"const": true},
+          "missing_terminal_records": {"const": 0},
+          "duplicate_terminal_records": {"const": 0},
+          "invalid_associations": {"const": 0}, "malformed_records": {"const": 0}
+        }},
+        "failures": {"maxProperties": 0},
+        "phases": {"items": {"properties": {
+          "cancellations": {"const": 0}, "timed_out": {"const": false}, "failures": {"const": 0}
+        }}}
+      }}
+    }
+  ],
   "$defs": {
     "identity": {
       "type": "object", "additionalProperties": false, "required": ["identity", "version", "sha256"],
@@ -121,10 +160,12 @@
     },
     "phase": {
       "type": "object", "additionalProperties": false,
-      "required": ["name", "requests", "concurrency", "maximum_outstanding", "successes", "failures", "duration_seconds"],
+      "required": ["name", "requests", "submitted", "completed", "cancellations", "timed_out", "concurrency", "maximum_outstanding", "successes", "failures", "duration_seconds"],
       "properties": {
         "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
-        "requests": {"$ref": "#/$defs/count"}, "concurrency": {"type": "integer", "minimum": 1, "maximum": 16},
+        "requests": {"$ref": "#/$defs/count"}, "submitted": {"$ref": "#/$defs/count"},
+        "completed": {"$ref": "#/$defs/count"}, "cancellations": {"$ref": "#/$defs/count"},
+        "timed_out": {"type": "boolean"}, "concurrency": {"type": "integer", "minimum": 1, "maximum": 16},
         "maximum_outstanding": {"type": "integer", "minimum": 1, "maximum": 16},
         "successes": {"$ref": "#/$defs/count"}, "failures": {"$ref": "#/$defs/count"},
         "duration_seconds": {"type": "number", "minimum": 0, "maximum": 300}

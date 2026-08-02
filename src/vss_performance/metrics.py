@@ -8,7 +8,10 @@ from .errors import PerformanceCorrectnessFailure
 
 
 def nearest_rank(values: Iterable[float], percentile: int) -> float:
-    samples = sorted(float(value) for value in values)
+    raw_samples = tuple(values)
+    if any(type(value) not in (int, float) for value in raw_samples):
+        raise PerformanceCorrectnessFailure("latency sample is invalid")
+    samples = sorted(float(value) for value in raw_samples)
     if not samples or type(percentile) is not int or not 1 <= percentile <= 100:
         raise PerformanceCorrectnessFailure("latency percentile input is invalid")
     if any(not math.isfinite(value) or value < 0 for value in samples):

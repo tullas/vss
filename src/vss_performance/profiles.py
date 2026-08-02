@@ -15,6 +15,7 @@ HARD_MAX_CONCURRENCY = 16
 HARD_MAX_REQUESTS = 500
 HARD_MAX_ENDURANCE_SECONDS = 60.0
 HARD_MAX_TOTAL_TIMEOUT_SECONDS = 300.0
+_ADMITTED_PROFILE_IDENTITIES = frozenset({"ci_safe", "laptop_small", "laptop_standard"})
 
 
 def _integer(value: object, name: str, *, minimum: int, maximum: int) -> int:
@@ -53,9 +54,17 @@ class PerformanceProfile:
     def __post_init__(self) -> None:
         if type(self.stress_concurrency_steps) is not tuple:
             raise InvalidPerformanceProfile("stress concurrency steps are not immutable")
-        if self.version != PROFILE_VERSION or self.workload_identity != WORKLOAD_IDENTITY:
+        if (
+            self.identity not in _ADMITTED_PROFILE_IDENTITIES
+            or self.version != PROFILE_VERSION
+            or self.workload_identity != WORKLOAD_IDENTITY
+        ):
             raise InvalidPerformanceProfile("performance profile identity is unsupported")
-        if self.fixture_identity != FIXTURE_IDENTITY or len(self.expected_content_digest) != 64:
+        if (
+            self.fixture_identity != FIXTURE_IDENTITY
+            or len(self.expected_content_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.expected_content_digest)
+        ):
             raise InvalidPerformanceProfile("performance fixture identity is unsupported")
         _integer(self.expected_option_count, "expected_option_count", minimum=1, maximum=8)
         _integer(self.warmup_requests, "warmup_requests", minimum=0, maximum=32)

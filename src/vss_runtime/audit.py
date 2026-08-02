@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
 from .errors import RuntimeInternalFailure
+
+_APPEND_LOCK = threading.Lock()
 
 
 class AuditLogger:
@@ -22,12 +25,18 @@ class AuditLogger:
             os.chmod(self.audit_root, 0o700)
             path = self.audit_root / "executions.jsonl"
             flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(path, flags, 0o600)
-            try:
-                os.chmod(path, 0o600)
-                payload = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
-                os.write(descriptor, payload.encode("utf-8"))
-            finally:
-                os.close(descriptor)
+            payload = (json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("utf-8")
+            with _APPEND_LOCK:
+                descriptor = os.open(path, flags, 0o600)
+                try:
+                    os.chmod(path, 0o600)
+                    written = 0
+                    while written < len(payload):
+                        count = os.write(descriptor, payload[written:])
+                        if count <= 0:
+                            raise RuntimeInternalFailure("runtime audit record could not be written")
+                        written += count
+                finally:
+                    os.close(descriptor)
         except OSError as exc:
             raise RuntimeInternalFailure("runtime audit record could not be written") from exc

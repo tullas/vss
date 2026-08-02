@@ -39,6 +39,56 @@ def validate_report(report: dict[str, Any]) -> None:
         raise PerformanceReportFailure("performance report schema validation failed")
     if report["schema_version"] != REPORT_SCHEMA_VERSION or report["status"] not in {"success", "failed"}:
         raise PerformanceReportFailure("performance report metadata is invalid")
+    counters = report["counters"]
+    phases = report["phases"]
+    if (
+        counters["admitted"] != counters["completed"] + counters["cancellations"]
+        or counters["successes"] + counters["failures"] != counters["completed"]
+        or sum(phase["submitted"] for phase in phases) != counters["admitted"]
+        or sum(phase["completed"] for phase in phases) != counters["completed"]
+        or sum(phase["cancellations"] for phase in phases) != counters["cancellations"]
+        or any(
+            phase["submitted"] > phase["requests"]
+            or phase["completed"] + phase["cancellations"] != phase["submitted"]
+            or phase["successes"] + phase["failures"] != phase["completed"]
+            for phase in phases
+        )
+    ):
+        raise PerformanceReportFailure("performance report accounting is invalid")
+    measured = [phase for phase in phases if phase["name"] == "measured"]
+    if len(measured) > 1:
+        raise PerformanceReportFailure("performance report measured phase is ambiguous")
+    measured_successes = measured[0]["successes"] if measured else 0
+    if report["latency"]["sample_count"] != measured_successes:
+        raise PerformanceReportFailure("performance report latency accounting is invalid")
+    expected_throughput = 0.0
+    if measured_successes:
+        if measured[0]["duration_seconds"] <= 0:
+            raise PerformanceReportFailure("performance report measured duration is invalid")
+        expected_throughput = round(measured_successes / measured[0]["duration_seconds"], 3)
+    if report["throughput_requests_per_second"] != expected_throughput:
+        raise PerformanceReportFailure("performance report throughput is invalid")
+    if report["status"] == "success" and (
+        len(measured) != 1
+        or any(
+            phase["submitted"] != phase["requests"]
+            or phase["timed_out"]
+            or phase["failures"]
+            or phase["cancellations"]
+            for phase in phases
+        )
+        or report["audit_validation"]["records"] != counters["completed"]
+    ):
+        raise PerformanceReportFailure("successful performance report is incomplete")
+    semantic = report["semantic_validation"]
+    if report["configuration"]["dry_run"]:
+        if semantic["expected_content_digest"] is not None or semantic["observed_content_digests"] or semantic["expected_option_count"] is not None:
+            raise PerformanceReportFailure("dry-run report claims semantic output")
+    elif report["status"] == "success" and (
+        semantic["digest_match"] is not True
+        or semantic["observed_content_digests"] != [semantic["expected_content_digest"]]
+    ):
+        raise PerformanceReportFailure("performance report semantic evidence is inconsistent")
     if report.get("report_sha256") != report_digest(report):
         raise PerformanceReportFailure("performance report digest is invalid")
     payload = canonical_bytes(report)

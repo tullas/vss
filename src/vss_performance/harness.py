@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from vss_reasoning.gateway import ReasoningGateway
-from vss_reasoning_contracts import canonical_bytes, load_json_document
+from vss_reasoning_contracts import canonical_bytes, canonical_digest, load_json_document
 
 from .environment import collect_environment, collect_resources
 from .errors import PerformanceCorrectnessFailure, PerformanceTimeout
@@ -37,7 +37,30 @@ class _Invocation:
     latency_seconds: float
     success: bool
     content_digest: str | None
+    request_digest: str
+    result_digest: str | None
     failure: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _AuditSnapshot:
+    existed: bool
+    device: int | None
+    inode: int | None
+    offset: int
+    anchor_start: int
+    anchor_sha256: str | None
+
+
+_AUDIT_KEYS = frozenset({
+    "event_type", "recorded_at", "execution_id", "request_id", "correlation_id",
+    "task_identity", "task_version", "result_family", "result_version",
+    "strategy_identity", "strategy_version", "provider_identity", "provider_version",
+    "semantic_registry_sha256", "implementation_registry_sha256", "request_sha256",
+    "result_sha256", "semantic_content_sha256", "policy_identity", "policy_version",
+    "authorization", "lifecycle_status", "duration_ms", "deadline_outcome",
+    "budget_outcome", "status", "failure_classification",
+})
 
 
 def _safe_commit(repository_root: Path) -> str | None:
@@ -89,28 +112,87 @@ class PerformanceHarness:
             raise PerformanceCorrectnessFailure("performance fixture is invalid")
         return value
 
-    def _audit_offset(self) -> int:
+    def _audit_snapshot(self) -> _AuditSnapshot:
         path = self._repository_root / _AUDIT_RELATIVE
         try:
             metadata = path.lstat()
         except FileNotFoundError:
-            return 0
+            return _AuditSnapshot(False, None, None, 0, 0, None)
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
             raise PerformanceCorrectnessFailure("development audit path is unsafe")
-        return metadata.st_size
-
-    def _audit_records(self, offset: int) -> list[dict[str, Any]]:
-        path = self._repository_root / _AUDIT_RELATIVE
+        anchor_start = max(0, metadata.st_size - 4096)
+        descriptor = -1
         try:
-            if path.is_symlink() or not path.is_file():
-                raise PerformanceCorrectnessFailure("development audit output is unavailable")
-            with path.open("rb") as stream:
-                stream.seek(offset)
-                data = stream.read(_MAX_AUDIT_READ_BYTES + 1)
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            opened = os.fstat(descriptor)
+            if (opened.st_dev, opened.st_ino, opened.st_size) != (
+                metadata.st_dev, metadata.st_ino, metadata.st_size
+            ):
+                raise PerformanceCorrectnessFailure("development audit output changed during inspection")
+            os.lseek(descriptor, anchor_start, os.SEEK_SET)
+            anchor = os.read(descriptor, metadata.st_size - anchor_start)
+            if len(anchor) != metadata.st_size - anchor_start:
+                raise PerformanceCorrectnessFailure("development audit output changed during inspection")
         except OSError as exc:
             raise PerformanceCorrectnessFailure("development audit output is unreadable") from exc
-        if len(data) > _MAX_AUDIT_READ_BYTES:
-            raise PerformanceCorrectnessFailure("development audit output is oversized")
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        return _AuditSnapshot(
+            True, metadata.st_dev, metadata.st_ino, metadata.st_size, anchor_start,
+            hashlib.sha256(anchor).hexdigest(),
+        )
+
+    def _audit_records(self, snapshot: _AuditSnapshot) -> list[dict[str, Any]]:
+        path = self._repository_root / _AUDIT_RELATIVE
+        descriptor = -1
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            before = os.fstat(descriptor)
+            if not stat.S_ISREG(before.st_mode):
+                raise PerformanceCorrectnessFailure("development audit output is unavailable")
+            if snapshot.existed and (before.st_dev, before.st_ino) != (snapshot.device, snapshot.inode):
+                raise PerformanceCorrectnessFailure("development audit output was replaced")
+            if before.st_size < snapshot.offset:
+                raise PerformanceCorrectnessFailure("development audit output was truncated")
+            if snapshot.existed:
+                os.lseek(descriptor, snapshot.anchor_start, os.SEEK_SET)
+                anchor_length = snapshot.offset - snapshot.anchor_start
+                anchor = b""
+                while len(anchor) < anchor_length:
+                    chunk = os.read(descriptor, anchor_length - len(anchor))
+                    if not chunk:
+                        raise PerformanceCorrectnessFailure("development audit output was replaced")
+                    anchor += chunk
+                if hashlib.sha256(anchor).hexdigest() != snapshot.anchor_sha256:
+                    raise PerformanceCorrectnessFailure("development audit output was replaced")
+            length = before.st_size - snapshot.offset
+            if length > _MAX_AUDIT_READ_BYTES:
+                raise PerformanceCorrectnessFailure("development audit output is oversized")
+            os.lseek(descriptor, snapshot.offset, os.SEEK_SET)
+            chunks: list[bytes] = []
+            remaining = length
+            while remaining:
+                chunk = os.read(descriptor, min(remaining, 65536))
+                if not chunk:
+                    raise PerformanceCorrectnessFailure("development audit output changed during reading")
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            after = os.fstat(descriptor)
+            if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino) or after.st_size < before.st_size:
+                raise PerformanceCorrectnessFailure("development audit output changed during reading")
+            data = b"".join(chunks)
+        except FileNotFoundError as exc:
+            if not snapshot.existed:
+                return []
+            raise PerformanceCorrectnessFailure("development audit output is unavailable") from exc
+        except OSError as exc:
+            raise PerformanceCorrectnessFailure("development audit output is unreadable") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        if data and not data.endswith(b"\n"):
+            raise PerformanceCorrectnessFailure("development audit output has a partial record")
         records: list[dict[str, Any]] = []
         for line in data.splitlines():
             try:
@@ -121,6 +203,81 @@ class PerformanceHarness:
                 raise PerformanceCorrectnessFailure("development audit output is malformed")
             records.append(value)
         return records
+
+    @staticmethod
+    def _validate_audit_associations(
+        records: list[dict[str, Any]],
+        invocations: list[_Invocation],
+        *,
+        dry_run: bool,
+        expected_digest: str,
+    ) -> dict[str, int]:
+        expected = {item.correlation_id: item for item in invocations}
+        if len(expected) != len(invocations) or len({item.request_id for item in invocations}) != len(invocations):
+            raise PerformanceCorrectnessFailure("benchmark request identities collide")
+        selected = [record for record in records if record.get("correlation_id") in expected]
+        by_correlation: dict[str, list[dict[str, Any]]] = {}
+        malformed = 0
+        execution_ids: set[str] = set()
+        for record in selected:
+            if frozenset(record) != _AUDIT_KEYS:
+                malformed += 1
+            correlation = record.get("correlation_id")
+            if type(correlation) is str:
+                by_correlation.setdefault(correlation, []).append(record)
+        duplicate = sum(max(0, len(group) - 1) for group in by_correlation.values())
+        missing = len(set(expected) - set(by_correlation))
+        invalid = 0
+        for correlation, invocation in expected.items():
+            group = by_correlation.get(correlation, [])
+            if len(group) != 1:
+                continue
+            record = group[0]
+            expected_event = (
+                "reasoning_readiness_completed" if invocation.success and dry_run
+                else "reasoning_execution_completed" if invocation.success
+                else "reasoning_execution_failed"
+            )
+            expected_status = "success" if invocation.success else "failed"
+            expected_content = expected_digest if invocation.success and not dry_run else None
+            expected_result_present = invocation.success and not dry_run
+            execution_id = record.get("execution_id")
+            execution_identity_invalid = (
+                type(execution_id) is not str
+                or len(execution_id) != 32
+                or any(character not in "0123456789abcdef" for character in execution_id)
+                or execution_id in execution_ids
+            )
+            if type(execution_id) is str:
+                execution_ids.add(execution_id)
+            if (
+                execution_identity_invalid
+                or type(record.get("recorded_at")) is not str
+                or record.get("request_id") != invocation.request_id
+                or record.get("event_type") != expected_event
+                or record.get("status") != expected_status
+                or record.get("task_identity") != "generate_options"
+                or record.get("task_version") != "1"
+                or record.get("result_family") != "option_set"
+                or record.get("result_version") != "1"
+                or record.get("strategy_identity") != "vss.generate-options.deterministic"
+                or record.get("strategy_version") != "1.0.0"
+                or record.get("provider_identity") != "vss.reasoning.deterministic-options"
+                or record.get("provider_version") != "1.0.0"
+                or record.get("authorization") != "authorized"
+                or record.get("request_sha256") != invocation.request_digest
+                or record.get("result_sha256") != invocation.result_digest
+                or record.get("semantic_content_sha256") != expected_content
+                or (invocation.result_digest is not None) != expected_result_present
+            ):
+                invalid += 1
+        return {
+            "records": len(selected),
+            "missing": missing,
+            "duplicate": duplicate,
+            "invalid": invalid,
+            "malformed": malformed,
+        }
 
     @staticmethod
     def _request(template: dict[str, Any], request_id: str, correlation_id: str) -> dict[str, Any]:
@@ -142,6 +299,7 @@ class PerformanceHarness:
         expected_option_count: int,
     ) -> _Invocation:
         request = self._request(template, request_id, correlation_id)
+        request_digest = canonical_digest(request)
         started = time.monotonic()
         try:
             outcome = self._gateway.execute(
@@ -157,7 +315,10 @@ class PerformanceHarness:
                     raise PerformanceCorrectnessFailure("dry-run produced semantic output")
                 if outcome.output.get("readiness", {}).get("provider_invoked") is not False:
                     raise PerformanceCorrectnessFailure("dry-run invoked the provider")
-                return _Invocation(request_id, correlation_id, latency, True, None, None)
+                return _Invocation(
+                    request_id, correlation_id, latency, True, None,
+                    request_digest, None, None,
+                )
             if outcome.validated_result is None or outcome.content_digest != expected_digest:
                 raise PerformanceCorrectnessFailure("semantic content digest mismatch")
             result = outcome.validated_result.value
@@ -165,11 +326,14 @@ class PerformanceHarness:
                 raise PerformanceCorrectnessFailure("request and result were mixed")
             if len(result["payload"]["options"]) != expected_option_count:
                 raise PerformanceCorrectnessFailure("semantic option count mismatch")
-            return _Invocation(request_id, correlation_id, latency, True, outcome.content_digest, None)
+            return _Invocation(
+                request_id, correlation_id, latency, True, outcome.content_digest,
+                request_digest, outcome.validated_result.digest, None,
+            )
         except Exception as exc:
             return _Invocation(
                 request_id, correlation_id, time.monotonic() - started, False, None,
-                type(exc).__name__,
+                request_digest, None, type(exc).__name__,
             )
 
     def _phase(
@@ -193,15 +357,16 @@ class PerformanceHarness:
         results: list[_Invocation] = []
         next_index = 0
         pending: set[concurrent.futures.Future[_Invocation]] = set()
+        timed_out = False
+        cancelled = 0
         executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=concurrency, thread_name_prefix="vss-performance"
         )
         try:
             while next_index < count or pending:
                 if time.monotonic() >= overall_deadline:
-                    for future in pending:
-                        future.cancel()
-                    raise PerformanceTimeout("performance profile total timeout exceeded")
+                    timed_out = True
+                    break
                 while next_index < count and len(pending) < maximum_outstanding:
                     sequence = starting_index + next_index
                     request_id = f"req-{prefix}-{sequence:04d}"
@@ -224,12 +389,24 @@ class PerformanceHarness:
                 )
                 results.extend(future.result() for future in done)
         finally:
+            if timed_out:
+                for future in pending:
+                    if future.cancel():
+                        cancelled += 1
             executor.shutdown(wait=True, cancel_futures=True)
+        if timed_out:
+            for future in pending:
+                if not future.cancelled():
+                    results.append(future.result())
         elapsed = time.monotonic() - started
         successes = sum(item.success for item in results)
         phase = {
             "name": name,
             "requests": count,
+            "submitted": next_index,
+            "completed": len(results),
+            "cancellations": cancelled,
+            "timed_out": timed_out,
             "concurrency": concurrency,
             "maximum_outstanding": maximum_outstanding,
             "successes": successes,
@@ -256,7 +433,7 @@ class PerformanceHarness:
         started_at = _utc_now()
         started = time.monotonic()
         overall_deadline = started + profile.total_timeout_seconds
-        audit_offset = self._audit_offset()
+        audit_snapshot = self._audit_snapshot()
         resources_before = collect_resources()
         all_results: list[_Invocation] = []
         measured: list[_Invocation] = []
@@ -264,9 +441,10 @@ class PerformanceHarness:
         sequence = 1
         failures: dict[str, int] = {}
         warnings: list[str] = []
+        run_timed_out = False
 
         def perform(name: str, count: int, concurrency: int, outstanding: int) -> list[_Invocation]:
-            nonlocal sequence
+            nonlocal sequence, run_timed_out
             items, phase, sequence = self._phase(
                 template, name=name, count=count, concurrency=concurrency,
                 maximum_outstanding=outstanding, environment=environment,
@@ -277,21 +455,35 @@ class PerformanceHarness:
             )
             phases.append(phase)
             all_results.extend(items)
+            run_timed_out = run_timed_out or phase["timed_out"]
             return items
 
         smoke = perform("smoke", 1, 1, 1)
-        if not all(item.success for item in smoke):
+        smoke_audit = self._validate_audit_associations(
+            self._audit_records(audit_snapshot), smoke, dry_run=dry_run,
+            expected_digest=profile.expected_content_digest,
+        ) if profile.verify_audit else {"missing": 0, "duplicate": 0, "invalid": 0, "malformed": 0}
+        smoke_valid = not run_timed_out and all(item.success for item in smoke) and not any(
+            smoke_audit[key] for key in ("missing", "duplicate", "invalid", "malformed")
+        )
+        if not smoke_valid:
             warnings.append("smoke phase failed; load phases were not run")
         else:
             ready = True
             if profile.warmup_requests:
                 warmup = perform("warmup", profile.warmup_requests, min(profile.concurrency, profile.warmup_requests), profile.maximum_outstanding)
-                ready = all(item.success for item in warmup)
+                warmup_audit = self._validate_audit_associations(
+                    self._audit_records(audit_snapshot), smoke + warmup, dry_run=dry_run,
+                    expected_digest=profile.expected_content_digest,
+                ) if profile.verify_audit else {"missing": 0, "duplicate": 0, "invalid": 0, "malformed": 0}
+                ready = not run_timed_out and all(item.success for item in warmup) and not any(
+                    warmup_audit[key] for key in ("missing", "duplicate", "invalid", "malformed")
+                )
                 if not ready:
                     warnings.append("warm-up phase failed; measured phases were not run")
             if ready:
                 measured = perform("measured", profile.measured_requests, profile.concurrency, profile.maximum_outstanding)
-                ready = all(item.success for item in measured)
+                ready = not run_timed_out and all(item.success for item in measured)
             if ready and not dry_run:
                 for step in profile.stress_concurrency_steps:
                     stress = perform(f"stress-{step}", profile.stress_requests_per_step, step, step)
@@ -314,26 +506,21 @@ class PerformanceHarness:
             if not item.success:
                 category = item.failure or "unknown_failure"
                 failures[category] = failures.get(category, 0) + 1
-        expected_correlations = {item.correlation_id for item in all_results}
-        audit_records = self._audit_records(audit_offset) if profile.verify_audit else []
+        if run_timed_out:
+            failures["PerformanceTimeout"] = 1
+        audit_records = self._audit_records(audit_snapshot) if profile.verify_audit else []
         try:
-            audit_bytes_appended = max(0, (self._repository_root / _AUDIT_RELATIVE).stat().st_size - audit_offset)
+            audit_bytes_appended = max(0, (self._repository_root / _AUDIT_RELATIVE).stat().st_size - audit_snapshot.offset)
         except OSError:
             audit_bytes_appended = None
-        selected = [record for record in audit_records if record.get("correlation_id") in expected_correlations]
-        by_correlation: dict[str, list[dict[str, Any]]] = {}
-        for record in selected:
-            by_correlation.setdefault(record["correlation_id"], []).append(record)
-        duplicate_audit = sum(max(0, len(records) - 1) for records in by_correlation.values())
-        missing_audit = len(expected_correlations - set(by_correlation))
-        invalid_audit = 0
-        for item in all_results:
-            records = by_correlation.get(item.correlation_id, [])
-            if len(records) != 1:
-                continue
-            record = records[0]
-            if record.get("request_id") != item.request_id or record.get("task_identity") != "generate_options" or record.get("result_family") != "option_set":
-                invalid_audit += 1
+        audit_validation = self._validate_audit_associations(
+            audit_records, all_results, dry_run=dry_run,
+            expected_digest=profile.expected_content_digest,
+        ) if profile.verify_audit else {"records": 0, "missing": 0, "duplicate": 0, "invalid": 0, "malformed": 0}
+        duplicate_audit = audit_validation["duplicate"]
+        missing_audit = audit_validation["missing"]
+        invalid_audit = audit_validation["invalid"]
+        malformed_audit = audit_validation["malformed"]
         semantic_mismatches = sum(
             1 for item in all_results if item.success and not dry_run and item.content_digest != profile.expected_content_digest
         )
@@ -351,8 +538,13 @@ class PerformanceHarness:
             warnings.append("process thread count changed during the observation window")
         status = "success" if (
             not failures and semantic_mismatches == 0 and duplicate_audit == 0
-            and missing_audit == 0 and invalid_audit == 0
-            and len(all_results) == sum(phase["requests"] for phase in phases)
+            and missing_audit == 0 and invalid_audit == 0 and malformed_audit == 0
+            and all(
+                phase["submitted"] == phase["requests"]
+                and phase["completed"] + phase["cancellations"] == phase["submitted"]
+                and not phase["timed_out"]
+                for phase in phases
+            )
         ) else "failed"
         report: dict[str, Any] = {
             "schema_version": "1", "report_id": report_id, "report_sha256": "",
@@ -369,11 +561,13 @@ class PerformanceHarness:
                 "endurance_enabled": bool(include_endurance and profile.endurance_seconds),
             },
             "counters": {
-                "admitted": len(all_results), "completed": len(all_results),
+                "admitted": sum(phase["submitted"] for phase in phases),
+                "completed": len(all_results),
                 "successes": sum(item.success for item in all_results),
                 "failures": sum(not item.success for item in all_results),
                 "timeouts": failures.get("ReasoningDeadlineExceeded", 0) + failures.get("PerformanceTimeout", 0),
-                "cancellations": 0, "audit_failures": failures.get("ReasoningAuditFailure", 0),
+                "cancellations": sum(phase["cancellations"] for phase in phases),
+                "audit_failures": failures.get("ReasoningAuditFailure", 0),
                 "semantic_mismatches": semantic_mismatches,
             },
             "latency": latency, "throughput_requests_per_second": throughput_value,
@@ -385,9 +579,9 @@ class PerformanceHarness:
                 "expected_option_count": None if dry_run else profile.expected_option_count,
             },
             "audit_validation": {
-                "enabled": profile.verify_audit, "records": len(selected),
+                "enabled": profile.verify_audit, "records": audit_validation["records"],
                 "missing_terminal_records": missing_audit, "duplicate_terminal_records": duplicate_audit,
-                "invalid_associations": invalid_audit, "malformed_records": 0,
+                "invalid_associations": invalid_audit, "malformed_records": malformed_audit,
             },
             "phases": phases, "failures": dict(sorted(failures.items())),
             "warnings": warnings + (["high percentiles have limited meaning for this sample size"] if len(successful_measured) < 100 else []),
@@ -402,10 +596,12 @@ class PerformanceHarness:
             "duration_ms": round(measured_duration * 1000, 3),
             "throughput_requests_per_second": throughput_value, "latency_ms": latency,
             "semantic_digest_match": report["semantic_validation"]["digest_match"],
-            "audit_records_valid": missing_audit == duplicate_audit == invalid_audit == 0,
+            "audit_records_valid": missing_audit == duplicate_audit == invalid_audit == malformed_audit == 0,
             "report_path": path, "report_sha256": report["report_sha256"],
             "warnings": report["warnings"], "status": status,
         }
+        if run_timed_out:
+            raise PerformanceTimeout("performance profile total timeout exceeded")
         if status != "success":
             raise PerformanceCorrectnessFailure("performance correctness validation failed")
         return summary, report

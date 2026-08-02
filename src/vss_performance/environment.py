@@ -41,9 +41,12 @@ def collect_environment() -> dict[str, Any]:
 
 def collect_resources() -> dict[str, int | float | None]:
     usage = resource.getrusage(resource.RUSAGE_SELF)
+    maximum_resident_set_kib = int(usage.ru_maxrss)
+    if sys.platform == "darwin":
+        maximum_resident_set_kib //= 1024
     return {
         "process_cpu_seconds": round(time_process(), 6),
-        "maximum_resident_set_kib": int(usage.ru_maxrss),
+        "maximum_resident_set_kib": maximum_resident_set_kib,
         "active_thread_count": threading.active_count(),
         "open_file_descriptor_count": _fd_count(),
     }

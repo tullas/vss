@@ -146,10 +146,13 @@ operators/agents.
   override; independent per-request data and identities; the real Gateway and
   normal validation/policy/audit path; monotonic durations; tested nearest-rank
   percentiles and measured-phase throughput; bounded offset-based audit
-  selection with exact terminal-record association; allowlisted environment
+  selection with rotation/truncation/partial-tail detection and exact terminal
+  event, implementation, status, execution and request association; serialized
+  complete in-process JSONL appends; allowlisted environment
   and approximate resource metadata; strict 256 KiB payload-free report schema;
   fixed ignored output root, restrictive modes, symlink rejection and atomic
-  replace; safe errors; and structural CI gates without brittle latency SLOs.
+  no-clobber placement; safe errors; and structural CI gates without brittle
+  latency SLOs.
   The report digest is integrity evidence only and successful measurement grants
   no authority or production certification. Production admission control,
   multi-process audit locking, durable audit/state, process isolation,
