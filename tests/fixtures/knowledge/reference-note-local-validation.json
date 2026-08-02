@@ -1,0 +1,22 @@
+{
+  "fixture_schema_version": "1",
+  "source_item_id": "local-validation-principle",
+  "source_version": "1",
+  "classification": "internal",
+  "trust": "approved_fixture",
+  "lifecycle_status": "active",
+  "observed_at": "2026-01-01T00:00:00Z",
+  "effective_from": "2026-01-01T00:00:00Z",
+  "effective_until": "2030-01-01T00:00:00Z",
+  "retrieved_at": "2026-01-01T00:00:00Z",
+  "stale_after": "2030-01-01T00:00:00Z",
+  "retention_until": "2031-01-01T00:00:00Z",
+  "owning_authority": "vss-project",
+  "payload": {
+    "title": "Local validation principle",
+    "body": "Development workflows must remain executable without paid external services.",
+    "topic_labels": ["local-first", "validation"],
+    "language": "en",
+    "citations": []
+  }
+}

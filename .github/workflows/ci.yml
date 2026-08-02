@@ -63,6 +63,10 @@ jobs:
         run: |
           python -m unittest discover -s tests/performance -p 'test_*.py'
           vss performance reasoning --profile ci_safe --environment development
+      - name: Test bounded knowledge packages
+        run: |
+          python -m unittest discover -s tests/knowledge -p 'test_*.py'
+          vss knowledge package validate --input tests/fixtures/knowledge/knowledge-package-valid.json --environment development --correlation-id m3-4-ci-validation
       - name: Test infrastructure contract
         run: python -m unittest discover -s tests/iac_contract -p 'test_*.py'
       - name: Test security supply-chain controls
