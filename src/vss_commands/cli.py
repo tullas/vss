@@ -13,9 +13,9 @@ from .runner import CommandRunner, response_json
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vss")
     subparsers = parser.add_subparsers(dest="action", required=True)
-    def add_execution_options(parser: argparse.ArgumentParser) -> None:
+    def add_execution_options(parser: argparse.ArgumentParser, *, input_required: bool = False) -> None:
         parser.add_argument("--environment", required=True)
-        parser.add_argument("--input", type=Path)
+        parser.add_argument("--input", type=Path, required=input_required)
         parser.add_argument("--correlation-id")
         parser.add_argument("--dry-run", action="store_true")
         parser.add_argument("--timeout", type=float)
@@ -59,6 +59,10 @@ def _parser() -> argparse.ArgumentParser:
     workflow_run.add_argument("workflow_name")
     workflow_run.add_argument("--environment", required=True)
     workflow_run.add_argument("--correlation-id")
+    reasoning = subparsers.add_parser("reasoning")
+    reasoning_actions = reasoning.add_subparsers(dest="reasoning_action", required=True)
+    generate_options = reasoning_actions.add_parser("generate-options")
+    add_execution_options(generate_options, input_required=True)
     return parser
 
 
@@ -68,6 +72,21 @@ def _read_input(path: Path | None) -> tuple[dict | None, ExitCode | None]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return None, ExitCode.INVALID_INPUT
+    if not isinstance(value, dict):
+        return None, ExitCode.INVALID_INPUT
+    return value, None
+
+
+def _read_reasoning_input(path: Path | None) -> tuple[dict | None, ExitCode | None]:
+    if path is None:
+        return None, ExitCode.INVALID_INPUT
+    try:
+        from vss_reasoning_contracts import SemanticContractError, load_json_document
+
+        value = load_json_document(path.read_bytes())
+    except (OSError, SemanticContractError):
+        # Contract failures are deliberately collapsed at the CLI boundary.
         return None, ExitCode.INVALID_INPUT
     if not isinstance(value, dict):
         return None, ExitCode.INVALID_INPUT
@@ -109,7 +128,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"error": str(exc)}, sort_keys=True, separators=(",", ":")))
             return int(exc.exit_code)
 
-    input_data, input_error = _read_input(args.input)
+    if args.action == "reasoning":
+        input_data, input_error = _read_reasoning_input(args.input)
+    else:
+        input_data, input_error = _read_input(args.input)
     if input_error is not None:
         print(json.dumps({"error": "input must be valid JSON object"}, sort_keys=True, separators=(",", ":")))
         return int(input_error)
@@ -117,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
         command_name = args.command
     elif args.action == "bootstrap":
         command_name = f"bootstrap.{args.bootstrap_action}"
+    elif args.action == "reasoning":
+        command_name = "reasoning.generate-options"
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret

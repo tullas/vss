@@ -106,6 +106,29 @@ operators/agents.
   truth. Provider invocation, Knowledge Package resolution, Plan IR, approval,
   execution, signing, third-party registration and production audit are not
   implemented and remain governed by later milestones and accepted ADRs.
+- Validated M3.1 requests to the M3.2 deterministic Reasoning Gateway, strategy,
+  provider, candidate result and local audit. Abuse: strategy or provider
+  substitution, implementation-path injection or self-selection, result
+  validation bypass, request/result or correlation substitution, fabricated
+  facts/evidence, false confidence, constraint misrepresentation, budget or
+  deadline bypass, mutable invocation state, environment-dependent output,
+  provider exception or semantic-payload leakage, duplicate audit outcomes,
+  audit-write failure, output injection, instruction-like input treated as
+  authority, or hidden capability/workflow invocation. Implemented mitigation:
+  one immutable repository-built registry and exact trusted identities; no
+  dynamic imports, plugins or caller-selected implementations; narrow immutable
+  context without Runtime internals, secrets, filesystem/network/subprocess or
+  audit handles; exact repository policy; one bounded provider call and at most
+  eight iterations; pre/post deadline and result-size checks; independent M3.1
+  request and result validation; exact request/correlation binding; stable
+  content digests independent of machine state; empty facts and external
+  evidence; qualified low confidence and explicit limitations; safe typed
+  errors; and one final payload-free audit record whose write failure is fatal.
+  Instruction-like text remains inert data, and neither successful validation
+  nor deterministic output grants authority. Built-in Python remains trusted
+  in-process code, local JSONL audit remains development-only, and process
+  isolation, durable production audit, Knowledge Packages, Plan IR, approvals,
+  external providers and all execution remain deferred.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,

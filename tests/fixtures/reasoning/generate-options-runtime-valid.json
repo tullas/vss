@@ -1,0 +1,27 @@
+{
+  "schema_version": "1",
+  "request_id": "m3-2-request-001",
+  "correlation_id": "m3-2-local-acceptance",
+  "task_identity": "generate_options",
+  "task_version": "1",
+  "required_result_family": "option_set",
+  "required_result_version": "1",
+  "lifecycle_mode": "validation",
+  "data_classification": "internal",
+  "permitted_purpose": "generate_options",
+  "budget": {
+    "maximum_duration_ms": 1000,
+    "maximum_result_bytes": 65536
+  },
+  "payload": {
+    "objective": "Select an implementation approach for a locally testable validation service.",
+    "constraints": [
+      {"id": "must_run_locally", "statement": "The approach must run locally."},
+      {"id": "no_paid_service", "statement": "The approach must not require a paid service."},
+      {"id": "provider_neutral", "statement": "The approach must remain provider neutral."},
+      {"id": "bounded_resources", "statement": "The approach must use bounded resources."}
+    ],
+    "desired_option_count": 4,
+    "evaluation_dimensions": ["security", "simplicity", "resource efficiency"]
+  }
+}

@@ -57,6 +57,8 @@ jobs:
         run: python -m unittest discover -s tests/workflows -p 'test_*.py'
       - name: Test semantic reasoning contracts
         run: python -m unittest discover -s tests/reasoning_contracts -p 'test_*.py'
+      - name: Test deterministic reasoning gateway
+        run: python -m unittest discover -s tests/reasoning -p 'test_*.py'
       - name: Test infrastructure contract
         run: python -m unittest discover -s tests/iac_contract -p 'test_*.py'
       - name: Test security supply-chain controls
