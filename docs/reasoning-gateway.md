@@ -146,6 +146,10 @@ implementation paths remain fixed and do not use this behavior.
 There is no AI model, prompt, external provider, network call, Knowledge
 Package, retrieval, Plan IR, approval, capability execution, workflow
 execution, or autonomous behavior. No external facts, citations, costs,
-timelines, or feasibility claims are produced. M3.3 may establish a local
+timelines, or feasibility claims are produced. M3.3 establishes a local
 concurrency and performance baseline without changing these authority
 boundaries.
+
+M3.3's [local performance laboratory](performance-laboratory.md) now exercises
+this same Gateway concurrently without calling the provider directly or
+changing those boundaries.

@@ -65,6 +65,13 @@ def _parser() -> argparse.ArgumentParser:
     reasoning_actions = reasoning.add_subparsers(dest="reasoning_action", required=True)
     generate_options = reasoning_actions.add_parser("generate-options")
     add_execution_options(generate_options, input_required=True)
+    performance = subparsers.add_parser("performance")
+    performance_actions = performance.add_subparsers(dest="performance_action", required=True)
+    performance_reasoning = performance_actions.add_parser("reasoning")
+    performance_reasoning.add_argument("--profile", required=True)
+    performance_reasoning.add_argument("--environment", required=True)
+    performance_reasoning.add_argument("--no-endurance", action="store_true")
+    performance_reasoning.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -150,6 +157,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.action == "reasoning":
         input_data, input_error = _read_reasoning_input(args.input)
+    elif args.action == "performance":
+        input_data, input_error = {
+            "profile": args.profile,
+            "include_endurance": not args.no_endurance,
+        }, None
     else:
         input_data, input_error = _read_input(args.input)
     if input_error is not None:
@@ -161,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
         command_name = f"bootstrap.{args.bootstrap_action}"
     elif args.action == "reasoning":
         command_name = "reasoning.generate-options"
+    elif args.action == "performance":
+        command_name = "performance.reasoning"
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret
@@ -173,11 +187,11 @@ def main(argv: list[str] | None = None) -> int:
         command_name,
         args.environment,
         input_data,
-        args.correlation_id,
+        getattr(args, "correlation_id", None),
         args.dry_run,
-        args.timeout,
-        args.verbose,
-        args.ask_become_pass,
+        getattr(args, "timeout", None),
+        getattr(args, "verbose", False),
+        getattr(args, "ask_become_pass", False),
     )
     print(response_json(response))
     return int(exit_code)
