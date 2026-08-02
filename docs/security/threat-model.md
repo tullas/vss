@@ -181,6 +181,25 @@ operators/agents.
   signing/encryption, privacy/residency/deletion enforcement, persistent
   revocation, cache invalidation, search/indexing, external providers, reasoning
   consumption, Plan IR, approvals and execution remain deferred.
+- Repository-owned M3.5 Context Contract Registry and deterministic Context
+  Assembly. Abuse: package substitution, arbitrary request/path input, purpose
+  expansion, classification downgrade, trust inflation, stale or revoked
+  replay, required/optional manipulation, nondeterministic ordering, duplicate
+  identity conflict, budget bypass, digest confusion, conflict or uncertainty
+  suppression, evidence references treated as access, payload leakage, or
+  CommandRunner drift into a second control plane. Implemented mitigation:
+  exact repository schemas and compatibility mappings, bounded no-follow input,
+  independent M3.4 package revalidation, exact policy/task/family/project/
+  environment checks, current freshness and revocation validation, immutable
+  request/policy/registry snapshots, deterministic identity ordering, explicit
+  required/optional semantics, complete-note-only minimization, preserved
+  conflict/uncertainty/provenance qualifications, distinct content/selection/
+  event digest domains, independently validated Context and Assembly Report,
+  payload-free audit, safe errors, and routing-only CLI integration. Context and
+  reports grant no provider/source/execution authority and are not delivered to
+  the Reasoning Gateway in M3.5. Context caching, reuse, persistent revocation,
+  provider translation, production audit, process isolation, and M3.6 delivery
+  remain deferred.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,

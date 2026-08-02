@@ -85,6 +85,18 @@ def _parser() -> argparse.ArgumentParser:
     package_validate.add_argument("--input", type=Path, required=True)
     package_validate.add_argument("--environment", required=True)
     package_validate.add_argument("--correlation-id")
+    context = subparsers.add_parser("context")
+    context_actions = context.add_subparsers(dest="context_action", required=True)
+    context_assemble = context_actions.add_parser("assemble")
+    context_assemble.add_argument("--request", type=Path, required=True)
+    context_assemble.add_argument("--package", type=Path, action="append", required=True)
+    context_assemble.add_argument("--environment", required=True)
+    context_assemble.add_argument("--correlation-id")
+    context_assemble.add_argument("--dry-run", action="store_true")
+    context_validate = context_actions.add_parser("validate")
+    context_validate.add_argument("--input", type=Path, required=True)
+    context_validate.add_argument("--environment", required=True)
+    context_validate.add_argument("--correlation-id")
     return parser
 
 
@@ -154,6 +166,34 @@ def _read_knowledge_input(path: Path | None) -> tuple[dict | None, ExitCode | No
     return (value, None) if isinstance(value, dict) else (None, ExitCode.INVALID_INPUT)
 
 
+def _read_context_file(path: Path) -> tuple[dict | None, ExitCode | None]:
+    # Context files are data inputs; no caller-selected implementation or schema
+    # root is accepted. The Context subsystem performs the contract checks.
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return None, ExitCode.INVALID_INPUT
+            chunks: list[bytes] = []
+            remaining = 64 * 1024 + 1
+            while remaining:
+                chunk = os.read(descriptor, min(remaining, 4096))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+            if len(raw) > 64 * 1024:
+                return None, ExitCode.INVALID_INPUT
+        finally:
+            os.close(descriptor)
+        from vss_reasoning_contracts import load_json_document
+        value = load_json_document(raw)
+    except Exception:
+        return None, ExitCode.INVALID_INPUT
+    return (value, None) if isinstance(value, dict) else (None, ExitCode.INVALID_INPUT)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
@@ -201,6 +241,21 @@ def main(argv: list[str] | None = None) -> int:
             input_data, input_error = {"source": args.source, "purpose": args.purpose}, None
         else:
             input_data, input_error = _read_knowledge_input(args.input)
+    elif args.action == "context":
+        if args.context_action == "assemble":
+            request, request_error = _read_context_file(args.request)
+            packages: list[dict] = []
+            input_error = request_error
+            if input_error is None:
+                for package_path in args.package:
+                    package, package_error = _read_context_file(package_path)
+                    if package_error is not None:
+                        input_error = package_error
+                        break
+                    packages.append(package)
+                input_data = {"request": request, "packages": packages}
+        else:
+            input_data, input_error = _read_context_file(args.input)
     else:
         input_data, input_error = _read_input(args.input)
     if input_error is not None:
@@ -216,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
         command_name = "performance.reasoning"
     elif args.action == "knowledge":
         command_name = f"knowledge.package.{args.package_action}"
+    elif args.action == "context":
+        command_name = f"context.{args.context_action}"
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret

@@ -1,0 +1,80 @@
+{
+  "classification": "internal",
+  "constructed_at": "2026-08-02T00:00:00Z",
+  "context_content_digest": "18407e80203f3fd2716d1eac8afb1659478c0bbbe15166d00605f237bd8f2666",
+  "context_contract_identity": "context_object",
+  "context_contract_version": "1",
+  "context_family": "generate_options_context",
+  "context_family_version": "1",
+  "context_id": "context-5451ffbdc72aa4caad891d92860c591f",
+  "correlation_id": "m3-5-local-assemble",
+  "environment": "development",
+  "expires_at": "2026-08-02T00:05:00Z",
+  "governance_report_digest": "c5da43b7ab2ec352f1c1aa9e7cf535251bd6a5e8079fadaafc4da245662ee85d",
+  "integrity": {
+    "complete_context_sha256": "4ebc705546d1f02b303512f14e6dc0d9a21288accad3740b4a41ab34642aaaf8"
+  },
+  "lifecycle": "validated",
+  "package_set_digest": "1c55b62c887867e7a6ef6729d362717fadb13e83d4edab259e0665b9799d7b96",
+  "payload": {
+    "budget_summary": {
+      "context_bytes": 1532,
+      "evidence_references": 2,
+      "maximum_context_bytes": 65536,
+      "selected_items": 1
+    },
+    "conflicts": [],
+    "evidence_references": [
+      "vss.local.reference-fixtures",
+      "02d57b92d796501fc646a4f0b4bb6e2d18d0ef3fbdf3ae860d37c9dbfafe79f5"
+    ],
+    "limitations": [
+      "Context is inert and has not been delivered to a reasoning provider.",
+      "Evidence references are identifiers only and grant no access."
+    ],
+    "selected_notes": [
+      {
+        "body": "Development workflows must remain executable without paid external services.",
+        "citations": [],
+        "classification": "internal",
+        "freshness_qualification": "current_at_assembly",
+        "item_content_digest": "02d57b92d796501fc646a4f0b4bb6e2d18d0ef3fbdf3ae860d37c9dbfafe79f5",
+        "item_family": "reference_note",
+        "item_family_version": "1",
+        "item_id": "local-validation-principle",
+        "language": "en",
+        "provenance_references": [
+          "vss.local.reference-fixtures",
+          "02d57b92d796501fc646a4f0b4bb6e2d18d0ef3fbdf3ae860d37c9dbfafe79f5"
+        ],
+        "source_package_content_digest": "b002f4f1def57d1231f4e17dcb189959dc343bd52786ee7366ecc2e774385bd7",
+        "source_package_id": "package-139efdbd4d93897ec39840e7de2e7dee",
+        "title": "Local validation principle",
+        "topic_labels": [
+          "local-first",
+          "validation"
+        ],
+        "trust": "approved_fixture"
+      }
+    ],
+    "source_qualifications": [
+      "approved_fixture"
+    ],
+    "uncertainty": [
+      "Truth was not independently verified.",
+      "Real-world applicability was not independently verified.",
+      "Completeness is not guaranteed.",
+      "Absence of additional sources is not established.",
+      "Omissions may reduce completeness."
+    ]
+  },
+  "policy_identity": "generate_options_context_local",
+  "policy_version": "1",
+  "project_id": "vss-local",
+  "purpose": "generate_options_local_validation",
+  "request_id": "m3-5-request-001",
+  "schema_version": "1",
+  "selection_digest": "6709c05f56ef35d0e80e3071821be8cd9cc7cfd2b124912c3e63c6bf07fc9e34",
+  "semantic_task": "generate_options",
+  "semantic_task_version": "1"
+}
