@@ -40,6 +40,12 @@ def validate_request(value: Any, registry: ContextContractRegistry) -> dict[str,
         raise InvalidContextInput("context task and family are incompatible")
     if value["policy_identity"] != "generate_options_context_local" or value["policy_version"] != "1" or value["purpose"] != "generate_options_local_validation" or value["environment"] != "development" or value["classification_ceiling"] not in {"public", "internal"} or value["minimum_trust"] != "approved_fixture":
         raise InvalidContextInput("context policy is not admitted")
+    package_ids = [item["package_id"] for item in value["package_requirements"]]
+    if len(package_ids) != len(set(package_ids)):
+        raise InvalidContextInput("context package requirements are duplicated")
+    item_ids = [item["item_id"] for item in value["item_requirements"]]
+    if len(item_ids) != len(set(item_ids)):
+        raise InvalidContextInput("context item requirements are duplicated")
     parse_utc(value["validation_time"])
     if value["lifecycle"] != "requested":
         raise InvalidContextInput("context request lifecycle is invalid")
@@ -59,6 +65,8 @@ def validate_context(value: Any, registry: ContextContractRegistry) -> Validated
         raise InvalidContextInput("context compatibility is invalid")
     if value["classification"] not in {"public", "internal"}:
         raise InvalidContextInput("context classification is invalid")
+    if canonical_digest(value["payload"]) != value["context_content_digest"]:
+        raise ContextIntegrityFailure("context content digest mismatch")
     if parse_utc(value["constructed_at"]) >= parse_utc(value["expires_at"]):
         raise InvalidContextInput("context expiry is invalid")
     material = dict(value)

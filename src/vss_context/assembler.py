@@ -83,12 +83,13 @@ class ContextAssembler:
 
     def assemble(self, request_value: dict[str, Any], package_values: list[dict[str, Any]], *, correlation_id: str, dry_run: bool = False) -> Any:
         started = time.monotonic()
-        request = validate_request(request_value, self._registry)
-        if type(correlation_id) is not str or correlation_id != request["correlation_id"]:
-            raise ContextPolicyDenied("context correlation identity is invalid")
-        if len(package_values) > MAX_PACKAGES:
-            raise ContextBudgetExceeded("context package count exceeds its bound")
+        request: dict[str, Any] = request_value if isinstance(request_value, dict) else {}
         try:
+            request = validate_request(request_value, self._registry)
+            if type(correlation_id) is not str or correlation_id != request["correlation_id"]:
+                raise ContextPolicyDenied("context correlation identity is invalid")
+            if len(package_values) > MAX_PACKAGES:
+                raise ContextBudgetExceeded("context package count exceeds its bound")
             # A caller cannot choose the freshness clock. The committed M3.4
             # package is the sole deterministic fixture exception; all other
             # assemblies use the current normalized UTC clock.
@@ -103,7 +104,10 @@ class ContextAssembler:
             total = sum(len(str(p).encode("utf-8")) for p in package_values)
             if total > MAX_AGGREGATE_PACKAGE_BYTES:
                 raise ContextBudgetExceeded("context package bytes exceed their bound")
-            validated = [revalidate_package(p, validation_time) for p in package_values]
+            try:
+                validated = [revalidate_package(p, validation_time) for p in package_values]
+            except Exception as exc:
+                raise ContextPackageFailure("knowledge package is invalid") from exc
             requirements = {item["package_id"]: item for item in request["package_requirements"]}
             by_id = {p["package_id"]: p for p in validated}
             for package_id, requirement in requirements.items():
@@ -127,6 +131,10 @@ class ContextAssembler:
                     if requirement and item["integrity"]["item_content_sha256"] != requirement["item_content_sha256"]:
                         raise ContextPackageFailure("knowledge item content digest mismatch")
                     candidates.append((package, item))
+            present_ids = {item["item_id"] for _, item in candidates}
+            for requirement in request["item_requirements"]:
+                if requirement["requirement"] == "required" and requirement["item_id"] not in present_ids:
+                    raise ContextPackageFailure("required knowledge item is missing")
             seen: dict[str, str] = {}
             selected: list[tuple[dict[str, Any], dict[str, Any]]] = []
             omitted: list[str] = []

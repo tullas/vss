@@ -78,6 +78,38 @@ class ContextAssemblyTests(unittest.TestCase):
         result = ContextAssembler().assemble(request, [load(PACKAGE)], correlation_id=request["correlation_id"])
         self.assertEqual(result.context.value["context_content_digest"], "18407e80203f3fd2716d1eac8afb1659478c0bbbe15166d00605f237bd8f2666")
 
+    def test_required_item_missing_fails_closed(self):
+        request = load(REQUEST)
+        request["item_requirements"] = [{
+            "item_id": "required-not-present",
+            "item_family": "reference_note",
+            "item_family_version": "1",
+            "item_content_sha256": "0" * 64,
+            "requirement": "required",
+        }]
+        with self.assertRaises(ContextContractError):
+            ContextAssembler().assemble(request, [load(PACKAGE)], correlation_id=request["correlation_id"])
+
+    def test_duplicate_requirements_fail_closed(self):
+        request = load(REQUEST)
+        requirement = dict(request["package_requirements"][0])
+        request["package_requirements"].append(requirement)
+        with self.assertRaises(ContextContractError):
+            ContextAssembler().assemble(request, [load(PACKAGE)], correlation_id=request["correlation_id"])
+
+    def test_package_mutation_fails_digest_revalidation(self):
+        request = load(REQUEST)
+        package = load(PACKAGE)
+        package["items"][0]["payload"]["body"] = "tampered"
+        with self.assertRaises(ContextContractError):
+            ContextAssembler().assemble(request, [package], correlation_id=request["correlation_id"])
+
+    def test_context_content_digest_is_verified(self):
+        value = load(ROOT / "tests/fixtures/context/context-object-valid.json")
+        value["context_content_digest"] = "0" * 64
+        with self.assertRaises(ContextContractError):
+            validate_context(value, ContextContractRegistry.built_in())
+
 
 if __name__ == "__main__":
     unittest.main()
