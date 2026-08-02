@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "request_id": "m3-5-request-001",
+  "correlation_id": "m3-5-local-assemble",
+  "semantic_task": "generate_options",
+  "semantic_task_version": "1",
+  "context_family": "generate_options_context",
+  "context_family_version": "1",
+  "policy_identity": "generate_options_context_local",
+  "policy_version": "1",
+  "purpose": "generate_options_local_validation",
+  "environment": "development",
+  "project_id": "vss-local",
+  "validation_time": "2026-08-02T00:00:00Z",
+  "classification_ceiling": "internal",
+  "minimum_trust": "approved_fixture",
+  "package_requirements": [
+    {"package_id": "package-139efdbd4d93897ec39840e7de2e7dee", "package_contract_identity": "knowledge_package", "package_contract_version": "1", "package_content_sha256": "b002f4f1def57d1231f4e17dcb189959dc343bd52786ee7366ecc2e774385bd7", "requirement": "required"}
+  ],
+  "item_requirements": [
+    {"item_id": "local-validation-principle", "item_family": "reference_note", "item_family_version": "1", "item_content_sha256": "02d57b92d796501fc646a4f0b4bb6e2d18d0ef3fbdf3ae860d37c9dbfafe79f5", "requirement": "required"}
+  ],
+  "budgets": {"maximum_context_bytes": 65536, "maximum_items": 8, "maximum_evidence_references": 32},
+  "deadline_seconds": 5,
+  "lifecycle": "requested"
+}

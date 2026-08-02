@@ -21,6 +21,8 @@ REASONING_COMMAND = "reasoning.generate-options"
 PERFORMANCE_COMMAND = "performance.reasoning"
 KNOWLEDGE_BUILD_COMMAND = "knowledge.package.build"
 KNOWLEDGE_VALIDATE_COMMAND = "knowledge.package.validate"
+CONTEXT_ASSEMBLE_COMMAND = "context.assemble"
+CONTEXT_VALIDATE_COMMAND = "context.validate"
 
 
 def utc_now() -> str:
@@ -81,7 +83,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND}:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND}:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -143,6 +145,28 @@ class CommandRunner:
                 return finish("error", ExitCode.INTERNAL_ERROR, {}, ["knowledge audit failed"])
             except Exception:
                 return finish("error", ExitCode.INTERNAL_ERROR, {}, ["knowledge operation failed"])
+        if command in {CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND}:
+            from vss_context import ContextAssembler
+            from vss_context.audit import ContextAuditFailure
+            from vss_context_contracts import ContextContractError, validate_context
+
+            assembler = ContextAssembler()
+            try:
+                if command == CONTEXT_ASSEMBLE_COMMAND:
+                    if frozenset(payload) != {"request", "packages"} or not isinstance(payload["request"], dict) or not isinstance(payload["packages"], list):
+                        return finish("error", ExitCode.INVALID_INPUT, {}, ["context assembly input is invalid"])
+                    outcome = assembler.assemble(payload["request"], payload["packages"], correlation_id=correlation, dry_run=dry_run)
+                    if dry_run:
+                        return finish("success", ExitCode.SUCCESS, outcome, [])
+                    return finish("success", ExitCode.SUCCESS, {"context": outcome.context.to_json_value(), "assembly_report": outcome.report.to_json_value(), "summary": dict(outcome.summary)}, [])
+                validated = validate_context(payload, assembler.registry)
+                return finish("success", ExitCode.SUCCESS, {"valid": True, "summary": {"context_id": validated.value["context_id"], "context_content_digest": validated.value["context_content_digest"], "complete_context_digest": validated.digest}}, [])
+            except ContextAuditFailure:
+                return finish("error", ExitCode.INTERNAL_ERROR, {}, ["context audit failed"])
+            except ContextContractError:
+                return finish("error", ExitCode.INVALID_INPUT, {}, ["context is invalid"])
+            except Exception:
+                return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["context assembly failed"])
         if command == REASONING_COMMAND:
             from vss_reasoning import (
                 CandidateGenerationFailure,

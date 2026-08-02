@@ -1,0 +1,56 @@
+{
+  "budget_consumption": {
+    "context_bytes": 1532,
+    "evidence_references": 2,
+    "maximum_context_bytes": 65536,
+    "selected_items": 1
+  },
+  "budget_limits": {
+    "maximum_context_bytes": 65536,
+    "maximum_evidence_references": 32,
+    "maximum_items": 8
+  },
+  "classification": "internal",
+  "conflict_count": 0,
+  "constructed_at": "2026-08-02T00:00:00Z",
+  "context_content_digest": "18407e80203f3fd2716d1eac8afb1659478c0bbbe15166d00605f237bd8f2666",
+  "context_family": "generate_options_context",
+  "context_family_version": "1",
+  "context_id": "context-5451ffbdc72aa4caad891d92860c591f",
+  "correlation_id": "m3-5-local-assemble",
+  "expires_at": "2026-08-02T00:05:00Z",
+  "freshness_result": "all_current",
+  "included_item_references": [
+    "local-validation-principle"
+  ],
+  "integrity": {
+    "complete_report_sha256": "8cf2a24b9c8e17a38c87251315345c1187896c77a12679d4149d735644f84329"
+  },
+  "lifecycle": "validated",
+  "limitations": [
+    "Context is inert and has not been delivered to a reasoning provider.",
+    "Evidence references are identifiers only and grant no access."
+  ],
+  "limitations_count": 2,
+  "omitted_item_references": [],
+  "package_references": [
+    "package-139efdbd4d93897ec39840e7de2e7dee"
+  ],
+  "package_set_digest": "1c55b62c887867e7a6ef6729d362717fadb13e83d4edab259e0665b9799d7b96",
+  "policy_identity": "generate_options_context_local",
+  "policy_version": "1",
+  "rejected_item_references": [],
+  "report_contract_identity": "context_assembly_report",
+  "report_contract_version": "1",
+  "report_id": "report-0a49aa5c3bb04291b8d4f194f6fc997b",
+  "request_id": "m3-5-request-001",
+  "revocation_result": "none",
+  "schema_version": "1",
+  "selection_digest": "6709c05f56ef35d0e80e3071821be8cd9cc7cfd2b124912c3e63c6bf07fc9e34",
+  "semantic_task": "generate_options",
+  "semantic_task_version": "1",
+  "status": "success",
+  "trust_result": "approved_fixture",
+  "uncertainty_count": 5,
+  "warnings": []
+}
