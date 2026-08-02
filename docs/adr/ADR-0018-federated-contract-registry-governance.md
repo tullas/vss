@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -113,9 +113,11 @@ Each registry belongs to one bounded domain:
 
 Future domains follow the same ownership rule. Every registry and public
 contract family identifies an accountable domain owner, technical owner,
-security owner, compatibility/migration owner, lifecycle owner, schema owner,
-and retirement authority. One team may initially hold several roles, but each
-role remains explicit. Ownership is not inferred from the latest committer.
+security owner, compatibility owner, migration owner, lifecycle owner, schema
+or validator owner, and retirement authority. One team may initially hold
+several roles, but each role remains conceptually distinct and explicit.
+Ownership is not inferred from the latest committer and grants no invocation,
+authorization, approval, or execution authority.
 
 Lifecycle or compatibility changes require accountable review. Documentation
 is sufficient for initial repository ownership; this ADR does not mandate a
@@ -153,6 +155,8 @@ VSS prohibits:
 - one universal schema with optional fields for all domains;
 - one universal lifecycle manager with execution or authorization authority;
 - one central runtime contract-registration or installation service;
+- one central contract-distribution or shared authority service;
+- one universal governance metadata payload;
 - reflection, module scanning, entry-point discovery, or arbitrary plugin
   directories for authoritative contract discovery;
 - forced inheritance across contract domains;
@@ -237,15 +241,18 @@ assumed compatible with `1.1.0`. Compatibility meaning is explicit.
 
 ### Compatibility mappings
 
-Cross-version and cross-registry mappings identify source and target
+Cross-version and cross-registry mappings are immutable within the invocation's
+registry snapshots and identify source and target
 identities/versions, mapping identity/version and owner, lifecycle, effective
 period, compatibility classification, validator, translator identity/version
-where required, limitations, deprecation deadline, rollback path, bounds, and
-failure behavior.
+where required, limitations, migration/compatibility window, deprecation
+deadline, rollback path, bounds, and failure behavior.
 
 Conceptual classifications may include exact, backward compatible, forward
 readable, translator required, and incompatible. Each domain finalizes its
-taxonomy. Unknown compatibility fails closed. A mapping cannot grant permission,
+taxonomy. These labels are explicit domain decisions, never inferred from
+version syntax, schema shape, or implementation behavior. Unknown compatibility
+fails closed. A mapping cannot grant permission,
 authorization, execution, disclosure, source access, or approval.
 
 ### Translators
@@ -256,7 +263,7 @@ owner, lifecycle, bounds, deterministic requirements, semantic-loss policy,
 limitations, and rollback/migration behavior.
 
 Where applicable, it preserves classification, trust, purpose, provenance,
-assumptions, conflicts, uncertainty, limitations, expiry, retention, and
+facts, assumptions, conflicts, uncertainty, limitations, expiry, retention, and
 revocation. It fails rather than silently discard mandatory semantics.
 
 A translator cannot authorize, downgrade classification, promote trust, broaden
@@ -295,6 +302,10 @@ Emergency security disablement may omit a normal window only when explicit,
 auditable, narrowly scoped, recoverable, and followed by incident and
 compatibility review.
 
+The follow-up review must produce an explicit recovery, replacement,
+deprecation, or retirement disposition; emergency disablement cannot remain an
+undocumented permanent lifecycle state.
+
 Retirement accounts for producers, consumers, stored artifacts, audit
 interpretation, replay, migrations, rollback, retention/legal obligations,
 security defects, local fixtures, and release artifacts. Apparent lack of a
@@ -302,7 +313,9 @@ current code path is insufficient reason to delete a contract.
 
 Historical validators, where required, are isolated, bounded, non-authorizing,
 read-only where practical, excluded from new production use, and security
-maintained or explicitly quarantined.
+maintained or explicitly quarantined. They are reachable only through an
+explicit historical-validation mode and cannot participate in active or ordinary
+resolution.
 
 ### Schema governance
 
@@ -310,7 +323,8 @@ Where JSON Schema is used, the owning domain requires an explicit supported
 dialect, conservative identifiers, appropriate unknown-field rejection, bounds
 for strings/arrays/mappings/depth/nodes/bytes, no network or remote resolution,
 no caller/environment-selected roots, repository-contained admitted schemas,
-traversal and symlink-escape rejection, regular-file/no-follow/bounded reads,
+traversal and parent/final-file symlink-escape rejection,
+regular-file/no-follow/bounded reads,
 duplicate-key rejection, controlled anchor/dynamic references, schema identity
 verification, immutable snapshots, deterministic schema digests, and
 post-construction substitution resistance.
@@ -434,6 +448,8 @@ duplicates, ambiguity, disabled or ordinarily retired contracts, malformed or
 mismatched schemas, digest mismatch, unsafe paths, mutable substitution,
 unsupported external references, and missing governance metadata where
 required. Failure never returns a generic fallback, nearest, or latest contract.
+Resolution never selects the newest or "best available" contract, and a
+deprecated contract is selectable only under explicit owning-domain policy.
 
 Federation reduces blast radius: failure cannot corrupt unrelated registries.
 An operation requiring several registries still fails if any required registry
@@ -477,6 +493,9 @@ loss; activation/deprecation/disablement/retirement; migration/rollback where
 implemented; and registration/digest/lifecycle/reference non-authority.
 
 Requirements that do not apply are documented rather than tested meaninglessly.
+A non-applicability declaration requires bounded rationale and review by the
+accountable and security owners, is revisited on material change, and cannot be
+used to evade a security-significant obligation.
 
 A repository-maintained conceptual conformance matrix should identify registry
 identity/version, domain owner, schema mechanism, lifecycle, compatibility,
@@ -518,8 +537,9 @@ and no schema-registry product is selected.
 Contract artifact version, registry implementation version, and validation-
 library/dependency version are independent upgrade dimensions. A library upgrade
 must demonstrate unchanged or intentionally reviewed schema behavior, tests for
-changed behavior, no newly accepted unsafe data, no remote-resolution expansion,
-canonical/digest stability where required, migration/rollback, and supply-chain
+changed behavior, assessment of newly accepted and newly rejected data, no
+remote-resolution expansion, canonical/digest stability where required,
+supported Python/runtime compatibility, migration/rollback, and supply-chain
 checks.
 
 A registry implementation upgrade preserves admitted contract semantics unless
@@ -584,7 +604,9 @@ They may use separate registries where ownership, lifecycle, security,
 classification, release cadence, or operational coupling differs, or one bounded
 domain registry with independently versioned families where semantics genuinely
 align. Business-domain similarity alone does not justify one Movie Contract
-Registry. A universal Movie Object containing all production data is prohibited.
+Registry. Federation also does not require needless one-family-per-registry
+fragmentation where ownership and semantics genuinely align. A universal Movie
+Object containing all production data is prohibited.
 
 ## Alternatives Considered
 
@@ -780,7 +802,7 @@ Before acceptance:
 
 - run `./scripts/validate_adr.sh`;
 - validate repository-relative references;
-- confirm status remains `Proposed`;
+- confirm status is `Accepted` only after independent architecture acceptance;
 - confirm only ADR-0018 is tracked as changed;
 - run the repository secret scan and `git diff --check`;
 - use existing Markdown validation if present; and
