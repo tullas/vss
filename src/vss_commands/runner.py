@@ -19,6 +19,8 @@ from .registry import get_command
 RUNTIME_CAPABILITY_COMMANDS = frozenset({"system.info", "runtime.echo", "runtime.time", "bootstrap.check"})
 REASONING_COMMAND = "reasoning.generate-options"
 PERFORMANCE_COMMAND = "performance.reasoning"
+KNOWLEDGE_BUILD_COMMAND = "knowledge.package.build"
+KNOWLEDGE_VALIDATE_COMMAND = "knowledge.package.validate"
 
 
 def utc_now() -> str:
@@ -35,10 +37,11 @@ def _safe_error(message: str) -> str:
 
 
 class CommandRunner:
-    def __init__(self, runtime_controller=None, reasoning_gateway=None, performance_harness=None) -> None:
+    def __init__(self, runtime_controller=None, reasoning_gateway=None, performance_harness=None, knowledge_builder=None) -> None:
         self._runtime_controller = runtime_controller
         self._reasoning_gateway = reasoning_gateway
         self._performance_harness = performance_harness
+        self._knowledge_builder = knowledge_builder
 
     def run(
         self,
@@ -78,7 +81,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND}:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND}:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -116,6 +119,30 @@ class CommandRunner:
                 return finish("error", ExitCode.INTERNAL_ERROR, {}, ["performance report failed"])
             except Exception:
                 return finish("error", ExitCode.INTERNAL_ERROR, {}, ["performance run failed"])
+        if command in {KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND}:
+            from vss_knowledge import KnowledgePackageBuilder
+            from vss_knowledge.errors import KnowledgeAuditFailure, KnowledgePolicyDenied, UnknownKnowledgeSource
+            from vss_knowledge_contracts import KnowledgeContractError
+
+            builder = self._knowledge_builder or KnowledgePackageBuilder()
+            try:
+                if command == KNOWLEDGE_BUILD_COMMAND:
+                    if frozenset(payload) != {"source", "purpose"}:
+                        return finish("error", ExitCode.INVALID_INPUT, {}, ["knowledge build input is invalid"])
+                    outcome = builder.build(payload["source"], payload["purpose"], environment, correlation)
+                    return finish("success", ExitCode.SUCCESS, {"knowledge_package": outcome.package.to_json_value(), "summary": dict(outcome.summary)}, [])
+                outcome = builder.validate(payload, environment, correlation)
+                return finish("success", ExitCode.SUCCESS, {"valid": True, "summary": dict(outcome.summary)}, [])
+            except UnknownKnowledgeSource:
+                return finish("error", ExitCode.INVALID_INPUT, {}, ["knowledge source is invalid"])
+            except KnowledgePolicyDenied:
+                return finish("error", ExitCode.PERMISSION_DENIED, {}, ["knowledge operation is not permitted"])
+            except KnowledgeContractError:
+                return finish("error", ExitCode.INVALID_INPUT, {}, ["knowledge package is invalid"])
+            except KnowledgeAuditFailure:
+                return finish("error", ExitCode.INTERNAL_ERROR, {}, ["knowledge audit failed"])
+            except Exception:
+                return finish("error", ExitCode.INTERNAL_ERROR, {}, ["knowledge operation failed"])
         if command == REASONING_COMMAND:
             from vss_reasoning import (
                 CandidateGenerationFailure,

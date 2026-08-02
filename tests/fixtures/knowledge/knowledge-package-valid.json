@@ -1,0 +1,140 @@
+{
+  "classification": "internal",
+  "classification_summary": {
+    "item_count": 1,
+    "maximum": "internal"
+  },
+  "conflict_summary": {
+    "conflicts": [],
+    "status": "none_detected"
+  },
+  "constructed_at": "2026-08-02T00:00:00Z",
+  "correlation_id": "m3-4-fixture",
+  "expires_at": "2030-01-01T00:00:00Z",
+  "freshness_summary": "all_current",
+  "integrity": {
+    "complete_package_sha256": "eebc9135ec407f1735ff4ce38edeaaf1abe47b23db4c42f1c3f3b5c3185428fd",
+    "package_content_sha256": "b002f4f1def57d1231f4e17dcb189959dc343bd52786ee7366ecc2e774385bd7",
+    "registry_sha256": "6e3b1941fddadade8480d30d717ad799bf1aaf13f729e1f4411769ea0a3e2f81"
+  },
+  "item_references": [
+    "local-validation-principle"
+  ],
+  "items": [
+    {
+      "classification": "internal",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_until": "2030-01-01T00:00:00Z",
+      "integrity": {
+        "decoded_sha256": "ea63eb62e719417e626197634cc1cc6511b8c6c2dafdd1505ab58719b344ea3d",
+        "item_content_sha256": "02d57b92d796501fc646a4f0b4bb6e2d18d0ef3fbdf3ae860d37c9dbfafe79f5",
+        "payload_sha256": "4ada57a88eb1cb30e8a0396138e8d0088071439b8c16fb3a2d8bb3e51ecf4f86",
+        "source_sha256": "0af2a6811de3601986f5b64e5bacdfd6e2166726dca7de823d0c1cc5e42ec4c7"
+      },
+      "item_family": "reference_note",
+      "item_family_version": "1",
+      "item_id": "local-validation-principle",
+      "lifecycle_status": "active",
+      "observed_at": "2026-01-01T00:00:00Z",
+      "payload": {
+        "body": "Development workflows must remain executable without paid external services.",
+        "citations": [],
+        "language": "en",
+        "title": "Local validation principle",
+        "topic_labels": [
+          "local-first",
+          "validation"
+        ]
+      },
+      "permitted_purposes": [
+        "local_validation_context"
+      ],
+      "provenance": {
+        "normalization_contract": "reference_note_normalizer",
+        "normalization_version": "1",
+        "owning_authority": "vss-project",
+        "retrieval_mechanism": "repository_fixture_loader",
+        "retrieval_version": "1"
+      },
+      "retention_until": "2031-01-01T00:00:00Z",
+      "retrieved_at": "2026-01-01T00:00:00Z",
+      "schema_version": "1",
+      "source_id": "vss.local.reference-fixtures",
+      "source_item_id": "local-validation-principle",
+      "source_version": "1",
+      "stale_after": "2030-01-01T00:00:00Z",
+      "transformations": [
+        "strict_json_decode/1",
+        "typed_normalization/1",
+        "classification_validation/1",
+        "canonicalization/1"
+      ],
+      "trust": "approved_fixture"
+    }
+  ],
+  "lifecycle_status": "validated",
+  "lineage": [
+    {
+      "input_sha256": "0af2a6811de3601986f5b64e5bacdfd6e2166726dca7de823d0c1cc5e42ec4c7",
+      "item_id": "local-validation-principle",
+      "kind": "source",
+      "output_sha256": "ea63eb62e719417e626197634cc1cc6511b8c6c2dafdd1505ab58719b344ea3d",
+      "step_id": "lineage-source"
+    },
+    {
+      "input_sha256": "ea63eb62e719417e626197634cc1cc6511b8c6c2dafdd1505ab58719b344ea3d",
+      "item_id": "local-validation-principle",
+      "kind": "normalized_payload",
+      "output_sha256": "4ada57a88eb1cb30e8a0396138e8d0088071439b8c16fb3a2d8bb3e51ecf4f86",
+      "step_id": "lineage-payload"
+    },
+    {
+      "input_sha256": "4ada57a88eb1cb30e8a0396138e8d0088071439b8c16fb3a2d8bb3e51ecf4f86",
+      "item_id": "local-validation-principle",
+      "kind": "validated_item",
+      "output_sha256": "02d57b92d796501fc646a4f0b4bb6e2d18d0ef3fbdf3ae860d37c9dbfafe79f5",
+      "step_id": "lineage-item"
+    },
+    {
+      "input_sha256": "02d57b92d796501fc646a4f0b4bb6e2d18d0ef3fbdf3ae860d37c9dbfafe79f5",
+      "item_id": null,
+      "kind": "package_content",
+      "output_sha256": "b002f4f1def57d1231f4e17dcb189959dc343bd52786ee7366ecc2e774385bd7",
+      "step_id": "lineage-content"
+    },
+    {
+      "input_sha256": "b002f4f1def57d1231f4e17dcb189959dc343bd52786ee7366ecc2e774385bd7",
+      "item_id": null,
+      "kind": "complete_package",
+      "output_sha256": "eebc9135ec407f1735ff4ce38edeaaf1abe47b23db4c42f1c3f3b5c3185428fd",
+      "step_id": "lineage-package"
+    }
+  ],
+  "package_contract_identity": "knowledge_package",
+  "package_contract_version": "1",
+  "package_id": "package-139efdbd4d93897ec39840e7de2e7dee",
+  "permitted_purpose": "local_validation_context",
+  "provenance_summary": {
+    "source_count": 1,
+    "transformation_count": 4
+  },
+  "redaction_summary": {
+    "policy_identity": "vss.no-redaction-required",
+    "policy_version": "1",
+    "removed_field_count": 0,
+    "status": "not_required"
+  },
+  "retention_until": "2031-01-01T00:00:00Z",
+  "revocation_summary": {
+    "revoked_item_ids": [],
+    "status": "none"
+  },
+  "schema_version": "1",
+  "source_references": [
+    "vss.local.reference-fixtures"
+  ],
+  "task_family": "local_validation",
+  "uncertainty_summary": [
+    "Truth and real-world applicability were not independently verified."
+  ]
+}

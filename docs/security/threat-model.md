@@ -158,6 +158,26 @@ operators/agents.
   multi-process audit locking, durable audit/state, process isolation,
   distributed workers, autoscaling, cloud validation, external-provider and
   movie-media performance remain deferred.
+- Repository-owned M3.4 Knowledge Contract Registry, fixed local fixture source,
+  `reference_note/1`, and bounded `knowledge_package/1`. Abuse: arbitrary path
+  or source selection, traversal and symlink/special-file reads, oversized or
+  duplicate-key input, schema/item/package substitution, dynamic references or
+  registration, identity/payload mismatch, classification downgrade, trust
+  inflation, purpose expansion, stale/expired/revoked replay, lineage or digest
+  forgery, conflict/uncertainty suppression, prompt injection, mutation after
+  validation, audit leakage, and false truth or authority inference.
+  Implemented mitigation: exact source and schema mappings; bounded no-follow
+  regular-file reads; strict JSON and immutable schema snapshots; typed payload
+  and fail-closed cross-field validation; explicit classification, trust,
+  purpose, freshness, lifecycle, retention, revocation, conflict and uncertainty
+  metadata; independent item/package integrity and ordered lineage checks; and
+  one safe terminal audit record whose failure is fatal. Instruction-like text
+  remains inert. Registration, provenance, trust, freshness, classification and
+  integrity grant no truth, disclosure, source access, reasoning, approval, or
+  execution authority. Connectors and credentials, production storage/audit,
+  signing/encryption, privacy/residency/deletion enforcement, persistent
+  revocation, cache invalidation, search/indexing, external providers, reasoning
+  consumption, Plan IR, approvals and execution remain deferred.
 
 Residual risks include hosted-runner administration, repository ruleset
 configuration, mutable APT repository contents, Docker group privilege,

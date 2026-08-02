@@ -72,6 +72,19 @@ def _parser() -> argparse.ArgumentParser:
     performance_reasoning.add_argument("--environment", required=True)
     performance_reasoning.add_argument("--no-endurance", action="store_true")
     performance_reasoning.add_argument("--dry-run", action="store_true")
+    knowledge = subparsers.add_parser("knowledge")
+    knowledge_actions = knowledge.add_subparsers(dest="knowledge_action", required=True)
+    package = knowledge_actions.add_parser("package")
+    package_actions = package.add_subparsers(dest="package_action", required=True)
+    package_build = package_actions.add_parser("build")
+    package_build.add_argument("--source", required=True)
+    package_build.add_argument("--purpose", required=True)
+    package_build.add_argument("--environment", required=True)
+    package_build.add_argument("--correlation-id")
+    package_validate = package_actions.add_parser("validate")
+    package_validate.add_argument("--input", type=Path, required=True)
+    package_validate.add_argument("--environment", required=True)
+    package_validate.add_argument("--correlation-id")
     return parser
 
 
@@ -120,6 +133,27 @@ def _read_reasoning_input(path: Path | None) -> tuple[dict | None, ExitCode | No
     return value, None
 
 
+def _read_knowledge_input(path: Path | None) -> tuple[dict | None, ExitCode | None]:
+    if path is None:
+        return None, ExitCode.INVALID_INPUT
+    try:
+        from vss_knowledge_contracts import MAX_PACKAGE_BYTES, load_json_document
+
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return None, ExitCode.INVALID_INPUT
+            document = os.read(descriptor, MAX_PACKAGE_BYTES + 1)
+            if len(document) > MAX_PACKAGE_BYTES:
+                return None, ExitCode.INVALID_INPUT
+        finally:
+            os.close(descriptor)
+        value = load_json_document(document)
+    except Exception:
+        return None, ExitCode.INVALID_INPUT
+    return (value, None) if isinstance(value, dict) else (None, ExitCode.INVALID_INPUT)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
@@ -162,6 +196,11 @@ def main(argv: list[str] | None = None) -> int:
             "profile": args.profile,
             "include_endurance": not args.no_endurance,
         }, None
+    elif args.action == "knowledge":
+        if args.package_action == "build":
+            input_data, input_error = {"source": args.source, "purpose": args.purpose}, None
+        else:
+            input_data, input_error = _read_knowledge_input(args.input)
     else:
         input_data, input_error = _read_input(args.input)
     if input_error is not None:
@@ -175,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
         command_name = "reasoning.generate-options"
     elif args.action == "performance":
         command_name = "performance.reasoning"
+    elif args.action == "knowledge":
+        command_name = f"knowledge.package.{args.package_action}"
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret
@@ -188,7 +229,7 @@ def main(argv: list[str] | None = None) -> int:
         args.environment,
         input_data,
         getattr(args, "correlation_id", None),
-        args.dry_run,
+        getattr(args, "dry_run", False),
         getattr(args, "timeout", None),
         getattr(args, "verbose", False),
         getattr(args, "ask_become_pass", False),
