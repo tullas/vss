@@ -1,0 +1,24 @@
+{
+  "schema_version": "1",
+  "request_id": "request-001",
+  "correlation_id": "correlation-001",
+  "task_identity": "generate_options",
+  "task_version": "1",
+  "required_result_family": "option_set",
+  "required_result_version": "1",
+  "lifecycle_mode": "validation",
+  "data_classification": "internal",
+  "permitted_purpose": "compare bounded implementation approaches",
+  "budget": {
+    "maximum_duration_ms": 1000,
+    "maximum_result_bytes": 65536
+  },
+  "payload": {
+    "objective": "Describe bounded implementation alternatives.",
+    "constraints": [
+      {"id": "local_first", "statement": "The alternatives must remain locally testable."}
+    ],
+    "desired_option_count": 2,
+    "evaluation_dimensions": ["security", "maintainability"]
+  }
+}

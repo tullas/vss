@@ -1,0 +1,59 @@
+{
+  "schema_version": "1",
+  "request_id": "request-001",
+  "correlation_id": "correlation-001",
+  "task_identity": "generate_options",
+  "task_version": "1",
+  "object_family": "option_set",
+  "object_family_version": "1",
+  "contract_identity": "vss.option_set/1",
+  "lifecycle_status": "active",
+  "payload": {
+    "option_set_id": "option-set-001",
+    "objective_summary": "Bounded alternatives for implementation.",
+    "options": [
+      {
+        "id": "minimal",
+        "title": "Minimal contract",
+        "description": "Implement the narrow admitted contract only.",
+        "benefits": ["Small review surface"],
+        "drawbacks": ["Future families require separate contracts"],
+        "risks": ["Bounds require maintenance"],
+        "constraints_satisfied": ["local_first"],
+        "constraints_not_satisfied": [],
+        "evidence_references": ["evidence:adr-0013"]
+      },
+      {
+        "id": "defer",
+        "title": "Defer implementation",
+        "description": "Retain the accepted architecture without code.",
+        "benefits": ["No immediate maintenance"],
+        "drawbacks": ["No machine validation"],
+        "risks": ["Contract drift"],
+        "constraints_satisfied": ["local_first"],
+        "constraints_not_satisfied": [],
+        "evidence_references": ["evidence:adr-0013"]
+      }
+    ],
+    "common_sections": {
+      "facts": [
+        {
+          "id": "accepted_adr",
+          "statement": "ADR-0013 defines semantic contracts.",
+          "qualification": "Claimed from repository evidence.",
+          "evidence_references": ["evidence:adr-0013"]
+        }
+      ],
+      "assumptions": [{"id": "existing_dependency", "statement": "The pinned validator remains available."}],
+      "unknowns": [{"id": "future_family", "statement": "Future object families are not yet selected."}],
+      "constraints": [{"id": "local_first", "statement": "Validation must run locally.", "kind": "required"}],
+      "evidence_references": ["evidence:adr-0013"],
+      "confidence": {
+        "level": "high",
+        "basis": "The result conforms to a deterministic fixture, not a calibrated probability.",
+        "qualifications": ["No reasoning quality is asserted."]
+      },
+      "limitations": [{"id": "inert_only", "statement": "This result grants no authority."}]
+    }
+  }
+}

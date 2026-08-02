@@ -1,0 +1,14 @@
+{
+  "schema_version": "1",
+  "request_id": "request-minimum",
+  "correlation_id": "correlation-minimum",
+  "task_identity": "generate_options",
+  "task_version": "1",
+  "required_result_family": "option_set",
+  "required_result_version": "1",
+  "lifecycle_mode": "validation",
+  "data_classification": "public",
+  "permitted_purpose": "contract validation",
+  "budget": {"maximum_duration_ms": 1, "maximum_result_bytes": 1},
+  "payload": {"objective": "Validate.", "constraints": [], "desired_option_count": 1}
+}

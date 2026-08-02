@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vss.semantic_result/1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "correlation_id", "task_identity", "task_version", "object_family", "object_family_version", "contract_identity", "lifecycle_status", "payload"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "request_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "correlation_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "task_identity": {"const": "generate_options"},
+    "task_version": {"const": "1"},
+    "object_family": {"const": "option_set"},
+    "object_family_version": {"const": "1"},
+    "contract_identity": {"const": "vss.option_set/1"},
+    "lifecycle_status": {"const": "active"},
+    "payload": {"type": "object"}
+  }
+}
