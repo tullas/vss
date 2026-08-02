@@ -7,7 +7,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
@@ -25,6 +27,7 @@ from vss_reasoning import (
     ReasoningUnavailable,
 )
 from vss_reasoning.gateway import ReasoningGateway
+from vss_reasoning.audit import DevelopmentReasoningAudit
 from vss_reasoning.models import CandidateOptions, OptionPrimitive
 from vss_reasoning.registry import (
     PROVIDER_IDENTITY,
@@ -74,6 +77,20 @@ class FailingProvider:
 class InvalidStrategy:
     def generate(self, context, provider):
         return {"invalid": True}, 1, 1
+
+
+class FailingStrategy:
+    def generate(self, context, provider):
+        raise RuntimeError("secret-like-strategy-output")
+
+
+class CapturingProvider:
+    def __init__(self) -> None:
+        self.context = None
+
+    def generate_option_primitives(self, context):
+        self.context = context
+        return FakeProvider().generate_option_primitives(context)
 
 
 class MutatingStrategy:
@@ -215,12 +232,25 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
 
     def test_inactive_or_substituted_implementation_fails_closed(self):
         inactive = replace(PROVIDER_IDENTITY, lifecycle_status="disabled")
-        for registry in (
-            ReasoningImplementationRegistry(STRATEGY_IDENTITY, inactive, object(), object()),
-            ReasoningImplementationRegistry(replace(STRATEGY_IDENTITY, identity="other"), PROVIDER_IDENTITY, object(), object()),
+        for registry, expected_error in (
+            (
+                ReasoningImplementationRegistry(
+                    STRATEGY_IDENTITY, inactive, object(), object()
+                ),
+                ReasoningUnavailable,
+            ),
+            (
+                ReasoningImplementationRegistry(
+                    replace(STRATEGY_IDENTITY, identity="other"),
+                    PROVIDER_IDENTITY,
+                    object(),
+                    object(),
+                ),
+                ReasoningUnauthorized,
+            ),
         ):
             gateway = self._gateway(audit=MemoryAudit(), registry=registry)
-            with self.assertRaises(ReasoningUnavailable):
+            with self.assertRaises(expected_error):
                 gateway.execute(self.request, environment="development", correlation_id=self.request["correlation_id"])
 
     def test_invalid_provider_output_is_independently_rejected(self):
@@ -237,8 +267,16 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
             ),
             lambda payload: payload["common_sections"]["evidence_references"].append("evidence:fake"),
             lambda payload: payload["common_sections"]["confidence"].__setitem__("level", "high"),
+            lambda payload: payload["common_sections"]["confidence"].__setitem__("qualifications", []),
+            lambda payload: payload["common_sections"].__setitem__("limitations", []),
+            lambda payload: payload["common_sections"]["unknowns"].pop(),
             lambda payload: payload["options"][0]["evidence_references"].append("evidence:fake"),
             lambda payload: payload["options"][0]["constraints_satisfied"].pop(),
+            lambda payload: payload["options"][0]["constraints_satisfied"].append("unknown_constraint"),
+            lambda payload: payload["options"][0]["constraints_not_satisfied"].append("must_run_locally"),
+            lambda payload: payload["options"][0].__setitem__("approval", True),
+            lambda payload: payload.__setitem__("provider_native", {}),
+            lambda payload: payload["options"].append(copy.deepcopy(payload["options"][0])),
         )
         for mutate in mutations:
             with self.subTest(mutate=mutate):
@@ -256,6 +294,16 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
             gateway.execute(self.request, environment="development", correlation_id=self.request["correlation_id"])
         self.assertNotIn("secret-like", str(caught.exception))
 
+    def test_strategy_exception_is_safe(self):
+        gateway = self._gateway(audit=MemoryAudit(), strategy=FailingStrategy())
+        with self.assertRaisesRegex(Exception, "deterministic candidate generation failed") as caught:
+            gateway.execute(
+                self.request,
+                environment="development",
+                correlation_id=self.request["correlation_id"],
+            )
+        self.assertNotIn("secret-like", str(caught.exception))
+
     def test_provider_call_and_iteration_budgets(self):
         for provider in (FakeProvider(calls=2), FakeProvider(iterations=9)):
             gateway = self._gateway(audit=MemoryAudit(), provider=provider)
@@ -268,9 +316,35 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
         with self.assertRaises(ReasoningBudgetExceeded):
             self._execute(request)
 
-    def test_expired_and_post_generation_deadlines(self):
-        with self.assertRaises(ReasoningDeadlineExceeded):
-            self._execute(timeout_seconds=0)
+    def test_invalid_cli_timeout_values_fail_closed(self):
+        for timeout in (
+            0.0,
+            -1.0,
+            True,
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            300.0001,
+            10**1000,
+        ):
+            with self.subTest(timeout=timeout), self.assertRaises(InvalidReasoningRequest):
+                self._execute(timeout_seconds=timeout)
+
+    def test_invalid_json_budget_numbers_fail_closed(self):
+        for field, value in (
+            ("maximum_duration_ms", 0),
+            ("maximum_duration_ms", -1),
+            ("maximum_duration_ms", True),
+            ("maximum_duration_ms", float("nan")),
+            ("maximum_result_bytes", True),
+            ("maximum_result_bytes", float("inf")),
+        ):
+            request = copy.deepcopy(self.request)
+            request["budget"][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(InvalidReasoningRequest):
+                self._execute(request)
+
+    def test_post_generation_deadline_cannot_return_partial_success(self):
         times = iter((0.0, 0.0, 2.0, 2.0))
         gateway = self._gateway(audit=MemoryAudit(), clock=lambda: next(times))
         with self.assertRaises(ReasoningDeadlineExceeded):
@@ -298,6 +372,14 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
         self.assertNotIn("option descriptions", serialized)
         self.assertEqual(record["correlation_id"], self.request["correlation_id"])
 
+    def test_invalid_outer_correlation_is_not_written_to_audit(self):
+        hostile = "x\n" + "z" * 10_000
+        with self.assertRaises(InvalidReasoningRequest):
+            self._execute(correlation_id=hostile)
+        self.assertEqual(len(self.audit.records), 1)
+        self.assertIsNone(self.audit.records[0]["correlation_id"])
+        self.assertNotIn(hostile, json.dumps(self.audit.records[0]))
+
     def test_audit_write_failure_is_fatal(self):
         gateway = self._gateway(audit=FailingAudit())
         with self.assertRaises(ReasoningAuditFailure):
@@ -319,6 +401,31 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             outcome.validated_result.value["payload"] = {}
 
+    def test_provider_context_is_narrow_and_recursively_immutable(self):
+        request = copy.deepcopy(self.request)
+        request["payload"]["desired_option_count"] = 1
+        provider = CapturingProvider()
+        gateway = self._gateway(audit=MemoryAudit(), provider=provider)
+        gateway.execute(
+            request,
+            environment="development",
+            correlation_id=request["correlation_id"],
+        )
+        context = provider.context
+        self.assertIsNotNone(context)
+        with self.assertRaises(FrozenInstanceError):
+            context.deadline = 0
+        with self.assertRaises(TypeError):
+            context.payload["objective"] = "changed"
+        with self.assertRaises(TypeError):
+            context.payload["constraints"][0]["statement"] = "changed"
+        prohibited = {
+            "runtime", "capability_registry", "workflow_registry", "registry",
+            "audit", "filesystem", "network", "subprocess", "environment_variables",
+            "secrets", "connector", "knowledge_package", "approval",
+        }
+        self.assertTrue(prohibited.isdisjoint(context.__slots__))
+
     def test_determinism_is_independent_of_cwd_and_environment(self):
         first = self._execute().content_digest
         old = os.getcwd()
@@ -336,7 +443,7 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
                 os.environ["VSS_REASONING_PROVIDER"] = old_value
         self.assertEqual(first, second)
 
-    def test_separate_process_digest_is_stable(self):
+    def test_separate_process_and_hash_seed_digests_are_stable(self):
         code = (
             "import json; from pathlib import Path; "
             "from vss_reasoning.gateway import ReasoningGateway; "
@@ -346,9 +453,87 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
             "g=ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(),audit=type('A',(),{'append':lambda self,record:None})()); "
             "print(g.execute(r,environment='development',correlation_id=r['correlation_id']).content_digest)"
         )
-        environment = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
-        digest = subprocess.check_output([sys.executable, "-c", code], text=True, env=environment, cwd="/").strip()
-        self.assertEqual(digest, self._execute().content_digest)
+        expected = self._execute().content_digest
+        for seed in ("1", "999"):
+            environment = dict(
+                os.environ,
+                PYTHONPATH=str(ROOT / "src"),
+                PYTHONHASHSEED=seed,
+            )
+            digest = subprocess.check_output(
+                [sys.executable, "-c", code], text=True, env=environment, cwd="/"
+            ).strip()
+            self.assertEqual(digest, expected)
+
+    def test_concurrent_and_failure_then_success_invocations_do_not_leak_state(self):
+        audit = MemoryAudit()
+        audit_lock = threading.Lock()
+        original_append = audit.append
+
+        def locked_append(record):
+            with audit_lock:
+                original_append(record)
+
+        audit.append = locked_append
+        gateway = self._gateway(audit=audit)
+
+        def invoke(index):
+            request = copy.deepcopy(self.request)
+            request["request_id"] = f"concurrent-request-{index}"
+            request["correlation_id"] = f"concurrent-correlation-{index}"
+            request["payload"]["desired_option_count"] = index
+            return gateway.execute(
+                request,
+                environment="development",
+                correlation_id=request["correlation_id"],
+            )
+
+        invalid = copy.deepcopy(self.request)
+        invalid["provider"] = "not-admitted"
+        with self.assertRaises(InvalidReasoningRequest):
+            gateway.execute(
+                invalid,
+                environment="development",
+                correlation_id=invalid["correlation_id"],
+            )
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            outcomes = list(executor.map(invoke, range(1, 9)))
+        self.assertEqual(
+            [len(item.output["semantic_result"]["payload"]["options"]) for item in outcomes],
+            list(range(1, 9)),
+        )
+        records = audit.records
+        self.assertEqual(len(records), 9)
+        self.assertEqual(len({item["execution_id"] for item in records}), 9)
+        self.assertEqual(records[0]["status"], "failed")
+        self.assertTrue(all(item["status"] == "success" for item in records[1:]))
+
+    def test_concurrent_development_audit_records_remain_valid_jsonl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gateway = self._gateway(audit=DevelopmentReasoningAudit(root))
+
+            def invoke(index):
+                request = copy.deepcopy(self.request)
+                request["request_id"] = f"audit-request-{index}"
+                request["correlation_id"] = f"audit-correlation-{index}"
+                return gateway.execute(
+                    request,
+                    environment="development",
+                    correlation_id=request["correlation_id"],
+                )
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                list(executor.map(invoke, range(8)))
+            lines = (root / ".local/runtime/audit/executions.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            records = [json.loads(line) for line in lines]
+            self.assertEqual(len(records), 8)
+            self.assertEqual(
+                {item["correlation_id"] for item in records},
+                {f"audit-correlation-{index}" for index in range(8)},
+            )
 
     def test_outer_command_envelope_and_exit_codes_remain_compatible(self):
         runner = CommandRunner(reasoning_gateway=self.gateway)
@@ -387,6 +572,44 @@ class DeterministicGenerateOptionsTests(unittest.TestCase):
                     )
                 self.assertEqual(code, ExitCode.INVALID_INPUT)
                 self.assertEqual(json.loads(output.getvalue())["error"], "input must be valid JSON object")
+
+    def test_cli_rejects_non_finite_timeout(self):
+        with redirect_stdout(io.StringIO()) as output:
+            code = cli_main(
+                [
+                    "reasoning", "generate-options", "--environment", "development",
+                    "--input", str(FIXTURE), "--correlation-id", "m3-2-local-acceptance",
+                    "--timeout", "nan",
+                ]
+            )
+        response = json.loads(output.getvalue())
+        self.assertEqual(code, ExitCode.INVALID_INPUT)
+        self.assertEqual(response["errors"], ["semantic request is invalid"])
+
+    def test_cli_bounds_input_and_rejects_special_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            oversized = root / "oversized.json"
+            oversized.write_bytes(b"{" + b" " * 16_384 + b"}")
+            fifo = root / "request.fifo"
+            os.mkfifo(fifo)
+            symlink = root / "request-link.json"
+            symlink.symlink_to(FIXTURE)
+            for path, expected in (
+                (oversized, ExitCode.INVALID_INPUT),
+                (fifo, ExitCode.INVALID_INPUT),
+                (Path("/dev/null"), ExitCode.INVALID_INPUT),
+                (symlink, ExitCode.SUCCESS),
+            ):
+                with self.subTest(path=path), redirect_stdout(io.StringIO()):
+                    code = cli_main(
+                        [
+                            "reasoning", "generate-options", "--environment", "development",
+                            "--input", str(path), "--correlation-id", "m3-2-local-acceptance",
+                            "--dry-run",
+                        ]
+                    )
+                self.assertEqual(code, expected)
 
 
 if __name__ == "__main__":

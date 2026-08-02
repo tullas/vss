@@ -50,6 +50,10 @@ class DeterministicGenerateOptionsStrategy:
                     {"id": "cost", "statement": "Real-world cost has not been measured."},
                     {"id": "timing", "statement": "A delivery timeline has not been established."},
                     {"id": "quality", "statement": "Outcome quality has not been evaluated."},
+                    {
+                        "id": "external_validation",
+                        "statement": "No external validation has been performed.",
+                    },
                 ],
                 "constraints": [
                     {"id": item["id"], "statement": item["statement"], "kind": "required"}

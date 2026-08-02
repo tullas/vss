@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -31,6 +33,8 @@ from .errors import (
 from .models import DeterministicReasoningContext, ReasoningOutcome, ReasoningPolicy
 from .registry import ReasoningImplementationRegistry
 
+_CORRELATION_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$")
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -53,6 +57,15 @@ class ReasoningGateway:
             ReasoningPolicy(
                 identity="vss.reasoning.generate-options.local",
                 version="1",
+                task_identity="generate_options",
+                task_version="1",
+                result_family="option_set",
+                result_version="1",
+                strategy_identity="vss.generate-options.deterministic",
+                strategy_version="1.0.0",
+                provider_identity="vss.reasoning.deterministic-options",
+                provider_version="1.0.0",
+                provider_api_version="1",
                 environments=frozenset({"development"}),
                 classifications=frozenset({"public", "internal"}),
                 purposes=frozenset({"generate_options"}),
@@ -77,6 +90,15 @@ class ReasoningGateway:
             or ReasoningPolicy(
                 identity="vss.reasoning.generate-options.local",
                 version="1",
+                task_identity="generate_options",
+                task_version="1",
+                result_family="option_set",
+                result_version="1",
+                strategy_identity="vss.generate-options.deterministic",
+                strategy_version="1.0.0",
+                provider_identity="vss.reasoning.deterministic-options",
+                provider_version="1.0.0",
+                provider_api_version="1",
                 environments=frozenset({"development"}),
                 classifications=frozenset({"public", "internal"}),
                 purposes=frozenset({"generate_options"}),
@@ -112,6 +134,23 @@ class ReasoningGateway:
 
     def _authorize(self, request: Any, environment: str) -> None:
         value = request.value
+        if (
+            value["task_identity"] != self._policy.task_identity
+            or value["task_version"] != self._policy.task_version
+            or value["required_result_family"] != self._policy.result_family
+            or value["required_result_version"] != self._policy.result_version
+            or self._implementations.strategy_identity.identity
+            != self._policy.strategy_identity
+            or self._implementations.strategy_identity.version
+            != self._policy.strategy_version
+            or self._implementations.provider_identity.identity
+            != self._policy.provider_identity
+            or self._implementations.provider_identity.version
+            != self._policy.provider_version
+            or self._implementations.provider_identity.api_version
+            != self._policy.provider_api_version
+        ):
+            raise ReasoningUnauthorized("reasoning combination is not authorized")
         if environment not in self._policy.environments:
             raise ReasoningUnauthorized("reasoning environment is not authorized")
         if value["data_classification"] not in self._policy.classifications:
@@ -142,6 +181,21 @@ class ReasoningGateway:
             raise InvalidReasoningResult("deterministic result fabricated facts or evidence")
         if common["confidence"]["level"] not in {"unknown", "low"}:
             raise InvalidReasoningResult("deterministic result confidence is not admitted")
+        if not common["confidence"]["qualifications"]:
+            raise InvalidReasoningResult("deterministic result confidence is unqualified")
+        if not common["limitations"]:
+            raise InvalidReasoningResult("deterministic result limitations are missing")
+        required_unknowns = {
+            "feasibility",
+            "cost",
+            "timing",
+            "quality",
+            "external_validation",
+        }
+        if not required_unknowns.issubset(
+            {item["id"] for item in common["unknowns"]}
+        ):
+            raise InvalidReasoningResult("deterministic result unknowns are incomplete")
         expected_ids = set(expected_constraints)
         for option in result_payload["options"]:
             if option["evidence_references"]:
@@ -160,6 +214,11 @@ class ReasoningGateway:
     ) -> ReasoningOutcome:
         started = self._clock()
         execution_id = uuid.uuid4().hex
+        safe_correlation_id = (
+            correlation_id
+            if type(correlation_id) is str and _CORRELATION_ID.fullmatch(correlation_id)
+            else None
+        )
         request = None
         result = None
         request_digest = None
@@ -168,22 +227,35 @@ class ReasoningGateway:
         event_type = "reasoning_execution_failed"
         failure = "internal_reasoning_failure"
         try:
+            if safe_correlation_id is None:
+                failure = "invalid_correlation_identity"
+                raise InvalidReasoningRequest("reasoning correlation identity is invalid")
             try:
                 request = validate_request(request_data, self._semantic_registry)
             except SemanticContractError as exc:
                 failure = "invalid_semantic_request"
                 raise InvalidReasoningRequest("semantic request validation failed") from exc
             request_digest = request.digest
-            if request.value["correlation_id"] != correlation_id:
+            if request.value["correlation_id"] != safe_correlation_id:
                 failure = "correlation_mismatch"
                 raise InvalidReasoningRequest("semantic request correlation mismatch")
             failure = "reasoning_unauthorized"
             self._authorize(request, environment)
             strategy, provider = self._implementations.resolve()
 
-            if timeout_seconds is not None and timeout_seconds <= 0:
-                failure = "deadline_exceeded"
-                raise ReasoningDeadlineExceeded("reasoning deadline exceeded")
+            if timeout_seconds is not None:
+                invalid_timeout = type(timeout_seconds) not in (int, float)
+                if type(timeout_seconds) is float and not math.isfinite(
+                    timeout_seconds
+                ):
+                    invalid_timeout = True
+                if not invalid_timeout and (
+                    timeout_seconds <= 0 or timeout_seconds > 300
+                ):
+                    invalid_timeout = True
+                if invalid_timeout:
+                    failure = "invalid_deadline"
+                    raise InvalidReasoningRequest("reasoning timeout is invalid")
             duration_limit = request.value["budget"]["maximum_duration_ms"] / 1000
             if timeout_seconds is not None:
                 duration_limit = min(duration_limit, timeout_seconds)
@@ -197,12 +269,17 @@ class ReasoningGateway:
                 "task_version": request.value["task_version"],
                 "required_result_family": request.value["required_result_family"],
                 "required_result_version": request.value["required_result_version"],
+                "strategy_identity": self._implementations.strategy_identity.identity,
+                "strategy_version": self._implementations.strategy_identity.version,
+                "provider_identity": self._implementations.provider_identity.identity,
+                "provider_version": self._implementations.provider_identity.version,
+                "provider_api_version": self._implementations.provider_identity.api_version,
                 "payload": request.value["payload"],
             }
             semantic_input_digest = canonical_digest(semantic_input)
             context = DeterministicReasoningContext(
                 request_id=request.value["request_id"],
-                correlation_id=correlation_id,
+                correlation_id=safe_correlation_id,
                 execution_id=execution_id,
                 environment=environment,
                 permitted_purpose=request.value["permitted_purpose"],
@@ -262,7 +339,7 @@ class ReasoningGateway:
             raw_result = {
                 "schema_version": "1",
                 "request_id": request.value["request_id"],
-                "correlation_id": correlation_id,
+                "correlation_id": safe_correlation_id,
                 "task_identity": "generate_options",
                 "task_version": "1",
                 "object_family": "option_set",
@@ -309,7 +386,7 @@ class ReasoningGateway:
                 "recorded_at": _utc_now(),
                 "execution_id": execution_id,
                 "request_id": request.value["request_id"] if request else None,
-                "correlation_id": correlation_id,
+                "correlation_id": safe_correlation_id,
                 "task_identity": "generate_options",
                 "task_version": "1",
                 "result_family": "option_set",

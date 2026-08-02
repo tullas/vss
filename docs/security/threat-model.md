@@ -124,6 +124,9 @@ operators/agents.
   content digests independent of machine state; empty facts and external
   evidence; qualified low confidence and explicit limitations; safe typed
   errors; and one final payload-free audit record whose write failure is fatal.
+  The CLI bounds reads before JSON decoding, rejects special input files, and
+  rejects non-finite, non-positive, boolean, or over-ceiling timeout values;
+  unsafe outer correlation identities are not copied into audit records.
   Instruction-like text remains inert data, and neither successful validation
   nor deterministic output grants authority. Built-in Python remains trusted
   in-process code, local JSONL audit remains development-only, and process

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 import sys
 from pathlib import Path
 
@@ -83,8 +85,26 @@ def _read_reasoning_input(path: Path | None) -> tuple[dict | None, ExitCode | No
         return None, ExitCode.INVALID_INPUT
     try:
         from vss_reasoning_contracts import SemanticContractError, load_json_document
+        from vss_reasoning_contracts.constants import MAX_REQUEST_BYTES
 
-        value = load_json_document(path.read_bytes())
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return None, ExitCode.INVALID_INPUT
+            chunks: list[bytes] = []
+            remaining = MAX_REQUEST_BYTES + 1
+            while remaining:
+                chunk = os.read(descriptor, min(remaining, 4096))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            document = b"".join(chunks)
+            if len(document) > MAX_REQUEST_BYTES:
+                return None, ExitCode.INVALID_INPUT
+        finally:
+            os.close(descriptor)
+        value = load_json_document(document)
     except (OSError, SemanticContractError):
         # Contract failures are deliberately collapsed at the CLI boundary.
         return None, ExitCode.INVALID_INPUT

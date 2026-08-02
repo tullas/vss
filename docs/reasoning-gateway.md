@@ -17,7 +17,9 @@ The Gateway is not an execution or approval authority. It cannot invoke a
 capability or workflow, retrieve knowledge, select tools, access secrets, or
 turn an option into an action. Runtime remains the sole execution and
 authorization authority. Registration, lifecycle `active`, confidence,
-evidence identifiers, and successful validation grant no authority.
+evidence identifiers, request budgets, policy admission, and successful
+validation grant no execution authority. The result is inert Autonomy Level 2
+proposal data under ADR-0016.
 
 ## Fixed implementations
 
@@ -90,6 +92,10 @@ side-effect-free generation. No partial result succeeds after timeout. The
 trusted in-process deadline checks are appropriate only to this bounded local
 implementation and are not production isolation.
 
+CLI `--timeout` is an optional finite positive duration in seconds, capped at
+300 seconds to match the v1 request-contract ceiling. Zero, negative,
+non-finite, boolean, or larger values fail closed as invalid input.
+
 Dry-run performs contract validation, policy authorization, and fixed
 implementation resolution. It does not invoke the provider and returns only
 safe readiness metadata—never a fabricated `OptionSet`.
@@ -129,7 +135,11 @@ Normal laptop execution is expected to be sub-second, but that observation is
 not a contractual SLO.
 
 Add `--dry-run` to validate readiness without generation. Input is strict JSON:
-duplicate object keys and non-finite values are rejected.
+duplicate object keys and non-finite values are rejected. The CLI reads at most
+the 16 KiB v1 request limit from a regular file before decoding. FIFO, device,
+directory, and other special-file inputs fail closed. A user-selected symlink
+to a regular input file is treated as user data and is permitted; schema and
+implementation paths remain fixed and do not use this behavior.
 
 ## Limitations
 

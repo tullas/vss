@@ -20,6 +20,15 @@ class ImplementationIdentity:
 class ReasoningPolicy:
     identity: str
     version: str
+    task_identity: str
+    task_version: str
+    result_family: str
+    result_version: str
+    strategy_identity: str
+    strategy_version: str
+    provider_identity: str
+    provider_version: str
+    provider_api_version: str
     environments: frozenset[str]
     classifications: frozenset[str]
     purposes: frozenset[str]
