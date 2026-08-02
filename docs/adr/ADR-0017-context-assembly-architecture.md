@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -155,6 +155,11 @@ The registry must be repository-owned, explicit, deterministic, immutable for
 an invocation, provider/source/storage neutral, non-executable, non-authorizing,
 and fail closed. Registration means known, not authorized.
 
+It remains independently owned from the Semantic Contract Registry, Knowledge
+Contract Registry, Runtime registry, and provider registry. Compatibility is an
+explicit immutable mapping across identities and versions; no registry may own,
+mutate, or dynamically aggregate every contract system into a God Registry.
+
 Dynamic imports, entry-point discovery, arbitrary schema or contract paths,
 environment-selected schemas, caller-selected transformations, arbitrary
 modules, and third-party runtime registration are prohibited. Unknown identity,
@@ -215,6 +220,12 @@ expiry. The first purpose is conceptually
 `generate_options_local_validation`; its exact stable identifier is deferred to
 M3.5 contract review.
 
+Compatibility must be an exact, versioned, repository-owned policy mapping of
+source package purpose, target task/version, context family/version, project,
+environment, classification, retention, and expiry. Prefix matching, lexical
+similarity, caller assertion, provider interpretation, and ad hoc implementation
+rules cannot establish compatibility. Unknown mappings fail closed.
+
 Packages cannot be silently reused across project, environment, task, public
 release, advisory/execution, or other purpose boundaries. Purpose
 incompatibility fails closed. Assembly can narrow a package purpose but cannot
@@ -232,10 +243,19 @@ restricted, regulated, personal, and secret-bearing production handling is
 deferred. Unknown classifications fail closed. Classification does not grant
 disclosure permission.
 
+The governance-side Assembly Report and audit classification are derived
+independently from every package, selected or referenced item, omission/rejection
+record, and governance field they describe. They may be more restrictive than
+the provider-visible payload and can never be downgraded merely because
+minimization removed higher-classified provider-visible content.
+
 Trust remains an explicit qualification. `approved_fixture` may be admitted;
-`unverified` may be represented but is rejected by the first assembly policy.
+`unverified` may be represented but is rejected by the first production
+assembly policy.
 Assembly cannot promote trust or convert claims into truth. Corroboration,
 external origin, or filesystem location does not create authority.
+Relevant trust qualifications remain visible in the provider-visible typed
+payload; governance-only detail remains in the Assembly Report.
 
 ### Freshness, temporal validity, and revocation
 
@@ -243,6 +263,12 @@ Assembly revalidates package expiry, item effective time and freshness,
 retention, source/item/package lifecycle, and current policy-owned revocation at
 assembly time. Validity at package construction is insufficient. Unknown
 freshness fails closed when current knowledge is required.
+
+Validation time is supplied by an immutable Runtime-authorized policy clock,
+bound to the assembly request, policy version, selection decision, report, and
+safe audit metadata. A caller, package, strategy, provider, or environment
+variable cannot select or move the validation clock. Deterministic fixtures may
+use a repository-owned fixed clock under an explicit test profile.
 
 Context expiry cannot exceed the earliest package expiry, selected-item
 stale-after/effective-until/retention deadline, assembly-policy lifetime, or
@@ -259,7 +285,9 @@ versioned, policy-owned, and provider neutral. The initial rule will:
 1. Admit only compatible item families and purpose.
 2. Enforce classification ceiling, trust, freshness, retention, and revocation.
 3. Normalize package order and sort items by stable identity.
-4. Detect duplicates according to an explicit policy.
+4. Detect duplicates according to an explicit, deterministic, versioned policy
+   and record the disposition safely without hiding divergent or conflicting
+   content.
 5. Include all required eligible items if they fit.
 6. Select optional eligible items in deterministic order within item, byte,
    evidence, conflict, uncertainty, provenance, node, depth, duration, and
@@ -267,7 +295,10 @@ versioned, policy-owned, and provider neutral. The initial rule will:
 7. Record every omission or rejection with a bounded reason.
 
 Selection cannot use randomness, filesystem or mapping iteration order, model
-ranking, embedding similarity, machine state, or nondeterministic tie-breaking.
+ranking, embedding similarity, the current provider, machine state, or
+nondeterministic tie-breaking. Exact duplicate representation remains an M3.5
+contract question, but duplicate handling must be attributable, bounded,
+inspectable, and unable to collapse unequal content under one identity.
 
 Data minimization is mandatory. Provider-visible context contains the minimum
 semantic subset. Governance-side records preserve sufficient package/item
@@ -293,8 +324,10 @@ preserves provenance and omission semantics.
 
 ### Required and optional knowledge
 
-Required/optional status must be explicit in the admitted request or policy; it
-is never inferred from order.
+Required/optional status applies conceptually at both package and item level. It
+must be explicit in the admitted request or policy and is never inferred from
+package order, item order, file order, source priority, or trust. The exact v1
+representation at each level remains an M3.5 contract question.
 
 Required content must be eligible, fit all limits, and be included or assembly
 fails. Optional content may be omitted deterministically for policy or budget
@@ -306,18 +339,23 @@ not create hidden fallback or source access.
 Material conflicts among selected content remain visible. Assembly cannot
 silently choose a winner, merge claims into a fact, omit conflict metadata while
 including the claims, or rank a source as true without an explicit future
-contract. The first family may carry unresolved conflict identity, involved item
-identities, qualification, resolution status, and handling policy. Reasoning
-must treat unresolved conflict as uncertainty.
+contract. Eligibility and assembly must evaluate conflicts across all selected
+packages and items, not only conflicts already summarized inside one package.
+For every material conflict, the first family must carry conflict identity,
+involved item identities, qualification, resolution status, and handling
+policy. Reasoning must treat unresolved conflict as uncertainty.
 
 Relevant uncertainty must also remain visible, including that truth,
 applicability, completeness, and absence of other sources have not been
 established. Assembly cannot convert unknown into true or false, unverified into
-fact, or omitted into absent from reality.
+fact, omitted into absent from reality, or `none_detected` into a claim of global
+consistency.
 
 Omission categories distinguish at least ineligible, optional-budget omission,
 stale, revoked, classification denied, purpose incompatible, unsupported family,
-duplicate, and superseded. Exact taxonomy is deferred to M3.5.
+duplicate, and superseded. Exact taxonomy is deferred to M3.5, but it must be
+explicit, bounded, non-secret-bearing, attributable to package/item identity,
+and incapable of converting required-content failure into successful omission.
 
 ### Provenance and evidence references
 
@@ -356,6 +394,11 @@ Conceptual lifecycle states are `requested`, `assembling`, `validated`,
 `delivered`, `expired`, `revoked`, and `rejected`. Only `validated` context may
 be delivered. Delivery does not imply provider invocation or execution.
 
+Immediately before binding or delivery, Runtime rechecks the Context Object's
+expiry, purpose, classification, task/context compatibility, package digests,
+and current revocation snapshot. An expired, revoked, or mismatched object is
+rejected rather than delivered for reasoning.
+
 Expired or revoked context cannot be reused. Reuse is denied by default. A
 future reuse policy must revalidate current authorization, purpose,
 classification, package and item digests, lifecycle, freshness, revocation,
@@ -373,10 +416,12 @@ and limitations.
 
 The report excludes note bodies, complete package/context payloads, credentials,
 paths, raw provenance, prompts, and hidden reasoning. It is evidence, not
-authority.
+authority. A successful Assembly Report means only that assembly completed; it
+does not mean reasoning ran, a proposal was accepted, or any action was approved.
 
 Audit records safe identities, versions, counts, classifications, outcomes,
-budget usage, digest evidence, expiry, status, exit code, and duration. Audit
+policy-clock identity, validation time, budget usage, digest evidence, expiry,
+status, exit code, and duration. Audit
 must not contain note titles/bodies, full packages or Context Objects,
 credentials, paths, source sessions, raw provenance, provider-native input, or
 hidden reasoning. Audit failure fails the operation. Local JSONL remains
@@ -394,7 +439,10 @@ Assembly registry, Assembly Report, or source resolver.
 The provider cannot request more context, resolve evidence, mutate context,
 broaden purpose, or select assembly policy. Whether the semantic request embeds
 the Context Object or references Runtime-owned invocation state remains an M3.5
-contract-impact decision. No M3.1 contract is changed by this ADR.
+contract-impact decision. Either design must bind exact context
+identity/version/digest, preserve an immutable provider-visible payload, reject
+arbitrary handles and provider-directed fetching, and keep semantic-request and
+context-contract versions independent. No M3.1 contract is changed by this ADR.
 
 ### Provider neutrality
 
@@ -671,7 +719,7 @@ Before acceptance:
 
 - run `./scripts/validate_adr.sh`;
 - validate repository-relative references;
-- confirm status remains `Proposed`;
+- confirm status is `Accepted` only after independent architecture acceptance;
 - confirm only this ADR is tracked as changed;
 - run `git diff --check` and the repository's existing Markdown validation, if
   available;
