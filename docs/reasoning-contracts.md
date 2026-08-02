@@ -1,9 +1,11 @@
 # Semantic reasoning contracts
 
-M3.1 implements validation-only contracts derived from ADR-0012 through
-ADR-0016. It does not reason, generate options, select or call a provider,
-execute a capability or workflow, retrieve knowledge, create plans, approve
-actions, or grant authority.
+M3.1 implements contracts and validation derived from ADR-0012 through
+ADR-0016. M3.2 consumes those contracts through the separately bounded local
+reasoning path described in [Reasoning Gateway](reasoning-gateway.md). The
+contract registry itself does not reason, generate options, select or call a
+provider, execute a capability or workflow, retrieve knowledge, create plans,
+approve actions, or grant authority.
 
 ## Registry
 
@@ -101,7 +103,8 @@ integrity evidence only—not signatures, authenticity, approval, or authority.
 Typed internal errors distinguish unknown identity, unsupported version,
 incompatible combination, invalid input/schema, unsafe content, disabled
 contract, registry integrity, and internal failure. M3.1 adds no exit code and
-no public reasoning CLI. Safe errors do not echo payload contents.
+no provider-facing or prompt-facing CLI. Safe errors do not echo payload
+contents. M3.2 adds only the exact semantic task command documented separately.
 
 ## Deterministic acceptance example
 
@@ -116,8 +119,8 @@ or execute anything.
 
 ## Known limitations and next step
 
-There is no reasoning provider, strategy, prompt, model selection, option
-generator, Knowledge Package, retrieval, Plan IR, approval artifact, or
-execution integration. Semantic objects remain inert. M3.2 may add a
-deterministic option generator through separately reviewed runtime boundaries;
-it must consume these contracts without weakening them.
+The contracts contain no prompt, model selection, Knowledge Package, retrieval,
+Plan IR, approval artifact, or execution integration. Semantic objects remain
+inert. M3.2 adds one fixed deterministic local implementation without weakening
+or changing these schemas. External reasoning and all authority-bearing work
+remain future, separately reviewed milestones.

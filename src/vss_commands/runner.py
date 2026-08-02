@@ -17,6 +17,7 @@ from .models import CommandContext, SafeCommandError
 from .registry import get_command
 
 RUNTIME_CAPABILITY_COMMANDS = frozenset({"system.info", "runtime.echo", "runtime.time", "bootstrap.check"})
+REASONING_COMMAND = "reasoning.generate-options"
 
 
 def utc_now() -> str:
@@ -33,8 +34,9 @@ def _safe_error(message: str) -> str:
 
 
 class CommandRunner:
-    def __init__(self, runtime_controller=None) -> None:
+    def __init__(self, runtime_controller=None, reasoning_gateway=None) -> None:
         self._runtime_controller = runtime_controller
+        self._reasoning_gateway = reasoning_gateway
 
     def run(
         self,
@@ -74,7 +76,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command != REASONING_COMMAND:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -84,6 +86,45 @@ class CommandRunner:
         payload = input_data if input_data is not None else {}
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
+        if command == REASONING_COMMAND:
+            from vss_reasoning import (
+                CandidateGenerationFailure,
+                InvalidReasoningRequest,
+                InvalidReasoningResult,
+                ReasoningAuditFailure,
+                ReasoningBudgetExceeded,
+                ReasoningDeadlineExceeded,
+                ReasoningUnauthorized,
+                ReasoningUnavailable,
+            )
+            from vss_reasoning.gateway import ReasoningGateway
+
+            gateway = self._reasoning_gateway or ReasoningGateway.built_in()
+            try:
+                outcome = gateway.execute(
+                    payload,
+                    environment=environment,
+                    correlation_id=correlation,
+                    dry_run=dry_run,
+                    timeout_seconds=timeout_seconds,
+                )
+                return finish("success", ExitCode.SUCCESS, dict(outcome.output), [])
+            except InvalidReasoningRequest:
+                return finish("error", ExitCode.INVALID_INPUT, {}, ["semantic request is invalid"])
+            except ReasoningUnauthorized:
+                return finish("error", ExitCode.PERMISSION_DENIED, {}, ["reasoning request is not authorized"])
+            except ReasoningDeadlineExceeded:
+                return finish("error", ExitCode.TIMEOUT, {}, ["reasoning deadline exceeded"])
+            except ReasoningBudgetExceeded:
+                return finish("error", ExitCode.INVALID_INPUT, {}, ["reasoning budget exceeded"])
+            except ReasoningUnavailable:
+                return finish("error", ExitCode.NOT_READY, {}, ["reasoning implementation is unavailable"])
+            except (CandidateGenerationFailure, InvalidReasoningResult):
+                return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["reasoning generation failed"])
+            except ReasoningAuditFailure:
+                return finish("error", ExitCode.INTERNAL_ERROR, {}, ["reasoning audit failed"])
+            except Exception:
+                return finish("error", ExitCode.INTERNAL_ERROR, {}, ["reasoning operation failed"])
         if command in RUNTIME_CAPABILITY_COMMANDS:
             from vss_runtime import RuntimeController
 
