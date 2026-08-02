@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -83,6 +83,10 @@ facts, assumptions, unknowns, constraints, evidence references, confidence,
 limitations, version, and contract identity. It is data for validation and
 human or Runtime-controlled consumption; it is never an instruction to execute.
 
+`Reasoning Object` is an architectural category, not a universal payload type.
+It must not become a data structure with optional fields for every present and
+future family.
+
 ### Reasoning Evidence
 
 **Reasoning Evidence** is a stable reference to authorized supporting material
@@ -159,10 +163,45 @@ freshness, method, data, calibration, generalization, or intended use. A
 limitation remains attached to the affected object and cannot be removed by a
 translator without explicit, validated semantics.
 
-## Semantic statements carried by every object
+## Semantic Result Envelope and family payload
 
-Every Reasoning Object family contains the following semantic statements,
-even when a field is explicitly empty:
+A semantic result is composed from a small common envelope and exactly one
+typed object-family payload:
+
+```text
+Semantic Result Envelope
+├── stable cross-family metadata
+└── exactly one typed family payload
+```
+
+The envelope may conceptually carry only stable contract mechanics:
+
+- Reasoning Contract identity and version;
+- Reasoning Task identity and version;
+- object-family identity and version;
+- correlation and request identity;
+- lifecycle metadata; and
+- safe integrity metadata.
+
+The envelope identifies one and only one object family and version. It does not
+contain alternatives, evaluation criteria or results, classification labels,
+recommendations, explanations, risks, plans, citations, costs, timelines,
+approvals, or other task- or family-specific semantics. Such information
+belongs only to the independently versioned family payload that owns its
+meaning.
+
+The envelope and payload must reject multiple unrelated family payloads,
+unknown payload fields, family-identity/payload mismatch, untyped generic data
+bags, arbitrary nested extension objects, executable or provider-native
+content, and optional fields whose meaning changes according to task. Adding an
+optional field to a universal object is prohibited. Future Plan IR remains a
+separate contract and can never be added as optional planning fields to a
+generic Reasoning Object.
+
+## Common semantic sections carried by every family
+
+Every object-family payload composes or references the same bounded semantic
+section contracts, even when a section is explicitly empty:
 
 - **Facts:** propositions treated as established within the bounded task
   context, with evidence or authoritative input references where required.
@@ -174,15 +213,22 @@ even when a field is explicitly empty:
   source access.
 - **Confidence:** scoped, qualified support statements without authority.
 - **Limitations:** restrictions on interpretation and use.
-- **Version:** the independently enforced object-family version.
-- **Contract identity:** the stable semantic identity defining the object's
-  meaning.
+- **Version and contract identity:** references matching the envelope's
+  independently enforced family identity and version.
 
-These statements are logically immutable after validation. A later annotation
-or evaluation is a new versioned object linked to the original; it does not
+These are common semantic invariants, not family-specific data accumulated in
+the envelope and not optional fields in one universal payload. Each family
+defines how the sections apply to its own meaning and independently bounds each
+section's size, depth, and cardinality. Task-specific meaning remains entirely
+inside the family payload.
+
+The sections are logically immutable after validation. A later annotation or
+evaluation is a new versioned object linked to the original; it does not
 rewrite prior evidence. Facts are facts *within the contract context*, not
 universal truth. Empty assumptions, unknowns, constraints, evidence, or
-limitations must be represented intentionally rather than omitted ambiguously.
+limitations are represented intentionally rather than omitted ambiguously.
+This is semantic composition, not a required class hierarchy, inheritance
+model, or programming-language type system.
 
 ## Reasoning Object families
 
@@ -190,6 +236,13 @@ Object families provide distinct semantic meanings rather than optional modes
 inside one universal object. A new family may be admitted without changing
 Runtime when it follows the common object invariants and is registered through
 an independently versioned contract.
+
+Every family owns its own bounded payload contract. Admission of a new family
+requires a distinct stable identity, its own schema and version, explicit
+lifecycle state, compatibility rules, conformance tests, security review,
+registry entry, owner, and bounded size, depth, cardinality, and complexity
+limits. Registration adds knowledge of the family; it does not add fields to
+the common envelope or any existing family.
 
 ### OptionSet
 
@@ -327,12 +380,69 @@ contract, authorization boundary, capability contract, or workflow contract,
 the design is rejected. An adapter may change inside the replaceable layer, but
 it cannot weaken semantic meaning or move provider concepts into Runtime.
 
+Likewise, adding a family through the admitted registry process must not require
+modifying the Runtime Kernel, unrelated capability public contracts, unrelated
+workflow schemas, or the provider-neutral Reasoning Gateway contract.
+
+## Semantic Contract Registry
+
+VSS requires a conceptual Semantic Contract Registry. It is part of the stable
+governance architecture and is not implemented by this ADR. The registry maps:
+
+- exact Reasoning Task identity and version;
+- required result-family identity and version;
+- object-family schema identity;
+- lifecycle status;
+- explicit compatibility rules;
+- maximum serialized size, depth, cardinality, and structural complexity;
+- translator identities where separately reviewed and explicitly approved;
+- accountable ownership; and
+- deprecation, compatibility-window, and retirement metadata.
+
+The registry is explicit repository-controlled metadata, not dynamic import,
+package entry-point, network, user-path, or arbitrary schema discovery. It
+fails closed for unknown task, family, schema, translator, or version identity
+and for unsupported combinations. It contains no executable code,
+provider-native configuration, provider or strategy selection, credentials, or
+authorization grants. Dynamic third-party registration remains unsupported.
+
+The registry is immutable for one Runtime invocation. Registration confirms
+only that a reviewed semantic contract is known. It does not authorize the
+caller, task, provider, strategy, Knowledge Package, translator, object, or any
+later operation.
+
+## Runtime knowledge boundary
+
+Runtime understands only generic contract mechanics:
+
+- envelope validation;
+- identity and registry resolution;
+- exact version compatibility and lifecycle state;
+- independent authorization;
+- size, depth, cardinality, complexity, time, and resource bounds;
+- integrity and audit metadata; and
+- result disposition as validated inert data or a named safe failure.
+
+Runtime must not contain family-specific branches such as “if family is
+OptionSet,” “if family is Evaluation,” “if family is Classification,” or “if
+family is Recommendation.” Family semantic validation is resolved through the
+explicit registered contract and its admitted schema identity, using the same
+generic validation mechanics for every family. The schema identity cannot name
+an arbitrary file, module, URL, or implementation.
+
+An old consumer need not understand a newly registered family. It continues to
+process its supported families unchanged and fails closed if asked to consume
+an unsupported one. A new family therefore changes registry data and its own
+contract artifacts in future implementation work, not Runtime family logic or
+unrelated public contracts.
+
 ## Contract identity and independent versioning
 
 Three version dimensions are independent:
 
-- **Reasoning Contract version:** versions the common semantic invariants and
-  relationship among task requests, result objects, and validation outcomes.
+- **Reasoning Contract/common-envelope version:** versions stable cross-family
+  metadata, common semantic invariants, and the relationship among task
+  requests, family payloads, and validation outcomes.
 - **Reasoning Task version:** versions the meaning, required inputs, permitted
   outputs, and failure semantics of one task such as `GenerateOptions`.
 - **Reasoning Object version:** versions one object family's meaning and
@@ -374,6 +484,11 @@ object versions, or unsupported version combinations fail closed before a
 reasoning result is accepted. Unknown fields cannot be treated as harmless when
 they could affect semantics or authority.
 
+Common-envelope, Reasoning Task, and object-family versions evolve
+independently. Existing consumers are not required to understand newly
+registered families, and registration of a family does not invalidate or
+reinterpret any older supported combination.
+
 ## Compatibility windows and migration
 
 Every new version proposal documents:
@@ -395,6 +510,9 @@ and remove an old version only after all supported consumers migrate.
 There is no implicit downgrade, silent field dropping, semantic default
 substitution, provider-controlled compatibility, or lossy translation without
 explicit policy approval. Compatibility windows cannot be indefinite.
+Every translator has an explicit identity and version and is admitted through
+the registry. Translation cannot silently drop or weaken facts, assumptions,
+unknowns, constraints, evidence, confidence qualifications, or limitations.
 
 ## Contract negotiation
 
@@ -438,6 +556,9 @@ The contract prevents authority confusion by requiring:
 - bounded object families and result counts;
 - rejection of provider-native and executable content;
 - exact identity and version validation;
+- envelope-to-family identity and schema binding;
+- explicit admitted schemas without arbitrary loading;
+- per-family limits on size, nesting depth, cardinality, and complexity;
 - independent Runtime authorization outside the object;
 - safe failure for unknown tasks, families, versions, or semantics; and
 - retention of uncertainty and limitations through translation.
@@ -622,6 +743,15 @@ must not be filled by provider defaults or implicit Runtime behavior.
 
 ADR-0013 may be accepted when:
 
+- the common envelope contains only stable cross-family metadata and exactly
+  one independently versioned typed family payload;
+- universal payloads, arbitrary extension bags, and optional task-specific
+  fields in the common envelope are prohibited;
+- every object family owns a bounded payload contract and admission lifecycle;
+- the Semantic Contract Registry is explicit, immutable per invocation,
+  non-executable, fail closed, and non-authorizing;
+- Runtime uses generic registry and validation mechanics without branching on
+  object-family identity;
 - the semantic task/object boundary is independent of provider and strategy;
 - `GenerateOptions` is the sole first task and returns only an inert
   `OptionSet`;
