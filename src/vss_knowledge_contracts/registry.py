@@ -88,8 +88,12 @@ def _load(root: Path, identity: str, filename: str) -> KnowledgeSchemaRecord:
         resolved = candidate.resolve(strict=True)
         if not resolved.is_relative_to(root):
             raise KnowledgeRegistryFailure("knowledge schema escapes trusted root")
+        expected = resolved.stat()
         descriptor = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        mode = os.fstat(descriptor).st_mode
+        opened = os.fstat(descriptor)
+        mode = opened.st_mode
+        if (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino):
+            raise KnowledgeRegistryFailure("knowledge schema changed during loading")
         raw = os.read(descriptor, _MAX_SCHEMA_BYTES + 1)
     except OSError as exc:
         raise KnowledgeRegistryFailure("knowledge schema is unavailable") from exc
@@ -120,6 +124,8 @@ class KnowledgeContractRegistry:
     digest: str = field(init=False)
 
     def __post_init__(self) -> None:
+        if _ROOT.is_symlink():
+            raise KnowledgeRegistryFailure("knowledge schema root symlinks are prohibited")
         root = _ROOT.resolve(strict=True)
         registrations = self.registrations or (KnowledgeRegistration(),)
         if registrations != (KnowledgeRegistration(),):

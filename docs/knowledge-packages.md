@@ -41,9 +41,17 @@ non-finite values, unsupported Python objects, and excessive structure.
 UTC metadata covers observation, effectiveness, retrieval, staleness,
 construction, expiration, and retention. Ordering is validated. Current policy
 rejects stale, expired, revoked, disabled, unverified, or purpose-incompatible
-items. The fixture uses fixed timestamps and tests use a deterministic clock;
-the CLI uses current UTC. Retention metadata is validated, while deletion is
-deferred.
+items. The committed fixture is recognized by its exact repository-owned event
+identity and validated against the fixed `2026-08-02T00:00:00Z` policy clock;
+other CLI packages use current UTC, and callers cannot provide a clock. This
+keeps CI evidence deterministic without allowing other packages to select
+historical time. Retention metadata is validated, while deletion is deferred.
+
+The builder and validator use an immutable policy-owned revocation snapshot.
+The M3.4 production snapshot is explicitly known-empty; test snapshots prove
+that effective source or item revocation invalidates construction or package
+validation, while invalid revocation ordering fails closed. No persistent or
+remote revocation service is claimed.
 
 Redaction is represented only by fixed policy `vss.no-redaction-required/1`.
 `none_detected` conflicts means none among included items, not none globally.
@@ -61,6 +69,11 @@ validated item content, package content, complete event-bound package, and the
 registry snapshot. Ordered lineage links these values. Digests detect recorded
 substitution; they are not signatures, authenticity, authorization, approval,
 encryption, trust, or truth.
+
+Canonical JSON uses UTF-8, sorted keys, fixed separators, and no fallback
+stringification. Unicode code points are preserved without implicit Unicode
+normalization, so canonically equivalent spellings can intentionally have
+different digests. Non-finite and unsupported values fail closed.
 
 Source, payload, item-content, and package-content digests remain stable for
 identical content and policy/contract versions. Package-content material excludes

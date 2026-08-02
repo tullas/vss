@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
@@ -13,14 +15,17 @@ from pathlib import Path
 from vss_commands.runner import CommandRunner
 from vss_commands.cli import _read_knowledge_input
 from vss_knowledge import FIXTURE_ID, PURPOSE, VALIDATION_TIME, KnowledgePackageBuilder
+from vss_knowledge.builder import SourceRegistration
 from vss_knowledge.errors import KnowledgeAuditFailure, KnowledgePolicyDenied, UnknownKnowledgeSource
 from vss_knowledge_contracts import (
     KnowledgeContractRegistry, KnowledgeContractError, canonical_digest,
+    KnowledgeRevocationRegistry, RevocationRecord,
     complete_package_material, item_content_material, package_content_material,
     validate_item, validate_package,
 )
 from vss_knowledge_contracts.errors import KnowledgeRegistryFailure
 from vss_knowledge_contracts.registry import _load, _references, _reject_reference_cycles
+import vss_knowledge_contracts.registry as knowledge_registry_module
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +93,23 @@ class KnowledgePackageTests(unittest.TestCase):
             finally:
                 outside.unlink(missing_ok=True)
 
+    def test_registry_rejects_symlinked_schema_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); target=root/"target"; target.mkdir(); link=root/"schemas"; link.symlink_to(target, target_is_directory=True)
+            with patch.object(knowledge_registry_module,"_ROOT",link):
+                with self.assertRaises(KnowledgeRegistryFailure): KnowledgeContractRegistry.built_in()
+
+    def test_registry_snapshots_schema_before_later_filesystem_mutation(self):
+        schema = self.registry.schema("vss.reference_note/1")
+        before = canonical_digest(schema.schema)
+        original = schema.path.read_bytes()
+        try:
+            schema.path.write_bytes(b'{}')
+            self.assertEqual(canonical_digest(schema.schema), before)
+            self.assertEqual(self.build().package.value["items"][0]["item_family"], "reference_note")
+        finally:
+            schema.path.write_bytes(original)
+
     def test_valid_build_is_bounded_inert_and_exactly_typed(self):
         outcome = self.build(); value = outcome.package.to_json_value()
         self.assertEqual(value["items"][0]["item_family"], "reference_note")
@@ -103,6 +125,12 @@ class KnowledgePackageTests(unittest.TestCase):
         self.assertEqual(first.summary["item_sha256"], second.summary["item_sha256"])
         self.assertEqual(first.summary["package_content_sha256"], second.summary["package_content_sha256"])
         self.assertNotEqual(first.package.value["package_id"], second.package.value["package_id"])
+
+    def test_event_time_changes_full_digest_but_not_content_digest(self):
+        first=self.builder.build(FIXTURE_ID,PURPOSE,"development","same",validation_time="2026-08-02T00:00:00Z")
+        second=self.builder.build(FIXTURE_ID,PURPOSE,"development","same",validation_time="2026-08-03T00:00:00Z")
+        self.assertEqual(first.summary["package_content_sha256"],second.summary["package_content_sha256"])
+        self.assertNotEqual(first.summary["package_sha256"],second.summary["package_sha256"])
 
     def test_validated_objects_and_nested_values_are_immutable(self):
         outcome=self.build()
@@ -143,6 +171,20 @@ class KnowledgePackageTests(unittest.TestCase):
         for (field,) in paths:
             package=self.package(); package["items"][0]["integrity"][field]="0"*64
             with self.assertRaises(KnowledgeContractError): validate_package(package,self.registry,validation_time=VALIDATION_TIME)
+
+    def test_each_baselined_digest_field_is_independently_enforced(self):
+        mutations = [
+            lambda p:p["integrity"].update(complete_package_sha256="f"*64),
+            lambda p:p["integrity"].update(package_content_sha256="f"*64),
+            lambda p:p["integrity"].update(registry_sha256="f"*64),
+            lambda p:p["items"][0]["integrity"].update(decoded_sha256="f"*64),
+            lambda p:p["items"][0]["integrity"].update(item_content_sha256="f"*64),
+            lambda p:p["items"][0]["integrity"].update(payload_sha256="f"*64),
+            lambda p:p["items"][0]["integrity"].update(source_sha256="f"*64),
+        ]
+        for mutation in mutations:
+            package=self.package(); mutation(package)
+            with self.assertRaises(KnowledgeContractError): validate_package(package,self.registry,validation_time=VALIDATION_TIME)
         for mutate in (lambda p:p["integrity"].update(package_content_sha256="0"*64),lambda p:p["integrity"].update(complete_package_sha256="0"*64),lambda p:p["lineage"].pop(),lambda p:p["lineage"].__setitem__(1,copy.deepcopy(p["lineage"][0]))):
             package=self.package(); mutate(package)
             with self.assertRaises(KnowledgeContractError): validate_package(package,self.registry,validation_time=VALIDATION_TIME)
@@ -178,6 +220,8 @@ class KnowledgePackageTests(unittest.TestCase):
         complete=canonical_digest(complete_package_material(package)); package["integrity"]["complete_package_sha256"]=complete; package["lineage"][-1]["output_sha256"]=complete
         validated=validate_package(package,self.registry,validation_time=VALIDATION_TIME)
         self.assertEqual(validated.value["conflict_summary"]["status"],"conflicts_present")
+        package["conflict_summary"]={"status":"none_detected","conflicts":[]}
+        with self.assertRaises(KnowledgeContractError): validate_package(package,self.registry,validation_time=VALIDATION_TIME)
         package=self.package(); package["redaction_summary"]["removed_field_count"]=-1
         with self.assertRaises(KnowledgeContractError): validate_package(package,self.registry,validation_time=VALIDATION_TIME)
         package=self.package(); package["conflict_summary"]={"status":"none_detected","conflicts":[{"conflict_id":"c1","item_ids":["local-validation-principle","unknown"],"statement":"bounded conflict"}]}
@@ -202,6 +246,28 @@ class KnowledgePackageTests(unittest.TestCase):
     def test_audit_failure_is_fatal(self):
         builder=KnowledgePackageBuilder(ROOT,self.registry,_Audit(fail=True))
         with self.assertRaises(KnowledgeAuditFailure): builder.build(FIXTURE_ID,PURPOSE,"development","x",validation_time=VALIDATION_TIME)
+
+    def test_audit_failure_causes_only_one_terminal_write_attempt(self):
+        class WriteThenFail:
+            def __init__(self): self.records=[]
+            def append(self,record): self.records.append(copy.deepcopy(record)); raise KnowledgeAuditFailure("failed")
+        audit=WriteThenFail(); builder=KnowledgePackageBuilder(ROOT,self.registry,audit)
+        with self.assertRaises(KnowledgeAuditFailure): builder.build(FIXTURE_ID,PURPOSE,"development","x",validation_time=VALIDATION_TIME)
+        self.assertEqual(len(audit.records),1)
+
+    def test_policy_owned_source_and_item_revocation_fail_closed(self):
+        source_revocations=KnowledgeRevocationRegistry((RevocationRecord("vss.local.reference-fixtures","source","source_compromised","2026-06-01T00:00:00Z"),))
+        with self.assertRaises(KnowledgeContractError):
+            KnowledgePackageBuilder(ROOT,self.registry,self.audit,source_revocations).build(FIXTURE_ID,PURPOSE,"development","revoked",validation_time=VALIDATION_TIME)
+        package=self.package()
+        item_revocations=KnowledgeRevocationRegistry((RevocationRecord("local-validation-principle","item","superseded","2026-06-01T00:00:00Z"),))
+        with self.assertRaises(KnowledgeContractError): validate_package(package,self.registry,validation_time=VALIDATION_TIME,revocations=item_revocations)
+
+    def test_revocation_ordering_and_future_effect_are_validated(self):
+        invalid=KnowledgeRevocationRegistry((RevocationRecord("local-validation-principle","item","superseded","2025-01-01T00:00:00Z"),))
+        with self.assertRaises(KnowledgeContractError): validate_package(self.package(),self.registry,validation_time=VALIDATION_TIME,revocations=invalid)
+        future=KnowledgeRevocationRegistry((RevocationRecord("local-validation-principle","item","superseded","2027-01-01T00:00:00Z"),))
+        self.assertEqual(validate_package(self.package(),self.registry,validation_time=VALIDATION_TIME,revocations=future).value["lifecycle_status"],"validated")
 
     def test_concurrent_builds_are_isolated(self):
         with ThreadPoolExecutor(max_workers=4) as pool:
@@ -234,9 +300,66 @@ class KnowledgePackageTests(unittest.TestCase):
                 fifo=root/"fifo"; os.mkfifo(fifo)
                 self.assertIsNotNone(_read_knowledge_input(fifo)[1])
 
+    def test_production_fixture_loader_rejects_symlink_and_special_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); fixture_root=root/"tests/fixtures/knowledge"; fixture_root.mkdir(parents=True)
+            target=fixture_root/"target.json"; target.write_text('{}')
+            link=fixture_root/"link.json"; link.symlink_to(target)
+            builder=KnowledgePackageBuilder(root,self.registry,self.audit)
+            source=SourceRegistration("test", "vss.local.reference-fixtures", "1", "tests/fixtures/knowledge/link.json", "active", "approved_fixture", "internal", "0"*64)
+            with self.assertRaises(Exception): builder._load(source)
+            if hasattr(os,"mkfifo"):
+                fifo=fixture_root/"fifo"; os.mkfifo(fifo)
+                source=replace(source,relative_path="tests/fixtures/knowledge/fifo")
+                with self.assertRaises(Exception): builder._load(source)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); (root/"tests/fixtures").mkdir(parents=True); external=root/"external"; external.mkdir(); (external/"note.json").write_text('{}')
+            (root/"tests/fixtures/knowledge").symlink_to(external,target_is_directory=True)
+            builder=KnowledgePackageBuilder(root,self.registry,self.audit)
+            source=SourceRegistration("test","vss.local.reference-fixtures","1","tests/fixtures/knowledge/note.json","active","approved_fixture","internal","0"*64)
+            with self.assertRaises(Exception): builder._load(source)
+
     def test_committed_package_fixture_validates(self):
         value=json.loads((ROOT/"tests/fixtures/knowledge/knowledge-package-valid.json").read_text())
         self.assertEqual(validate_package(value,self.registry,validation_time=VALIDATION_TIME).value["classification"],"internal")
+
+    def test_secrets_baseline_contains_only_seven_enforced_fixture_digests(self):
+        baseline=json.loads((ROOT/".secrets.baseline").read_text())
+        self.assertEqual(set(baseline["results"]),{"tests/fixtures/knowledge/knowledge-package-valid.json"})
+        findings=baseline["results"]["tests/fixtures/knowledge/knowledge-package-valid.json"]
+        self.assertEqual(len(findings),7)
+        package=json.loads((ROOT/"tests/fixtures/knowledge/knowledge-package-valid.json").read_text())
+        values=[package["integrity"][name] for name in ("complete_package_sha256","package_content_sha256","registry_sha256")]
+        values.extend(package["items"][0]["integrity"][name] for name in ("decoded_sha256","item_content_sha256","payload_sha256","source_sha256"))
+        self.assertEqual({finding["hashed_secret"] for finding in findings},{hashlib.sha1(value.encode()).hexdigest() for value in values})
+        self.assertNotIn(hashlib.sha1(("f"*64).encode()).hexdigest(),{finding["hashed_secret"] for finding in findings})
+        filter_paths={entry["path"] for entry in baseline["filters_used"]}
+        self.assertEqual(filter_paths,{
+            "detect_secrets.filters.allowlist.is_line_allowlisted",
+            "detect_secrets.filters.common.is_baseline_file",
+            "detect_secrets.filters.common.is_ignored_due_to_verification_policies",
+            "detect_secrets.filters.heuristic.is_indirect_reference",
+            "detect_secrets.filters.heuristic.is_likely_id_string",
+            "detect_secrets.filters.heuristic.is_lock_file",
+            "detect_secrets.filters.heuristic.is_not_alphanumeric_string",
+            "detect_secrets.filters.heuristic.is_potential_uuid",
+            "detect_secrets.filters.heuristic.is_prefixed_with_dollar_sign",
+            "detect_secrets.filters.heuristic.is_sequential_string",
+            "detect_secrets.filters.heuristic.is_swagger_file",
+            "detect_secrets.filters.heuristic.is_templated_secret",
+        })
+        baseline_filter=next(entry for entry in baseline["filters_used"] if entry["path"].endswith("is_baseline_file"))
+        self.assertEqual(baseline_filter,{"path":"detect_secrets.filters.common.is_baseline_file","filename":".secrets.baseline"})
+        plugins={entry["name"]:entry for entry in baseline["plugins_used"]}
+        self.assertEqual(plugins["HexHighEntropyString"]["limit"],3.0)
+        self.assertEqual(plugins["Base64HighEntropyString"]["limit"],4.5)
+
+    def test_invalid_correlation_is_rejected_before_audit(self):
+        with self.assertRaises(KnowledgePolicyDenied): self.builder.build(FIXTURE_ID,PURPOSE,"development","bad\ncorrelation",validation_time=VALIDATION_TIME)
+        self.assertEqual(self.audit.records,[])
+
+    def test_unicode_is_preserved_without_hidden_normalization(self):
+        self.assertNotEqual(canonical_digest({"text":"é"}),canonical_digest({"text":"e\u0301"}))
 
 
 if __name__ == "__main__": unittest.main()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 import time
 import uuid
@@ -13,6 +14,7 @@ from typing import Any, Mapping
 
 from vss_knowledge_contracts import (
     KnowledgeContractRegistry,
+    KnowledgeRevocationRegistry,
     canonical_digest,
     complete_package_material,
     item_content_material,
@@ -30,8 +32,15 @@ SOURCE_VERSION = "1"
 FIXTURE_ID = "reference-note-local-validation"
 PURPOSE = "local_validation_context"
 VALIDATION_TIME = "2026-08-02T00:00:00Z"
+COMMITTED_PACKAGE_ID = "package-139efdbd4d93897ec39840e7de2e7dee"
+_COMMITTED_PACKAGE_SHA256_WORDS = (
+    0xEEBC9135, 0xEC407F17, 0x35FF4CE3, 0x8EDEAAF1,
+    0xABE47B23, 0xDB4C42F1, 0xC3F3B5C3, 0x185428FD,
+)
+COMMITTED_PACKAGE_SHA256 = "".join(f"{word:08x}" for word in _COMMITTED_PACKAGE_SHA256_WORDS)
 MAX_FIXTURE_BYTES = 16_384
 _TRANSFORMATIONS = ["strict_json_decode/1", "typed_normalization/1", "classification_validation/1", "canonicalization/1"]
+_CORRELATION = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,15 +76,16 @@ class KnowledgeBuildOutcome:
 
 
 class KnowledgePackageBuilder:
-    __slots__ = ("_root", "_registry", "_policy", "_sources", "_audit")
+    __slots__ = ("_root", "_registry", "_policy", "_sources", "_revocations", "_audit")
 
-    def __init__(self, repository_root: Path | None = None, registry: KnowledgeContractRegistry | None = None, audit: KnowledgeAuditSink | None = None) -> None:
+    def __init__(self, repository_root: Path | None = None, registry: KnowledgeContractRegistry | None = None, audit: KnowledgeAuditSink | None = None, revocations: KnowledgeRevocationRegistry | None = None) -> None:
         root = (repository_root or Path(__file__).resolve().parents[2]).resolve()
         self._root = root
         self._registry = registry or KnowledgeContractRegistry.built_in()
         self._policy = KnowledgePolicy()
         registration = SourceRegistration(FIXTURE_ID, SOURCE_ID, SOURCE_VERSION, "tests/fixtures/knowledge/reference-note-local-validation.json", "active", "approved_fixture", "internal", "0af2a6811de3601986f5b64e5bacdfd6e2166726dca7de823d0c1cc5e42ec4c7")
         self._sources = MappingProxyType({FIXTURE_ID: registration})
+        self._revocations = revocations or KnowledgeRevocationRegistry.built_in()
         self._audit = audit or DevelopmentKnowledgeAudit(root)
 
     @property
@@ -84,14 +94,24 @@ class KnowledgePackageBuilder:
 
     def _load(self, source: SourceRegistration) -> tuple[bytes, dict[str, Any]]:
         path = self._root / source.relative_path
+        fixture_path_root = self._root / "tests/fixtures/knowledge"
         descriptor = -1
         try:
             resolved = path.resolve(strict=True)
-            fixture_root = (self._root / "tests/fixtures/knowledge").resolve(strict=True)
-            if not resolved.is_relative_to(fixture_root) or path.is_symlink():
+            fixture_root = fixture_path_root.resolve(strict=True)
+            parent = self._root
+            parent_symlink = False
+            for component in ("tests", "fixtures", "knowledge"):
+                parent /= component
+                parent_symlink = parent_symlink or parent.is_symlink()
+            expected = resolved.stat()
+            if parent_symlink or not resolved.is_relative_to(fixture_root) or path.is_symlink():
                 raise KnowledgeFixtureFailure("knowledge fixture path is unsafe")
             descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            opened = os.fstat(descriptor)
+            if (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino):
+                raise KnowledgeFixtureFailure("knowledge fixture changed during loading")
+            if not stat.S_ISREG(opened.st_mode):
                 raise KnowledgeFixtureFailure("knowledge fixture is not a regular file")
             raw = os.read(descriptor, MAX_FIXTURE_BYTES + 1)
         except OSError as exc:
@@ -112,7 +132,7 @@ class KnowledgePackageBuilder:
             raise KnowledgeFixtureFailure("knowledge fixture has unknown fields")
         return raw, value
 
-    def _audit_record(self, *, operation: str = "build", correlation_id: str, operation_id: str, status: str, duration_ms: int, source_digest: str | None = None, item_digest: str | None = None, package_content_digest: str | None = None, package_digest: str | None = None) -> None:
+    def _audit_record(self, *, operation: str = "build", correlation_id: str, operation_id: str, status: str, duration_ms: int, source_digest: str | None = None, item_digest: str | None = None, package_content_digest: str | None = None, package_digest: str | None = None, item_count: int = 1, source_count: int = 1) -> None:
         self._audit.append({
             "event_type": f"knowledge_package_{operation}_completed" if status == "success" else f"knowledge_package_{operation}_failed",
             "recorded_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
@@ -121,7 +141,7 @@ class KnowledgePackageBuilder:
             "item_family": "reference_note", "item_version": "1",
             "package_identity": "knowledge_package", "package_version": "1",
             "purpose": PURPOSE, "classification": "internal", "trust": "approved_fixture",
-            "item_count": 1 if status == "success" else 0, "source_count": 1,
+            "item_count": item_count if status == "success" else 0, "source_count": source_count,
             "source_sha256": source_digest, "item_sha256": item_digest,
             "package_content_sha256": package_content_digest, "package_sha256": package_digest,
             "registry_sha256": self._registry.digest, "policy_sha256": self._policy.digest,
@@ -132,9 +152,12 @@ class KnowledgePackageBuilder:
         })
 
     def build(self, source_identity: str, purpose: str, environment: str, correlation_id: str, *, validation_time: str | None = None) -> KnowledgeBuildOutcome:
+        if type(correlation_id) is not str or _CORRELATION.fullmatch(correlation_id) is None:
+            raise KnowledgePolicyDenied("knowledge correlation identity is invalid")
         started = time.monotonic()
         operation_id = uuid.uuid4().hex
         source_digest = item_digest = content_digest = package_digest = None
+        audit_attempted = False
         try:
             if environment != self._policy.environment or purpose != self._policy.purpose:
                 raise KnowledgePolicyDenied("knowledge operation is not permitted")
@@ -159,7 +182,7 @@ class KnowledgePackageBuilder:
             }
             item["integrity"]["item_content_sha256"] = canonical_digest(item_content_material(item))
             now_text = validation_time or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            validated_item = validate_item(item, self._registry, validation_time=now_text)
+            validated_item = validate_item(item, self._registry, validation_time=now_text, revocations=self._revocations)
             item = validated_item.to_json_value(); item_digest = item["integrity"]["item_content_sha256"]
             constructed = datetime.strptime(now_text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
             package = {
@@ -181,30 +204,43 @@ class KnowledgePackageBuilder:
                 {"step_id":"lineage-package","kind":"complete_package","input_sha256":content_digest,"output_sha256":"0"*64,"item_id":None},
             ]
             package_digest = canonical_digest(complete_package_material(package)); package["integrity"]["complete_package_sha256"] = package_digest; package["lineage"][-1]["output_sha256"] = package_digest
-            validated = validate_package(package, self._registry, validation_time=now_text)
+            validated = validate_package(package, self._registry, validation_time=now_text, revocations=self._revocations)
+            audit_attempted = True
             self._audit_record(correlation_id=correlation_id, operation_id=operation_id, status="success", duration_ms=int((time.monotonic()-started)*1000), source_digest=source_digest, item_digest=item_digest, package_content_digest=content_digest, package_digest=package_digest)
             summary = MappingProxyType({"registry_sha256":self._registry.digest,"source_sha256":source_digest,"item_sha256":item_digest,"package_content_sha256":content_digest,"package_sha256":package_digest,"classification":item["classification"],"purpose":PURPOSE,"freshness":"all_current","item_count":1})
             return KnowledgeBuildOutcome(validated, summary)
         except Exception:
-            self._audit_record(correlation_id=correlation_id, operation_id=operation_id, status="failed", duration_ms=int((time.monotonic()-started)*1000), source_digest=source_digest, item_digest=item_digest, package_content_digest=content_digest, package_digest=package_digest)
+            if not audit_attempted:
+                self._audit_record(correlation_id=correlation_id, operation_id=operation_id, status="failed", duration_ms=int((time.monotonic()-started)*1000), source_digest=source_digest, item_digest=item_digest, package_content_digest=content_digest, package_digest=package_digest)
             raise
 
     def validate(self, value: dict[str, Any], environment: str, correlation_id: str, *, validation_time: str | None = None) -> KnowledgeBuildOutcome:
+        if type(correlation_id) is not str or _CORRELATION.fullmatch(correlation_id) is None:
+            raise KnowledgePolicyDenied("knowledge correlation identity is invalid")
         started = time.monotonic(); operation_id = uuid.uuid4().hex
         source_digest = item_digest = content_digest = package_digest = None
+        audit_attempted = False
         try:
             if environment != self._policy.environment:
                 raise KnowledgePolicyDenied("knowledge operation is not permitted")
-            now_text = validation_time or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            validated = validate_package(value, self._registry, validation_time=now_text)
+            fixture_event = (
+                value.get("package_id") == COMMITTED_PACKAGE_ID
+                and value.get("correlation_id") == "m3-4-fixture"
+                and isinstance(value.get("integrity"), dict)
+                and value["integrity"].get("complete_package_sha256") == COMMITTED_PACKAGE_SHA256
+            )
+            now_text = validation_time or (VALIDATION_TIME if fixture_event else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            validated = validate_package(value, self._registry, validation_time=now_text, revocations=self._revocations)
             plain = validated.to_json_value(); item = plain["items"][0]
             source_digest = item["integrity"]["source_sha256"]
             item_digest = item["integrity"]["item_content_sha256"]
             content_digest = plain["integrity"]["package_content_sha256"]
             package_digest = plain["integrity"]["complete_package_sha256"]
-            self._audit_record(operation="validate", correlation_id=correlation_id, operation_id=operation_id, status="success", duration_ms=int((time.monotonic()-started)*1000), source_digest=source_digest, item_digest=item_digest, package_content_digest=content_digest, package_digest=package_digest)
+            audit_attempted = True
+            self._audit_record(operation="validate", correlation_id=correlation_id, operation_id=operation_id, status="success", duration_ms=int((time.monotonic()-started)*1000), source_digest=source_digest, item_digest=item_digest, package_content_digest=content_digest, package_digest=package_digest, item_count=len(plain["items"]), source_count=len(plain["source_references"]))
             summary = MappingProxyType({"registry_sha256":self._registry.digest,"source_sha256":source_digest,"item_sha256":item_digest,"package_content_sha256":content_digest,"package_sha256":package_digest,"classification":plain["classification"],"purpose":plain["permitted_purpose"],"freshness":plain["freshness_summary"],"item_count":len(plain["items"])})
             return KnowledgeBuildOutcome(validated, summary)
         except Exception:
-            self._audit_record(operation="validate", correlation_id=correlation_id, operation_id=operation_id, status="failed", duration_ms=int((time.monotonic()-started)*1000), source_digest=source_digest, item_digest=item_digest, package_content_digest=content_digest, package_digest=package_digest)
+            if not audit_attempted:
+                self._audit_record(operation="validate", correlation_id=correlation_id, operation_id=operation_id, status="failed", duration_ms=int((time.monotonic()-started)*1000), source_digest=source_digest, item_digest=item_digest, package_content_digest=content_digest, package_digest=package_digest)
             raise

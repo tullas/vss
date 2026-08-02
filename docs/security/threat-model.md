@@ -169,10 +169,13 @@ operators/agents.
   Implemented mitigation: exact source and schema mappings; bounded no-follow
   regular-file reads; strict JSON and immutable schema snapshots; typed payload
   and fail-closed cross-field validation; explicit classification, trust,
-  purpose, freshness, lifecycle, retention, revocation, conflict and uncertainty
-  metadata; independent item/package integrity and ordered lineage checks; and
-  one safe terminal audit record whose failure is fatal. Instruction-like text
-  remains inert. Registration, provenance, trust, freshness, classification and
+  purpose, freshness, lifecycle, retention, an immutable policy-owned
+  revocation snapshot, conflict and uncertainty metadata; independent
+  item/package integrity and ordered lineage checks; and one safe terminal audit
+  attempt whose failure is fatal. The committed deterministic fixture's fixed
+  validation time is admitted only when its exact event identity and complete
+  digest match; other packages use the current validation time.
+  Instruction-like text remains inert. Registration, provenance, trust, freshness, classification and
   integrity grant no truth, disclosure, source access, reasoning, approval, or
   execution authority. Connectors and credentials, production storage/audit,
   signing/encryption, privacy/residency/deletion enforcement, persistent

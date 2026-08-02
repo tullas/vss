@@ -11,6 +11,7 @@ from vss_reasoning_contracts.canonicalization import thaw_json, validate_json_va
 from .errors import InvalidKnowledgeInput, KnowledgeIntegrityFailure
 from .models import ValidatedKnowledgeItem, ValidatedKnowledgePackage
 from .registry import KnowledgeContractRegistry
+from .revocation import KnowledgeRevocationRegistry
 
 CLASSIFICATION_RANK = {"public": 0, "internal": 1}
 MAX_ITEM_BYTES = 16_384
@@ -26,7 +27,7 @@ def _schema(value: Any, schema: Any, label: str) -> None:
         raise InvalidKnowledgeInput(f"{label} does not match its contract")
 
 
-def _time(value: str) -> datetime:
+def parse_utc_timestamp(value: str) -> datetime:
     try:
         parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (TypeError, ValueError) as exc:
@@ -69,7 +70,7 @@ def complete_package_material(value: dict[str, Any]) -> dict[str, Any]:
     return material
 
 
-def validate_item(value: Any, registry: KnowledgeContractRegistry, *, validation_time: str) -> ValidatedKnowledgeItem:
+def validate_item(value: Any, registry: KnowledgeContractRegistry, *, validation_time: str, revocations: KnowledgeRevocationRegistry | None = None) -> ValidatedKnowledgeItem:
     try:
         validate_json_value(value, maximum_bytes=MAX_ITEM_BYTES)
     except Exception as exc:
@@ -79,14 +80,17 @@ def validate_item(value: Any, registry: KnowledgeContractRegistry, *, validation
     registry.resolve_item(str(value.get("item_family", "")), str(value.get("item_family_version", "")))
     _schema(value, registry.schema("vss.knowledge_item/1").schema, "knowledge item")
     _schema(value["payload"], registry.schema("vss.reference_note/1").schema, "reference note")
-    times = {name: _time(value[name]) for name in ("observed_at", "effective_from", "effective_until", "retrieved_at", "stale_after", "retention_until")}
+    times = {name: parse_utc_timestamp(value[name]) for name in ("observed_at", "effective_from", "effective_until", "retrieved_at", "stale_after", "retention_until")}
     if not (times["effective_from"] <= times["observed_at"] <= times["retrieved_at"] < times["stale_after"] <= times["effective_until"] <= times["retention_until"]):
         raise InvalidKnowledgeInput("knowledge item temporal ordering is invalid")
-    now = _time(validation_time)
+    now = parse_utc_timestamp(validation_time)
     if value["lifecycle_status"] != "active" or now >= times["stale_after"]:
         raise InvalidKnowledgeInput("knowledge item is stale, revoked, or disabled")
     if value["trust"] != "approved_fixture" or value["permitted_purposes"] != ["local_validation_context"]:
         raise InvalidKnowledgeInput("knowledge item trust or purpose is not admitted")
+    revocation_snapshot = revocations or KnowledgeRevocationRegistry.built_in()
+    revocation_snapshot.assert_not_revoked("source", value["source_id"], effective_from=value["effective_from"], validation_time=validation_time)
+    revocation_snapshot.assert_not_revoked("item", value["item_id"], effective_from=value["effective_from"], validation_time=validation_time)
     integrity = value["integrity"]
     if integrity["payload_sha256"] != canonical_digest(value["payload"]):
         raise KnowledgeIntegrityFailure("knowledge item payload integrity mismatch")
@@ -95,7 +99,7 @@ def validate_item(value: Any, registry: KnowledgeContractRegistry, *, validation
     return ValidatedKnowledgeItem._create(value)
 
 
-def validate_package(value: Any, registry: KnowledgeContractRegistry, *, validation_time: str) -> ValidatedKnowledgePackage:
+def validate_package(value: Any, registry: KnowledgeContractRegistry, *, validation_time: str, revocations: KnowledgeRevocationRegistry | None = None) -> ValidatedKnowledgePackage:
     try:
         validate_json_value(value, maximum_bytes=MAX_PACKAGE_BYTES)
     except Exception as exc:
@@ -104,10 +108,11 @@ def validate_package(value: Any, registry: KnowledgeContractRegistry, *, validat
         raise InvalidKnowledgeInput("knowledge package must be an object")
     registry.resolve_package(str(value.get("package_contract_identity", "")), str(value.get("package_contract_version", "")))
     _schema(value, registry.schema("vss.knowledge_package/1").schema, "knowledge package")
-    constructed, expires, retention, now = map(_time, (value["constructed_at"], value["expires_at"], value["retention_until"], validation_time))
+    constructed, expires, retention, now = map(parse_utc_timestamp, (value["constructed_at"], value["expires_at"], value["retention_until"], validation_time))
     if not constructed < expires <= retention or now >= expires or value["lifecycle_status"] != "validated":
         raise InvalidKnowledgeInput("knowledge package temporal or lifecycle state is invalid")
-    items = [validate_item(item, registry, validation_time=validation_time) for item in value["items"]]
+    revocation_snapshot = revocations or KnowledgeRevocationRegistry.built_in()
+    items = [validate_item(item, registry, validation_time=validation_time, revocations=revocation_snapshot) for item in value["items"]]
     item_values = [item.to_json_value() for item in items]
     item_ids = [item["item_id"] for item in item_values]
     if len(item_ids) != len(set(item_ids)) or value["item_references"] != item_ids:
@@ -122,7 +127,9 @@ def validate_package(value: Any, registry: KnowledgeContractRegistry, *, validat
     conflicts = value["conflict_summary"]["conflicts"]
     if any(not set(conflict["item_ids"]).issubset(item_ids) for conflict in conflicts):
         raise InvalidKnowledgeInput("knowledge package conflict references are invalid")
-    expected_conflict_status = "conflicts_present" if conflicts else "none_detected"
+    expected_conflict_status = "conflicts_present" if len(item_values) > 1 else "none_detected"
+    if len(item_values) > 1 and not conflicts:
+        raise InvalidKnowledgeInput("multi-item knowledge package must preserve conflicts explicitly")
     if value["conflict_summary"]["status"] != expected_conflict_status:
         raise InvalidKnowledgeInput("knowledge package conflict summary is invalid")
     lineage = value["lineage"]
