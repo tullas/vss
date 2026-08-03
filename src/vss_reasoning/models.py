@@ -5,6 +5,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from vss_reasoning_contracts import ValidatedSemanticRequest, ValidatedSemanticResult
+from vss_reasoning_contracts.canonicalization import freeze_json
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +57,7 @@ class DeterministicReasoningContext:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
-        object.__setattr__(self, "provider_context", MappingProxyType(dict(self.provider_context or {})))
+        object.__setattr__(self, "provider_context", freeze_json(dict(self.provider_context or {})))
 
 
 @dataclass(frozen=True, slots=True)
