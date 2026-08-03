@@ -150,7 +150,7 @@ an inert, independently validated `generate_options_context/1` artifact:
 vss reasoning generate-options \
   --environment development \
   --input tests/fixtures/reasoning/generate-options-runtime-valid.json \
-  --context tests/fixtures/context/context-object-valid.json \
+  --context tests/fixtures/context/context-object-reasoning-valid.json \
   --correlation-id m3-2-local-acceptance
 ```
 

@@ -16,7 +16,7 @@ def load(path):
 class ContextReasoningIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.request = load(ROOT / "tests/fixtures/reasoning/generate-options-runtime-valid.json")
-        self.context = load(ROOT / "tests/fixtures/context/context-object-valid.json")
+        self.context = load(ROOT / "tests/fixtures/context/context-object-reasoning-valid.json")
 
     def test_context_changes_deterministic_result_qualification(self):
         gateway = ReasoningGateway.built_in()

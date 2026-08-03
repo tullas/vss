@@ -94,6 +94,10 @@ class DeterministicGenerateOptionsStrategy:
                 "id": "context_qualification",
                 "statement": "Context purpose, uncertainty, conflicts, and evidence references remain qualified and non-authorizing.",
             })
+            payload["common_sections"]["assumptions"].append({
+                "id": "context_uncertainty",
+                "statement": f"The supplied Context preserves {len(context.provider_context.get('uncertainty', []))} uncertainty qualification(s) and {len(context.provider_context.get('conflicts', []))} unresolved conflict(s).",
+            })
             if refs:
                 payload["common_sections"]["limitations"].append({
                     "id": "context_evidence",

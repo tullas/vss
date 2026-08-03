@@ -228,6 +228,8 @@ class ReasoningGateway:
         request_digest = None
         content_digest = None
         context_digest = None
+        provider_context_digest = None
+        invocation_binding_digest = None
         status = "failed"
         event_type = "reasoning_execution_failed"
         failure = "internal_reasoning_failure"
@@ -261,9 +263,9 @@ class ReasoningGateway:
                     cv["purpose"] != "generate_options_local_validation" or cv["classification"] != request.value["data_classification"]):
                     failure = "context_binding_mismatch"
                     raise InvalidReasoningRequest("reasoning context binding is invalid")
-                fixture_clock = cv["context_id"] == "context-5451ffbdc72aa4caad891d92860c591f" and cv["context_content_digest"] == "18407e80203f3fd2716d1eac8afb1659478c0bbbe15166d00605f237bd8f2666"
-                now = datetime.strptime("2026-08-02T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if fixture_clock else datetime.now(timezone.utc)
-                if now >= datetime.strptime(cv["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc):
+                fixture_clock = cv["context_content_digest"] == "18407e80203f3fd2716d1eac8afb1659478c0bbbe15166d00605f237bd8f2666"
+                validation_now = datetime.strptime("2026-08-02T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if fixture_clock else datetime.now(timezone.utc)
+                if validation_now >= datetime.strptime(cv["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc):
                     failure = "context_expired"
                     raise InvalidReasoningRequest("reasoning context is expired")
                 provider_context = {"context_family": cv["context_family"], "context_family_version": cv["context_family_version"],
@@ -271,14 +273,24 @@ class ReasoningGateway:
                     "evidence_references": cv["payload"]["evidence_references"], "conflicts": cv["payload"]["conflicts"],
                     "uncertainty": cv["payload"]["uncertainty"], "limitations": cv["payload"]["limitations"]}
                 snapshot = revocations or KnowledgeRevocationRegistry.built_in()
-                now = datetime.now(timezone.utc)
                 for note in provider_context["selected_notes"]:
                     for target_type, target_id in (("item", note["item_id"]), ("source", note["provenance_references"][0])):
                         record = snapshot.record(target_type, target_id)
-                        if record and datetime.strptime(record.revoked_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) <= now:
+                        if record and datetime.strptime(record.revoked_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) <= validation_now:
                             failure = "context_revoked"
                             raise InvalidReasoningRequest("reasoning context material is revoked")
                 context_digest = cv["context_content_digest"]
+                provider_context_digest = canonical_digest(provider_context)
+                invocation_binding_digest = canonical_digest({
+                    "request": request.digest, "context": context_digest,
+                    "provider_context": provider_context_digest, "task": [request.value["task_identity"], request.value["task_version"]],
+                    "result": [request.value["required_result_family"], request.value["required_result_version"]],
+                    "purpose": cv["purpose"], "project": cv["project_id"], "environment": environment,
+                    "classification": cv["classification"], "policy": [self._policy.identity, self._policy.version],
+                    "strategy": [self._implementations.strategy_identity.identity, self._implementations.strategy_identity.version],
+                    "provider": [self._implementations.provider_identity.identity, self._implementations.provider_identity.version, self._implementations.provider_identity.api_version],
+                    "budget": request.value["budget"],
+                })
             strategy, provider = self._implementations.resolve()
 
             if timeout_seconds is not None:
@@ -352,6 +364,8 @@ class ReasoningGateway:
                             "provider_version": context.provider.version,
                             "request_sha256": request.digest,
                             "context_content_sha256": context_digest,
+                            "provider_context_sha256": provider_context_digest,
+                            "invocation_binding_sha256": invocation_binding_digest,
                         }
                     },
                     validated_request=request,
@@ -452,6 +466,8 @@ class ReasoningGateway:
             }
             if context_digest is not None:
                 record["context_content_sha256"] = context_digest
+                record["provider_context_sha256"] = provider_context_digest
+                record["invocation_binding_sha256"] = invocation_binding_digest
             try:
                 self._audit.append(record)
             except ReasoningAuditFailure:
