@@ -7,12 +7,12 @@
   "context_family": "generate_options_context",
   "context_family_version": "1",
   "context_id": "context-5451ffbdc72aa4caad891d92860c591f",
-  "correlation_id": "m3-5-local-assemble",
+  "correlation_id": "m3-2-local-acceptance",
   "environment": "development",
   "expires_at": "2026-08-02T00:05:00Z",
   "governance_report_digest": "c5da43b7ab2ec352f1c1aa9e7cf535251bd6a5e8079fadaafc4da245662ee85d",
   "integrity": {
-    "complete_context_sha256": "4ebc705546d1f02b303512f14e6dc0d9a21288accad3740b4a41ab34642aaaf8"
+    "complete_context_sha256": "95b2e84fd6f32cdc2c3f8e4f930a1b777e45f8a70e81d737fb644463716601bc"
   },
   "lifecycle": "validated",
   "package_set_digest": "1c55b62c887867e7a6ef6729d362717fadb13e83d4edab259e0665b9799d7b96",
@@ -72,7 +72,7 @@
   "policy_version": "1",
   "project_id": "vss-local",
   "purpose": "generate_options_local_validation",
-  "request_id": "m3-5-request-001",
+  "request_id": "m3-2-request-001",
   "schema_version": "1",
   "selection_digest": "6709c05f56ef35d0e80e3071821be8cd9cc7cfd2b124912c3e63c6bf07fc9e34",
   "semantic_task": "generate_options",

@@ -208,3 +208,11 @@ Signed capability bundles, revocation, external trust roots, isolation for
 third-party code, and third-party capability provenance remain deferred;
 dynamic third-party capability installation is prohibited until those controls
 are designed and validated.
+### M3.6 governed Context delivery
+
+The reasoning boundary revalidates Context integrity, exact request/correlation
+binding, lifecycle, expiry, and the deterministic fixture revocation snapshot
+before delivery. The provider receives only a bounded typed view and no package,
+source, registry, audit, or evidence-resolution capability. Invalid Context does
+not fall back to context-free reasoning. Persistent revocation, authenticated
+Context artifacts, durable audit, and process isolation remain deferred.

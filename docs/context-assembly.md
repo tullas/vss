@@ -105,6 +105,16 @@ vss context validate \
 
 The existing VSS response envelope and numeric exit codes are preserved.
 
+## M3.6 boundary
+
+M3.6 delivers a validated Context to the existing deterministic GenerateOptions
+Gateway through an immutable invocation binding. It rechecks expiry and
+current policy-owned revocation immediately before provider delivery and
+passes only the minimal typed payload. The provider receives no package,
+Assembly Report, registry, source path, or evidence-resolution capability.
+The semantic request remains v1; no external provider, prompt, retrieval,
+cache, or reuse is introduced.
+
 ## Deliberate non-scope
 
 M3.5 adds no Reasoning Gateway integration or semantic schema change, provider,

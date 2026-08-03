@@ -83,4 +83,20 @@ class DeterministicGenerateOptionsStrategy:
                 ],
             },
         }
+        if context.provider_context:
+            notes = context.provider_context.get("selected_notes", [])
+            refs = context.provider_context.get("evidence_references", [])
+            payload["common_sections"]["assumptions"].append({
+                "id": "governed_context",
+                "statement": f"{len(notes)} bounded governed context note(s) were supplied; their claims remain unverified.",
+            })
+            payload["common_sections"]["limitations"].append({
+                "id": "context_qualification",
+                "statement": "Context purpose, uncertainty, conflicts, and evidence references remain qualified and non-authorizing.",
+            })
+            if refs:
+                payload["common_sections"]["limitations"].append({
+                    "id": "context_evidence",
+                    "statement": "Evidence identifiers are inert and were not resolved by the provider.",
+                })
         return payload, candidates.provider_calls, candidates.iterations

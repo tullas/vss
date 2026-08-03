@@ -183,11 +183,12 @@ class CommandRunner:
             gateway = self._reasoning_gateway or ReasoningGateway.built_in()
             try:
                 outcome = gateway.execute(
-                    payload,
+                    payload.get("semantic_request", payload),
                     environment=environment,
                     correlation_id=correlation,
                     dry_run=dry_run,
                     timeout_seconds=timeout_seconds,
+                    context_data=payload.get("context") if "semantic_request" in payload else None,
                 )
                 return finish("success", ExitCode.SUCCESS, dict(outcome.output), [])
             except InvalidReasoningRequest:
