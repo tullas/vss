@@ -141,6 +141,27 @@ directory, and other special-file inputs fail closed. A user-selected symlink
 to a regular input file is treated as user data and is permitted; schema and
 implementation paths remain fixed and do not use this behavior.
 
+## M3.6 governed Context delivery
+
+The existing context-free command remains unchanged. M3.6 additionally accepts
+an inert, independently validated `generate_options_context/1` artifact:
+
+```bash
+vss reasoning generate-options \
+  --environment development \
+  --input tests/fixtures/reasoning/generate-options-runtime-valid.json \
+  --context tests/fixtures/context/context-object-reasoning-valid.json \
+  --correlation-id m3-2-local-acceptance
+```
+
+The Gateway binds request, Context, correlation, purpose, project, environment,
+expiry, and exact content digest before delivery. The deterministic provider
+receives only a bounded provider-visible view; it cannot resolve evidence,
+access packages, retrieve more data, or invoke Runtime capabilities. Context
+delivery is not authorization and does not alter semantic request v1 or result
+family v1. Invalid Context never falls back to context-free reasoning. Dry-run
+performs the same binding checks and invokes the provider zero times.
+
 ## Limitations
 
 There is no AI model, prompt, external provider, network call, Knowledge

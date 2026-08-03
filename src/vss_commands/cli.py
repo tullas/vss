@@ -65,6 +65,7 @@ def _parser() -> argparse.ArgumentParser:
     reasoning_actions = reasoning.add_subparsers(dest="reasoning_action", required=True)
     generate_options = reasoning_actions.add_parser("generate-options")
     add_execution_options(generate_options, input_required=True)
+    generate_options.add_argument("--context", type=Path)
     performance = subparsers.add_parser("performance")
     performance_actions = performance.add_subparsers(dest="performance_action", required=True)
     performance_reasoning = performance_actions.add_parser("reasoning")
@@ -261,6 +262,12 @@ def main(argv: list[str] | None = None) -> int:
     if input_error is not None:
         print(json.dumps({"error": "input must be valid JSON object"}, sort_keys=True, separators=(",", ":")))
         return int(input_error)
+    if args.action == "reasoning" and args.context is not None:
+        context_value, context_error = _read_context_file(args.context)
+        if context_error is not None:
+            print(json.dumps({"error": "context input must be valid JSON object"}, sort_keys=True, separators=(",", ":")))
+            return int(context_error)
+        input_data = {"semantic_request": input_data, "context": context_value}
     if args.action == "run":
         command_name = args.command
     elif args.action == "bootstrap":

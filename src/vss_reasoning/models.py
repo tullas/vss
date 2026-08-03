@@ -52,9 +52,11 @@ class DeterministicReasoningContext:
     maximum_iterations: int
     semantic_content_digest: str
     payload: Mapping[str, Any]
+    provider_context: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
+        object.__setattr__(self, "provider_context", MappingProxyType(dict(self.provider_context or {})))
 
 
 @dataclass(frozen=True, slots=True)

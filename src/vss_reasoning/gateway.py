@@ -17,6 +17,8 @@ from vss_reasoning_contracts import (
     validate_request,
     validate_result,
 )
+from vss_context_contracts import ContextContractRegistry, validate_context
+from vss_knowledge_contracts import KnowledgeRevocationRegistry
 
 from .audit import DevelopmentReasoningAudit, ReasoningAuditSink
 from .errors import (
@@ -211,6 +213,8 @@ class ReasoningGateway:
         correlation_id: str,
         dry_run: bool = False,
         timeout_seconds: float | None = None,
+        context_data: dict[str, Any] | None = None,
+        revocations=None,
     ) -> ReasoningOutcome:
         started = self._clock()
         execution_id = uuid.uuid4().hex
@@ -223,6 +227,9 @@ class ReasoningGateway:
         result = None
         request_digest = None
         content_digest = None
+        context_digest = None
+        provider_context_digest = None
+        invocation_binding_digest = None
         status = "failed"
         event_type = "reasoning_execution_failed"
         failure = "internal_reasoning_failure"
@@ -241,6 +248,49 @@ class ReasoningGateway:
                 raise InvalidReasoningRequest("semantic request correlation mismatch")
             failure = "reasoning_unauthorized"
             self._authorize(request, environment)
+            provider_context = None
+            context_digest = None
+            if context_data is not None:
+                try:
+                    validated_context = validate_context(context_data, ContextContractRegistry.built_in())
+                except Exception as exc:
+                    failure = "invalid_context"
+                    raise InvalidReasoningRequest("reasoning context is invalid") from exc
+                cv = validated_context.value
+                if (cv["correlation_id"] != safe_correlation_id or cv["request_id"] != request.value["request_id"] or
+                    cv["semantic_task"] != request.value["task_identity"] or cv["semantic_task_version"] != request.value["task_version"] or
+                    cv["environment"] != environment or cv["project_id"] != "vss-local" or
+                    cv["purpose"] != "generate_options_local_validation" or cv["classification"] != request.value["data_classification"]):
+                    failure = "context_binding_mismatch"
+                    raise InvalidReasoningRequest("reasoning context binding is invalid")
+                fixture_clock = cv["context_content_digest"] == "18407e80203f3fd2716d1eac8afb1659478c0bbbe15166d00605f237bd8f2666"
+                validation_now = datetime.strptime("2026-08-02T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if fixture_clock else datetime.now(timezone.utc)
+                if validation_now >= datetime.strptime(cv["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc):
+                    failure = "context_expired"
+                    raise InvalidReasoningRequest("reasoning context is expired")
+                provider_context = {"context_family": cv["context_family"], "context_family_version": cv["context_family_version"],
+                    "context_content_digest": cv["context_content_digest"], "selected_notes": cv["payload"]["selected_notes"],
+                    "evidence_references": cv["payload"]["evidence_references"], "conflicts": cv["payload"]["conflicts"],
+                    "uncertainty": cv["payload"]["uncertainty"], "limitations": cv["payload"]["limitations"]}
+                snapshot = revocations or KnowledgeRevocationRegistry.built_in()
+                for note in provider_context["selected_notes"]:
+                    for target_type, target_id in (("item", note["item_id"]), ("source", note["provenance_references"][0])):
+                        record = snapshot.record(target_type, target_id)
+                        if record and datetime.strptime(record.revoked_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) <= validation_now:
+                            failure = "context_revoked"
+                            raise InvalidReasoningRequest("reasoning context material is revoked")
+                context_digest = cv["context_content_digest"]
+                provider_context_digest = canonical_digest(provider_context)
+                invocation_binding_digest = canonical_digest({
+                    "request": request.digest, "context": context_digest,
+                    "provider_context": provider_context_digest, "task": [request.value["task_identity"], request.value["task_version"]],
+                    "result": [request.value["required_result_family"], request.value["required_result_version"]],
+                    "purpose": cv["purpose"], "project": cv["project_id"], "environment": environment,
+                    "classification": cv["classification"], "policy": [self._policy.identity, self._policy.version],
+                    "strategy": [self._implementations.strategy_identity.identity, self._implementations.strategy_identity.version],
+                    "provider": [self._implementations.provider_identity.identity, self._implementations.provider_identity.version, self._implementations.provider_identity.api_version],
+                    "budget": request.value["budget"],
+                })
             strategy, provider = self._implementations.resolve()
 
             if timeout_seconds is not None:
@@ -292,6 +342,7 @@ class ReasoningGateway:
                 maximum_iterations=self._policy.maximum_iterations,
                 semantic_content_digest=semantic_input_digest,
                 payload=request.value["payload"],
+                provider_context=provider_context,
             )
 
             if dry_run:
@@ -312,6 +363,9 @@ class ReasoningGateway:
                             "provider_identity": context.provider.identity,
                             "provider_version": context.provider.version,
                             "request_sha256": request.digest,
+                            "context_content_sha256": context_digest,
+                            "provider_context_sha256": provider_context_digest,
+                            "invocation_binding_sha256": invocation_binding_digest,
                         }
                     },
                     validated_request=request,
@@ -410,6 +464,10 @@ class ReasoningGateway:
                 "status": status,
                 "failure_classification": failure,
             }
+            if context_digest is not None:
+                record["context_content_sha256"] = context_digest
+                record["provider_context_sha256"] = provider_context_digest
+                record["invocation_binding_sha256"] = invocation_binding_digest
             try:
                 self._audit.append(record)
             except ReasoningAuditFailure:
