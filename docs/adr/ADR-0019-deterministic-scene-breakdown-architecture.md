@@ -63,7 +63,12 @@ There is no universal Movie Object or Production Object. Story, screenplay,
 scene, character, location, shot, costume, sound, schedule, asset, render,
 review, licensing, and release concepts remain independently versioned future
 families. A bounded registry may group genuinely aligned movie families, but it
-must not become a universal Movie Registry.
+must not become a universal Movie Registry. M4.1 may initially keep movie-owned
+metadata distributed across the existing federated Knowledge, Semantic, and
+Context registries; a dedicated Movie Domain Contract Registry is introduced
+only if repeated movie-domain ownership, lifecycle, or compatibility needs
+justify it. It never owns Runtime, provider, workflow, approval, or execution
+authority.
 
 ## First Knowledge families
 
@@ -76,17 +81,34 @@ or metadata bag. Instruction-like text is ordinary inert content.
 `character_reference/1` and `location_reference/1` are optional future additions;
 they are admitted in M4.1 only if they materially improve the first slice.
 
-Source knowledge is distinct from interpretation. Derived output must label
-source-supported observations, rule-derived interpretation, assumptions,
-unknowns, conflicts, limitations, and evidence references separately.
+The explicitly supplied character/location declarations are bounded source
+claims, not extracted truth. “Bounded annotations” is not an arbitrary key/value
+or extension bag: the first implementation must either use a separately
+versioned, closed annotation family or reject the annotation. Unknown annotation
+shapes fail closed. Character and location domain contracts remain separate
+future families.
+
+Source knowledge is distinct from interpretation. Derived output must label each
+character, location, time indicator, event, and dramatic-function statement as
+directly declared, directly observed in the admitted source representation,
+rule-derived, or unresolved. It must separately retain assumptions, unknowns,
+conflicts, limitations, and evidence references. A missing declaration is not a
+claim of absence.
 
 ## Scene semantics and identity
 
 For this slice, a scene is a contiguous narrative unit identified by explicit
-headings, location/time changes, separators, sequence markers, or a bounded
-deterministic fallback. This is an operational definition, not a universal
-artistic definition. Explicit, rule-derived, and ambiguous boundaries remain
-distinguishable; material ambiguity is not silently resolved.
+headings, structured separators, sequence markers, admitted structured location
+or time transitions, or a bounded deterministic fallback. This is an
+operational definition, not a universal artistic definition. A natural-language
+mention of another place or time is not an explicit transition unless a
+versioned implementation rule admits that representation. Explicit,
+rule-derived, and ambiguous boundaries remain distinguishable; material
+ambiguity is not silently resolved.
+
+Boundary-rule identity/version and boundary basis are retained. Fallback
+segmentation is inspectable and reported as rule-derived, never as source fact;
+hidden NLP heuristics and provider/model interpretation are outside this slice.
 
 Scene identity is derived from source identity/version, source sequence,
 normalized boundary index, deterministic ordinal, and scene-content digest. It
@@ -117,7 +139,9 @@ one validated scene or bounded scene subset plus
 `scene_production_options_context/1`, and producing
 `scene_production_option_set/1`.
 
-Options are bounded alternatives, not plans or recommendations. They may
+Options are bounded alternatives, not plans or recommendations and are not
+ranked unless a separately versioned later policy explicitly admits ranking.
+They may
 describe broad production approach, visual treatment category, staging
 complexity, location/performer/asset requirements, effects and audio
 considerations, local prototype suitability, unknown dependencies, and
