@@ -91,6 +91,19 @@ jobs:
           assert first == second
           print('movie registry/story/scene digests:', *first)
           PY
+      - name: Test deterministic movie scene breakdown
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          from pathlib import Path
+          from vss_reasoning_contracts import load_json_document, canonical_digest
+          from vss_movie_scene_breakdown import assemble_scene_context, break_down_scenes
+          root=Path.cwd(); story=load_json_document((root/'tests/fixtures/movie/story-fragment-valid.json').read_bytes())
+          def run():
+              context=assemble_scene_context(story, request_id='m4-2-request-001', correlation_id='m4-2-local-run', project_id=story['project_id'], validation_time='2026-08-02T00:00:00Z')
+              result=break_down_scenes(context, now='2026-08-02T00:00:01Z')
+              return context.digest, canonical_digest(result)
+          assert run()==run(); print('scene context/result digests:', *run())
+          PY
       - name: Test deterministic Context Assembly
         run: |
           python -m unittest discover -s tests/context -p 'test_*.py'

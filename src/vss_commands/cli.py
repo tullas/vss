@@ -98,6 +98,19 @@ def _parser() -> argparse.ArgumentParser:
     context_validate.add_argument("--input", type=Path, required=True)
     context_validate.add_argument("--environment", required=True)
     context_validate.add_argument("--correlation-id")
+    movie = subparsers.add_parser("movie")
+    movie_actions = movie.add_subparsers(dest="movie_action", required=True)
+    movie_break = movie_actions.add_parser("break-down-scenes")
+    movie_break.add_argument("--request", type=Path, required=True)
+    movie_break.add_argument("--context", type=Path, required=True)
+    movie_break.add_argument("--environment", required=True)
+    movie_break.add_argument("--correlation-id", required=True)
+    movie_break.add_argument("--dry-run", action="store_true")
+    movie_assemble = movie_actions.add_parser("context-assemble-scene-breakdown")
+    movie_assemble.add_argument("--request", type=Path, required=True)
+    movie_assemble.add_argument("--story", type=Path, required=True)
+    movie_assemble.add_argument("--environment", required=True)
+    movie_assemble.add_argument("--correlation-id", required=True)
     return parser
 
 
@@ -230,7 +243,17 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"error": str(exc)}, sort_keys=True, separators=(",", ":")))
             return int(exc.exit_code)
 
-    if args.action == "reasoning":
+    if args.action == "movie":
+        request, input_error = _read_reasoning_input(args.request)
+        if args.movie_action == "break-down-scenes":
+            context, context_error = _read_context_file(args.context)
+            input_error = input_error or context_error
+            input_data = {"request": request, "context": context} if input_error is None else None
+        else:
+            story, story_error = _read_reasoning_input(args.story)
+            input_error = input_error or story_error
+            input_data = {"request": request, "story": story} if input_error is None else None
+    elif args.action == "reasoning":
         input_data, input_error = _read_reasoning_input(args.input)
     elif args.action == "performance":
         input_data, input_error = {
@@ -280,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
         command_name = f"knowledge.package.{args.package_action}"
     elif args.action == "context":
         command_name = f"context.{args.context_action}"
+    elif args.action == "movie":
+        command_name = "movie.break-down-scenes" if args.movie_action == "break-down-scenes" else "movie.context-assemble-scene-breakdown"
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret

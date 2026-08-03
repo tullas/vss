@@ -226,3 +226,14 @@ instruction-like story text. Rights and cultural qualifications remain claims
 requiring separate legal or human review; no provider, Context, parser,
 execution, or media capability exists in M4.1. Persistent revocation, durable
 audit, and production isolation remain deferred.
+## M4.2 scene breakdown boundary
+
+M4.2 adds a repository-owned, versioned structural marker catalogue and a
+task-specific immutable scene Context. Marker processing is bounded and does
+not interpret ordinary prose as a command or scene transition. Context and
+source substitutions are bound by project, request, correlation, family,
+purpose, and digests. Fallback segmentation remains qualified and ambiguous;
+it is not artistic or historical truth. The provider receives no package,
+filesystem, network, Runtime, capability, workflow, or audit handle. Advanced
+screenplay parsing, persistent revocation, rights verification, cultural expert
+review, process isolation, production options, and Plan IR remain deferred.

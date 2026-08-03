@@ -1,4 +1,5 @@
 from jsonschema import Draft202012Validator
+import re
 from vss_reasoning_contracts.canonicalization import validate_json_value
 from .errors import MovieContractError
 from .limits import MAX_STORY_BYTES, MAX_RESULT_BYTES
@@ -11,7 +12,7 @@ def _validate(value, identity, registry, maximum):
     if not isinstance(value,dict): raise MovieContractError("movie artifact must be an object")
     registry.resolve(identity)
     errors=list(Draft202012Validator(registry.schemas[identity]["schema"]).iter_errors(value))
-    if errors: raise MovieContractError("movie artifact does not match its contract")
+    if errors: raise MovieContractError("movie artifact does not match its contract: " + errors[0].message)
     return ValidatedMovieArtifact._create(value)
 
 def validate_story_fragment(value, registry=None):
@@ -42,7 +43,7 @@ def validate_scene_breakdown(value, registry=None):
             if source == scene["source_binding"] and span["start"] < end and start < span["end"]:
                 raise MovieContractError("overlapping source spans")
         spans.append((scene["source_binding"], span["start"], span["end"]))
-        if scene["boundary_rule"].count("/") != 1 or not scene["boundary_rule"].rsplit("/", 1)[1].isdigit():
+        if not re.fullmatch(r"[a-z][a-z0-9._:-]{0,63}/[1-9][0-9]*(\.[0-9]+){0,2}", scene["boundary_rule"]):
             raise MovieContractError("invalid boundary rule")
         if any(ref not in bindings for ref in scene["evidence_references"]):
             raise MovieContractError("unknown scene evidence reference")
