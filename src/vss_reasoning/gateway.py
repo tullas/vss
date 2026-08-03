@@ -474,3 +474,33 @@ class ReasoningGateway:
                 raise
             except Exception as exc:
                 raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
+
+    def execute_scene_breakdown(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False) -> dict[str, Any]:
+        """Admit the bounded movie task through the existing Gateway boundary."""
+        started = self._clock(); execution_id = uuid.uuid4().hex; calls = 0
+        request_id = request_data.get("request_id") if isinstance(request_data, dict) else None
+        try:
+            if type(correlation_id) is not str or not _CORRELATION_ID.fullmatch(correlation_id):
+                raise InvalidReasoningRequest("reasoning correlation identity is invalid")
+            if not isinstance(request_data, dict) or request_data.get("task_identity") != "break_down_scenes" or request_data.get("task_version") != "1":
+                raise InvalidReasoningRequest("movie task is not admitted")
+            if request_data.get("correlation_id") != correlation_id or request_data.get("purpose") != "scene_breakdown_local_validation":
+                raise InvalidReasoningRequest("movie request binding is invalid")
+            from vss_movie_scene_breakdown import SceneBreakdownService
+            service = SceneBreakdownService()
+            if context_data.get("correlation_id") != correlation_id or context_data.get("request_id") != request_id:
+                raise InvalidReasoningRequest("movie Context binding is invalid")
+            if dry_run:
+                output = service.execute(context_data, dry_run=True)
+            else:
+                output = service.execute(context_data)
+                calls = 1
+            record = {"event_type": "movie_scene_breakdown_readiness_completed" if dry_run else "movie_scene_breakdown_completed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "result_family": "scene_breakdown", "provider_call_count": calls, "status": "success", "duration_ms": max(0, int((self._clock() - started) * 1000))}
+            self._audit.append(record)
+            return {"readiness": output} if dry_run else {"scene_breakdown": output, "result_digest": canonical_digest(output)}
+        except Exception:
+            try:
+                self._audit.append({"event_type": "movie_scene_breakdown_failed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "provider_call_count": calls, "status": "failed"})
+            except Exception as audit_exc:
+                raise ReasoningAuditFailure("reasoning audit record could not be written") from audit_exc
+            raise

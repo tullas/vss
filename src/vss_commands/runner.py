@@ -97,22 +97,21 @@ class CommandRunner:
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
         if command in {MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND}:
-            from vss_movie_scene_breakdown import SceneBreakdownService
             try:
                 if command == MOVIE_CONTEXT_COMMAND:
                     if frozenset(payload) != {"request", "story"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie context input is invalid"])
                     req, story = payload["request"], payload["story"]
-                    if req.get("correlation_id") != correlation or req.get("project_id") != story.get("project_id") or req.get("purpose") != "scene_breakdown_local_validation": return finish("error", ExitCode.INVALID_INPUT, {}, ["movie request binding mismatch"])
-                    context = SceneBreakdownService().assemble(story, request_id=req["request_id"], correlation_id=correlation, project_id=story["project_id"])
+                    from vss_context import ContextAssembler
+                    context = ContextAssembler().assemble_scene_breakdown(story, request_id=req.get("request_id"), correlation_id=correlation, project_id=req.get("project_id"), environment=environment)
                     return finish("success", ExitCode.SUCCESS, {"context": context.to_json_value(), "context_digest": context.digest}, [])
                 if frozenset(payload) != {"request", "context"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie breakdown input is invalid"])
                 req, context = payload["request"], payload["context"]
-                if req.get("correlation_id") != correlation or context.get("correlation_id") != correlation or context.get("request_id") != req.get("request_id"):
-                    return finish("error", ExitCode.INVALID_INPUT, {}, ["movie correlation or request binding mismatch"])
-                service=SceneBreakdownService()
-                if dry_run: return finish("success", ExitCode.SUCCESS, service.execute(context, dry_run=True), [])
-                result=service.execute(context)
-                return finish("success", ExitCode.SUCCESS, {"scene_breakdown": result, "result_digest": canonical_digest(result)}, [])
+                gateway = self._reasoning_gateway
+                if gateway is None:
+                    from vss_reasoning.gateway import ReasoningGateway
+                    gateway = ReasoningGateway.built_in()
+                result = gateway.execute_scene_breakdown(req, context, environment=environment, correlation_id=correlation, dry_run=dry_run)
+                return finish("success", ExitCode.SUCCESS, result, [])
             except Exception:
                 return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["movie scene breakdown failed"])
         if command == PERFORMANCE_COMMAND:

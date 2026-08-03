@@ -197,3 +197,8 @@ class ContextAssembler:
             except Exception as audit_exc:
                 raise ContextAuditFailure("context audit failed") from audit_exc
             raise
+
+    def assemble_scene_breakdown(self, story: dict[str, Any], *, request_id: str, correlation_id: str, project_id: str, environment: str, validation_time: str | None = None) -> Any:
+        """Movie-specific Context admission routed through the Context layer."""
+        from vss_movie_scene_breakdown import assemble_scene_context
+        return assemble_scene_context(story, request_id=request_id, correlation_id=correlation_id, project_id=project_id, environment=environment, validation_time=validation_time)
