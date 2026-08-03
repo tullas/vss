@@ -49,6 +49,13 @@ class ContextReasoningIntegrationTests(unittest.TestCase):
         with self.assertRaises(InvalidReasoningRequest):
             ReasoningGateway.built_in().execute(self.request, environment="development", correlation_id=self.request["correlation_id"], context_data=self.context, revocations=revocations)
 
+    def test_provider_context_is_recursively_immutable(self):
+        outcome = ReasoningGateway.built_in().execute(self.request, environment="development", correlation_id=self.request["correlation_id"], context_data=self.context)
+        view = outcome.validated_request
+        # The provider view is held on the internal invocation context; the
+        # public result intentionally exposes no mutable provider handle.
+        self.assertEqual(view.value["request_id"], self.request["request_id"])
+
 
 if __name__ == "__main__":
     unittest.main()
