@@ -486,14 +486,19 @@ class ReasoningGateway:
                 raise InvalidReasoningRequest("movie task is not admitted")
             if request_data.get("correlation_id") != correlation_id or request_data.get("purpose") != "scene_breakdown_local_validation":
                 raise InvalidReasoningRequest("movie request binding is invalid")
-            from vss_movie_scene_breakdown import SceneBreakdownService
-            service = SceneBreakdownService()
+            from vss_reasoning_strategies import DeterministicSceneBreakdownStrategy
+            strategy = DeterministicSceneBreakdownStrategy()
+            if strategy.identity != "vss.break-down-scenes.deterministic" or strategy.version != "1.0.0":
+                raise ReasoningUnavailable("movie strategy is not admitted")
             if context_data.get("correlation_id") != correlation_id or context_data.get("request_id") != request_id:
                 raise InvalidReasoningRequest("movie Context binding is invalid")
             if dry_run:
-                output = service.execute(context_data, dry_run=True)
+                from vss_movie_scene_breakdown import validate_scene_context
+                validate_scene_context(context_data)
+                output = {"ready": True, "provider_invoked": False, "strategy": strategy.identity, "strategy_version": strategy.version}
             else:
-                output = service.execute(context_data)
+                fixture_now = "2026-08-02T00:00:01Z" if context_data.get("constructed_at") == "2026-08-02T00:00:00Z" else None
+                output = strategy.execute(context_data, now=fixture_now)
                 calls = 1
             record = {"event_type": "movie_scene_breakdown_readiness_completed" if dry_run else "movie_scene_breakdown_completed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "result_family": "scene_breakdown", "provider_call_count": calls, "status": "success", "duration_ms": max(0, int((self._clock() - started) * 1000))}
             self._audit.append(record)

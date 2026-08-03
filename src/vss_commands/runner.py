@@ -103,7 +103,9 @@ class CommandRunner:
                     req, story = payload["request"], payload["story"]
                     from vss_context import ContextAssembler
                     context = ContextAssembler().assemble_scene_breakdown(story, request_id=req.get("request_id"), correlation_id=correlation, project_id=req.get("project_id"), environment=environment)
-                    return finish("success", ExitCode.SUCCESS, {"context": context.to_json_value(), "context_digest": context.digest}, [])
+                    from vss_movie_scene_breakdown import scene_context_report
+                    report=scene_context_report(context)
+                    return finish("success", ExitCode.SUCCESS, {"context": context.to_json_value(), "assembly_report": report, "context_digest": context.digest}, [])
                 if frozenset(payload) != {"request", "context"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie breakdown input is invalid"])
                 req, context = payload["request"], payload["context"]
                 gateway = self._reasoning_gateway

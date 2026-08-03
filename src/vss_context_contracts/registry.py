@@ -23,6 +23,7 @@ _FILES = MappingProxyType({
     "vss.context_assembly_request/1": "context-assembly-request-v1.schema.json",
     "vss.context_object/1": "context-object-v1.schema.json",
     "vss.generate_options_context/1": "generate-options-context-v1.schema.json",
+    "vss.scene_breakdown_context/1": "scene-breakdown-context-v1.schema.json",
     "vss.context_assembly_report/1": "context-assembly-report-v1.schema.json",
 })
 
@@ -99,6 +100,7 @@ class ContextContractRegistry:
             ContextRegistration("context_assembly_request", "1", "vss.context_assembly_request/1"),
             ContextRegistration("context_object", "1", "vss.context_object/1"),
             ContextRegistration("generate_options_context", "1", "vss.generate_options_context/1"),
+            ContextRegistration("scene_breakdown_context", "1", "vss.scene_breakdown_context/1"),
             ContextRegistration("context_assembly_report", "1", "vss.context_assembly_report/1"),
         )
         registrations = self.registrations or expected
@@ -139,4 +141,8 @@ class ContextContractRegistry:
             "package_purpose": "local_validation_context",
             "context_purpose": "generate_options_local_validation",
             "policy": "generate_options_context_local/1",
+            "scene_breakdown": "scene_breakdown_context/1",
+            "scene_breakdown_policy": "scene_breakdown_context_local/1",
+            "scene_breakdown_strategy": "vss.break-down-scenes.deterministic/1.0.0",
+            "scene_breakdown_provider": "vss.reasoning.deterministic-scene-breakdown/1.0.0",
         })

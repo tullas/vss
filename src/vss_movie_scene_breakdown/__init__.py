@@ -5,6 +5,7 @@ from .service import (
     assemble_scene_context,
     validate_scene_context,
     break_down_scenes,
+    scene_context_report,
 )
 
-__all__ = ["SceneBreakdownContext", "SceneBreakdownService", "assemble_scene_context", "validate_scene_context", "break_down_scenes"]
+__all__ = ["SceneBreakdownContext", "SceneBreakdownService", "assemble_scene_context", "validate_scene_context", "break_down_scenes", "scene_context_report"]

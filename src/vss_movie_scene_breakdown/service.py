@@ -54,6 +54,11 @@ def assemble_scene_context(story: dict, *, request_id: str, correlation_id: str,
     context["integrity"]["complete_context_sha256"]=canonical_digest({**context,"integrity":{}})
     return validate_scene_context(context)
 
+def scene_context_report(context: SceneBreakdownContext) -> dict:
+    value=thaw_json(context.value)
+    report={"schema_version":"1","report_family":"scene_breakdown_context_assembly_report","report_version":"1","request_id":value["request_id"],"correlation_id":value["correlation_id"],"context_id":value["context_id"],"context_family":"scene_breakdown_context","context_family_version":"1","project_id":value["project_id"],"environment":value["environment"],"purpose":value["purpose"],"classification":value["classification"],"story_fragment_id":value["payload"]["story_fragment"]["fragment_id"],"story_fragment_digest":value["payload"]["story_fragment"]["fragment_digest"],"rule_catalogue":value["payload"]["rule_catalogue"],"source_count":1,"context_content_digest":value["context_content_digest"],"complete_context_digest":context.digest,"status":"success"}
+    report["report_digest"]=canonical_digest(report); return report
+
 def _scene_id(project, fragment_id, digest, start, end, ordinal): return "scene-"+hashlib.sha256(f"{project}|{fragment_id}|{digest}|{start}|{end}|{ordinal}".encode()).hexdigest()[:24]
 
 def break_down_scenes(context: SceneBreakdownContext, *, now: str | None = None) -> dict:
