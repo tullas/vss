@@ -2,6 +2,7 @@ import json, unittest
 from pathlib import Path
 from vss_movie_scene_breakdown import assemble_scene_context, break_down_scenes
 from vss_reasoning.gateway import ReasoningGateway
+from vss_movie_scene_breakdown import MovieRevocation, MovieRevocationSnapshot
 
 ROOT=Path(__file__).resolve().parents[2]
 def load(n): return json.loads((ROOT/'tests/fixtures/movie'/n).read_text())
@@ -31,3 +32,8 @@ class SceneBreakdownTests(unittest.TestCase):
         gateway=ReasoningGateway.built_in()
         self.assertIn('scene_breakdown', gateway.execute_scene_breakdown(req,c.to_json_value(),environment='development',correlation_id='m4-2-local-run'))
         self.assertFalse(gateway.execute_scene_breakdown(req,c.to_json_value(),environment='development',correlation_id='m4-2-local-run',dry_run=True)['readiness']['provider_invoked'])
+
+    def test_revoked_source_has_zero_provider_path(self):
+        story=load('story-fragment-valid.json'); c=assemble_scene_context(story,request_id='m4-2-request-001',correlation_id='m4-2-local-run',project_id=story['project_id'],validation_time='2026-08-02T00:00:00Z'); req=load('break-down-scenes-request-runtime-valid.json')
+        snapshot=MovieRevocationSnapshot((MovieRevocation('story_fragment',story['fragment_id'],c.value['payload']['story_fragment']['fragment_digest'],'2026-08-02T00:00:01Z','withdrawn'),))
+        with self.assertRaises(Exception): ReasoningGateway.built_in().execute_scene_breakdown(req,c.to_json_value(),environment='development',correlation_id='m4-2-local-run',revocations=snapshot)

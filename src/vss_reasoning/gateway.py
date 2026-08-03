@@ -475,7 +475,7 @@ class ReasoningGateway:
             except Exception as exc:
                 raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
 
-    def execute_scene_breakdown(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False) -> dict[str, Any]:
+    def execute_scene_breakdown(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
         """Admit the bounded movie task through the existing Gateway boundary."""
         started = self._clock(); execution_id = uuid.uuid4().hex; calls = 0
         request_id = request_data.get("request_id") if isinstance(request_data, dict) else None
@@ -497,7 +497,13 @@ class ReasoningGateway:
             from vss_movie_scene_breakdown import validate_scene_context
             validated_context = validate_scene_context(context_data)
             context_digest = validated_context.digest
-            provider_digest = canonical_digest({"context_family": context_data["context_family"], "context_content_digest": context_data["context_content_digest"], "payload": context_data["payload"]})
+            from vss_movie_scene_breakdown import MovieRevocationSnapshot, provider_view_from_context
+            snapshot = revocations or MovieRevocationSnapshot.built_in()
+            now = "2026-08-02T00:00:01Z" if context_data.get("constructed_at") == "2026-08-02T00:00:00Z" else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            source = context_data["payload"]["story_fragment"]
+            revocation = snapshot.evaluate("story_fragment", source["fragment_id"], source["fragment_digest"], now)
+            if revocation != "eligible": raise InvalidReasoningRequest("movie source is revoked")
+            provider_digest = provider_view_from_context(validated_context).provider_visible_digest
             invocation_digest = canonical_digest({"request_id": request_id, "request_digest": canonical_digest(request_data), "context_digest": context_digest, "provider_digest": provider_digest, "task": ["break_down_scenes", "1"], "result": ["scene_breakdown", "1"], "purpose": context_data["purpose"], "project": context_data["project_id"], "environment": environment, "strategy": [strategy.identity, strategy.version], "provider": ["vss.reasoning.deterministic-scene-breakdown", "1.0.0", "1"]})
             if dry_run:
                 from vss_movie_scene_breakdown import validate_scene_context
@@ -507,7 +513,7 @@ class ReasoningGateway:
                 fixture_now = "2026-08-02T00:00:01Z" if context_data.get("constructed_at") == "2026-08-02T00:00:00Z" else None
                 output = strategy.execute(context_data, now=fixture_now)
                 calls = 1
-            record = {"event_type": "movie_scene_breakdown_readiness_completed" if dry_run else "movie_scene_breakdown_completed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "result_family": "scene_breakdown", "provider_call_count": calls, "context_id": context_data["context_id"], "context_content_sha256": context_data["context_content_digest"], "complete_context_sha256": context_digest, "provider_context_sha256": provider_digest, "invocation_binding_sha256": invocation_digest, "result_sha256": None if dry_run else canonical_digest(output), "status": "success", "duration_ms": max(0, int((self._clock() - started) * 1000))}
+            record = {"event_type": "movie_scene_breakdown_readiness_completed" if dry_run else "movie_scene_breakdown_completed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "result_family": "scene_breakdown", "provider_call_count": calls, "context_id": context_data["context_id"], "context_content_sha256": context_data["context_content_digest"], "complete_context_sha256": context_digest, "provider_context_sha256": provider_digest, "invocation_binding_sha256": invocation_digest, "revocation_result": revocation, "result_sha256": None if dry_run else canonical_digest(output), "status": "success", "duration_ms": max(0, int((self._clock() - started) * 1000))}
             self._audit.append(record)
             return {"readiness": output} if dry_run else {"scene_breakdown": output, "result_digest": canonical_digest(output)}
         except Exception:

@@ -29,6 +29,40 @@ class SceneBreakdownContext:
         object.__setattr__(obj,"value",frozen); object.__setattr__(obj,"digest",canonical_digest(frozen)); return obj
     def to_json_value(self): return thaw_json(self.value)
 
+@dataclass(frozen=True, slots=True)
+class SceneBreakdownProviderView:
+    fragment_id: str
+    fragment_digest: str
+    project_id: str
+    fragment_text: str
+    source_type: str
+    source_sequence: int
+    declared_characters: tuple
+    declared_locations: tuple
+    source_qualification: str
+    rights_qualification: str
+    cultural_qualification: str
+    evidence_references: tuple
+    rule_catalogue: str
+    maximum_scenes: int
+    uncertainty: tuple
+    limitations: tuple
+    provider_visible_digest: str
+
+def provider_view_from_context(context: SceneBreakdownContext) -> SceneBreakdownProviderView:
+    cv=thaw_json(validate_scene_context(context.value if isinstance(context, SceneBreakdownContext) else context).value)
+    source=cv["payload"]["story_fragment"]
+    material={k:source[k] for k in ("fragment_id","fragment_digest","fragment_text","source_type","source_sequence","declared_characters","declared_locations","source_qualification","rights_qualification","cultural_qualification")}
+    material.update({"project_id":cv["project_id"],"evidence_references":cv["payload"]["source_bindings"],"rule_catalogue":cv["payload"]["rule_catalogue"],"maximum_scenes":32,"uncertainty":cv["payload"]["uncertainty"],"limitations":cv["payload"]["limitations"]})
+    digest=canonical_digest(material)
+    return SceneBreakdownProviderView(provider_visible_digest=digest, declared_characters=tuple(source["declared_characters"]), declared_locations=tuple(source["declared_locations"]), evidence_references=tuple(cv["payload"]["source_bindings"]), uncertainty=tuple(cv["payload"]["uncertainty"]), limitations=tuple(cv["payload"]["limitations"]), **{k:material[k] for k in ("fragment_id","fragment_digest","project_id","fragment_text","source_type","source_sequence","source_qualification","rights_qualification","cultural_qualification","rule_catalogue","maximum_scenes")})
+
+def segment_provider_view(view: SceneBreakdownProviderView) -> dict:
+    payload={"story_fragment":{"fragment_id":view.fragment_id,"fragment_digest":view.fragment_digest,"fragment_text":view.fragment_text,"source_type":view.source_type,"source_sequence":view.source_sequence,"declared_characters":list(view.declared_characters),"declared_locations":list(view.declared_locations),"source_qualification":view.source_qualification,"rights_qualification":view.rights_qualification,"cultural_qualification":view.cultural_qualification},"source_bindings":[view.fragment_id],"rule_catalogue":view.rule_catalogue,"uncertainty":list(view.uncertainty),"limitations":list(view.limitations),"budget_summary":{"maximum_context_bytes":MAX_CONTEXT}}
+    context={"schema_version":"1","context_id":"provider-view","context_family":"scene_breakdown_context","context_family_version":"1","request_id":"provider","correlation_id":"provider","semantic_task":"break_down_scenes","semantic_task_version":"1","purpose":"scene_breakdown_local_validation","environment":"development","project_id":view.project_id,"classification":"public","policy_identity":POLICY,"policy_version":"1","constructed_at":"2026-08-02T00:00:00Z","expires_at":"2026-08-03T00:00:00Z","lifecycle":"validated","context_content_digest":canonical_digest(payload),"integrity":{"complete_context_sha256":"0"*64},"payload":payload}
+    context["integrity"]["complete_context_sha256"]=canonical_digest({**context,"integrity":{}})
+    return break_down_scenes(context, now="2026-08-02T00:00:01Z")
+
 def validate_scene_context(value: Any) -> SceneBreakdownContext:
     if not isinstance(value, dict): value=thaw_json(value) if hasattr(value, "keys") else value
     if not isinstance(value, dict): raise ValueError("scene context must be an object")
