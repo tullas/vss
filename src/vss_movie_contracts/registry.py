@@ -5,6 +5,7 @@ from jsonschema import Draft202012Validator
 from vss_reasoning_contracts import canonical_digest
 from .errors import MovieRegistryError, MovieContractError
 from .models import MovieRegistration
+from vss_reasoning_contracts.canonicalization import freeze_json
 
 ROOT = Path(__file__).resolve().parents[2] / "schemas"
 FILES = MappingProxyType({"story_fragment/1":"story-fragment-v1.schema.json", "break_down_scenes/1":"break-down-scenes-task-v1.schema.json", "scene_breakdown/1":"scene-breakdown-v1.schema.json"})
@@ -20,9 +21,13 @@ def _load(identity, filename):
     try:
         resolved=path.resolve(strict=True)
         if not resolved.is_relative_to(ROOT): raise MovieRegistryError("movie schema escapes root")
-        fd=os.open(path, os.O_RDONLY|getattr(os,"O_NOFOLLOW",0)); st=os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode): raise MovieRegistryError("movie schema is not regular")
-        raw=os.read(fd, 262145); os.close(fd)
+        fd=os.open(path, os.O_RDONLY|getattr(os,"O_NOFOLLOW",0))
+        try:
+            st=os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode): raise MovieRegistryError("movie schema is not regular")
+            raw=os.read(fd, 262145)
+        finally:
+            os.close(fd)
     except OSError as exc: raise MovieRegistryError("movie schema unavailable") from exc
     if len(raw)>262144: raise MovieRegistryError("movie schema too large")
     try: schema=json.loads(raw, object_pairs_hook=_pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
@@ -31,19 +36,32 @@ def _load(identity, filename):
     if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema": raise MovieRegistryError("movie schema dialect invalid")
     try: Draft202012Validator.check_schema(schema)
     except Exception as exc: raise MovieRegistryError("movie schema malformed") from exc
-    return {"identity":identity,"sha256":hashlib.sha256(raw).hexdigest(),"schema":schema}
+    def walk(node, root=True):
+        if isinstance(node, dict):
+            if not root and "$id" in node: raise MovieRegistryError("nested schema id rejected")
+            if any(k in node for k in ("$dynamicRef", "$recursiveRef", "$anchor", "$dynamicAnchor")):
+                raise MovieRegistryError("unsupported schema reference")
+            if "$ref" in node and not (isinstance(node["$ref"], str) and node["$ref"].startswith("#")):
+                raise MovieRegistryError("remote schema reference rejected")
+            for value in node.values(): walk(value, False)
+        elif isinstance(node, list):
+            for value in node: walk(value, False)
+    walk(schema)
+    return {"identity":identity,"sha256":hashlib.sha256(raw).hexdigest(),"schema":freeze_json(schema)}
 
 class MovieContractRegistry:
     __slots__=("registrations","schemas","digest")
     def __init__(self):
         regs=tuple(MovieRegistration(i,"1",f"vss.movie.{i}/1") for i in FILES)
         schemas={i:_load(i,f) for i,f in FILES.items()}
-        self.registrations=regs; self.schemas=MappingProxyType(schemas)
+        self.registrations=regs; self.schemas=freeze_json(schemas)
         self.digest=canonical_digest({"registry":"movie_domain_contract_registry/1","registrations":[r.__dict__ if hasattr(r,"__dict__") else {"identity":r.identity,"version":r.version,"schema_identity":r.schema_identity,"lifecycle":r.lifecycle,"owner":r.owner} for r in regs],"schemas":{k:v["sha256"] for k,v in sorted(schemas.items())}})
     @classmethod
     def built_in(cls): return cls()
     def resolve(self, identity, version=None):
-        if version is not None: identity = f"{identity}/{version}"
+        if not isinstance(identity, str) or not identity or "*" in identity or identity.endswith("latest"):
+            raise MovieContractError("unknown movie contract")
+        qualified = identity if version is None else f"{identity}/{version}"
         for r in self.registrations:
-            if r.identity == identity or (version is not None and (r.identity,r.version)==(identity,version)): return r
+            if r.identity == qualified: return r
         raise MovieContractError("unknown movie contract")

@@ -16,8 +16,13 @@ class ValidatedMovieArtifact:
     value: Mapping[str, Any]
     digest: str
     def __init__(self, value: dict[str, Any]):
+        raise TypeError("validated movie artifacts must be created by validators")
+    @classmethod
+    def _create(cls, value: dict[str, Any]):
+        obj=object.__new__(cls)
         frozen = freeze_json(value)
-        object.__setattr__(self, "value", frozen)
-        object.__setattr__(self, "digest", canonical_digest(frozen))
+        object.__setattr__(obj, "value", frozen)
+        object.__setattr__(obj, "digest", canonical_digest(frozen))
+        return obj
     def to_json_value(self):
         return thaw_json(self.value)

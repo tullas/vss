@@ -43,3 +43,23 @@ repeated sequencing, dependency, resource, effect, or approval requirements.
 Trusted Python remains in-process. Any future audit remains development-only;
 production rights verification, persistent revocation, isolation, and durable
 audit are deferred.
+
+### M4.1 precision notes
+
+The validated Story Fragment `digest` is the complete canonical digest of the
+validated artifact; M4.1 does not expose a second declared integrity field.
+`fragment_id` and `scene_id` are validated caller-supplied stable identifiers,
+not cryptographic identity derivations. Their semantic content is bound by the
+complete artifact/payload digests and source bindings.
+
+Scene source spans use Unicode code-point offsets. Standalone M4.1 validation
+checks span shape, ordering, overlap, and source-binding references; containment
+against source text is deferred to M4.2 Context assembly. Each scene carries an
+exact versioned boundary-rule reference, an ambiguity marker, and a
+scene-content digest. Fallback boundaries are rule-derived and never imply
+artistic certainty.
+
+The task contract has a strict `validate_scene_task` API. Its lifecycle denotes
+structural contract admission only; it does not imply an implemented algorithm,
+strategy, provider, or executable policy. Registry schema snapshots are
+recursively immutable. No annotation extension bag exists in `story_fragment/1`.
