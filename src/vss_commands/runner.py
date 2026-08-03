@@ -11,6 +11,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from vss_config import ConfigError, load_configuration
+from vss_reasoning_contracts import canonical_digest
 
 from .exit_codes import ExitCode
 from .models import CommandContext, SafeCommandError
@@ -23,6 +24,8 @@ KNOWLEDGE_BUILD_COMMAND = "knowledge.package.build"
 KNOWLEDGE_VALIDATE_COMMAND = "knowledge.package.validate"
 CONTEXT_ASSEMBLE_COMMAND = "context.assemble"
 CONTEXT_VALIDATE_COMMAND = "context.validate"
+MOVIE_BREAKDOWN_COMMAND = "movie.break-down-scenes"
+MOVIE_CONTEXT_COMMAND = "movie.context-assemble-scene-breakdown"
 
 
 def utc_now() -> str:
@@ -83,7 +86,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND}:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND, MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND}:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -93,6 +96,26 @@ class CommandRunner:
         payload = input_data if input_data is not None else {}
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
+        if command in {MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND}:
+            try:
+                if command == MOVIE_CONTEXT_COMMAND:
+                    if frozenset(payload) != {"request", "story"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie context input is invalid"])
+                    req, story = payload["request"], payload["story"]
+                    from vss_context import ContextAssembler
+                    context = ContextAssembler().assemble_scene_breakdown(story, request_id=req.get("request_id"), correlation_id=correlation, project_id=req.get("project_id"), environment=environment)
+                    from vss_movie_scene_breakdown import scene_context_report
+                    report=scene_context_report(context)
+                    return finish("success", ExitCode.SUCCESS, {"context": context.to_json_value(), "assembly_report": report, "context_digest": context.digest}, [])
+                if frozenset(payload) != {"request", "context"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie breakdown input is invalid"])
+                req, context = payload["request"], payload["context"]
+                gateway = self._reasoning_gateway
+                if gateway is None:
+                    from vss_reasoning.gateway import ReasoningGateway
+                    gateway = ReasoningGateway.built_in()
+                result = gateway.execute_scene_breakdown(req, context, environment=environment, correlation_id=correlation, dry_run=dry_run)
+                return finish("success", ExitCode.SUCCESS, result, [])
+            except Exception:
+                return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["movie scene breakdown failed"])
         if command == PERFORMANCE_COMMAND:
             from vss_performance import (
                 InvalidPerformanceProfile,

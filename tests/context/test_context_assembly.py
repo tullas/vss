@@ -25,6 +25,7 @@ class ContextAssemblyTests(unittest.TestCase):
         self.assertEqual({(item.identity, item.version) for item in first.registrations}, {
             ("context_assembly_request", "1"), ("context_object", "1"),
             ("generate_options_context", "1"), ("context_assembly_report", "1"),
+            ("scene_breakdown_context", "1"),
         })
         with self.assertRaises(ContextContractError):
             first.resolve("context_object", "2")

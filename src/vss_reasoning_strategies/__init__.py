@@ -1,3 +1,4 @@
 from .deterministic_generate_options import DeterministicGenerateOptionsStrategy
+from .deterministic_scene_breakdown import DeterministicSceneBreakdownStrategy
 
-__all__ = ["DeterministicGenerateOptionsStrategy"]
+__all__ = ["DeterministicGenerateOptionsStrategy", "DeterministicSceneBreakdownStrategy"]
