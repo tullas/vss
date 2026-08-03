@@ -492,6 +492,13 @@ class ReasoningGateway:
                 raise ReasoningUnavailable("movie strategy is not admitted")
             if context_data.get("correlation_id") != correlation_id or context_data.get("request_id") != request_id:
                 raise InvalidReasoningRequest("movie Context binding is invalid")
+            if context_data.get("context_family") != "scene_breakdown_context" or context_data.get("context_family_version") != "1" or context_data.get("semantic_task") != "break_down_scenes" or context_data.get("purpose") != "scene_breakdown_local_validation" or context_data.get("project_id") != request_data.get("project_id") or context_data.get("environment") != environment:
+                raise InvalidReasoningRequest("movie Context compatibility is invalid")
+            from vss_movie_scene_breakdown import validate_scene_context
+            validated_context = validate_scene_context(context_data)
+            context_digest = validated_context.digest
+            provider_digest = canonical_digest({"context_family": context_data["context_family"], "context_content_digest": context_data["context_content_digest"], "payload": context_data["payload"]})
+            invocation_digest = canonical_digest({"request_id": request_id, "request_digest": canonical_digest(request_data), "context_digest": context_digest, "provider_digest": provider_digest, "task": ["break_down_scenes", "1"], "result": ["scene_breakdown", "1"], "purpose": context_data["purpose"], "project": context_data["project_id"], "environment": environment, "strategy": [strategy.identity, strategy.version], "provider": ["vss.reasoning.deterministic-scene-breakdown", "1.0.0", "1"]})
             if dry_run:
                 from vss_movie_scene_breakdown import validate_scene_context
                 validate_scene_context(context_data)
@@ -500,7 +507,7 @@ class ReasoningGateway:
                 fixture_now = "2026-08-02T00:00:01Z" if context_data.get("constructed_at") == "2026-08-02T00:00:00Z" else None
                 output = strategy.execute(context_data, now=fixture_now)
                 calls = 1
-            record = {"event_type": "movie_scene_breakdown_readiness_completed" if dry_run else "movie_scene_breakdown_completed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "result_family": "scene_breakdown", "provider_call_count": calls, "status": "success", "duration_ms": max(0, int((self._clock() - started) * 1000))}
+            record = {"event_type": "movie_scene_breakdown_readiness_completed" if dry_run else "movie_scene_breakdown_completed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "result_family": "scene_breakdown", "provider_call_count": calls, "context_id": context_data["context_id"], "context_content_sha256": context_data["context_content_digest"], "complete_context_sha256": context_digest, "provider_context_sha256": provider_digest, "invocation_binding_sha256": invocation_digest, "result_sha256": None if dry_run else canonical_digest(output), "status": "success", "duration_ms": max(0, int((self._clock() - started) * 1000))}
             self._audit.append(record)
             return {"readiness": output} if dry_run else {"scene_breakdown": output, "result_digest": canonical_digest(output)}
         except Exception:
