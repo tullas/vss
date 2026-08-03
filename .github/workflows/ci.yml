@@ -71,6 +71,26 @@ jobs:
         run: |
           python -m unittest discover -s tests/knowledge -p 'test_*.py'
           vss knowledge package validate --input tests/fixtures/knowledge/knowledge-package-valid.json --environment development --correlation-id m3-4-ci-validation
+      - name: Test movie contract validation
+        run: python -m unittest discover -s tests/movie_contracts -p 'test_*.py'
+      - name: Validate deterministic movie contract fixtures
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          from pathlib import Path
+          from vss_movie_contracts import MovieContractRegistry, validate_story_fragment, validate_scene_breakdown, validate_scene_task
+          from vss_reasoning_contracts import load_json_document
+          root = Path.cwd()
+          def run():
+              registry = MovieContractRegistry.built_in()
+              story = validate_story_fragment(load_json_document((root / 'tests/fixtures/movie/story-fragment-valid.json').read_bytes()), registry)
+              breakdown = validate_scene_breakdown(load_json_document((root / 'tests/fixtures/movie/scene-breakdown-valid.json').read_bytes()), registry)
+              task = {'schema_version':'1','task_identity':'break_down_scenes','task_version':'1','result_family':'scene_breakdown','result_version':'1','project_id':'movie-lab','purpose':'scene_breakdown_local_validation','bounds':{'maximum_scenes':4},'lifecycle':'active'}
+              validate_scene_task(task, registry)
+              return registry.digest, story.digest, breakdown.digest
+          first = run(); second = run()
+          assert first == second
+          print('movie registry/story/scene digests:', *first)
+          PY
       - name: Test deterministic Context Assembly
         run: |
           python -m unittest discover -s tests/context -p 'test_*.py'

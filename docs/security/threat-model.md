@@ -216,3 +216,13 @@ before delivery. The provider receives only a bounded typed view and no package,
 source, registry, audit, or evidence-resolution capability. Invalid Context does
 not fall back to context-free reasoning. Persistent revocation, authenticated
 Context artifacts, durable audit, and process isolation remain deferred.
+### M4.1 movie contract threats
+
+The bounded movie registry, strict schemas, closed declarations, original
+fixtures, source/interpretation provenance categories, exact digests, and
+immutable models mitigate Movie God Objects, arbitrary annotations, source or
+fixture leakage, identity substitution, fabricated interpretation, and
+instruction-like story text. Rights and cultural qualifications remain claims
+requiring separate legal or human review; no provider, Context, parser,
+execution, or media capability exists in M4.1. Persistent revocation, durable
+audit, and production isolation remain deferred.
