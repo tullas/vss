@@ -214,6 +214,7 @@ class ReasoningGateway:
         dry_run: bool = False,
         timeout_seconds: float | None = None,
         context_data: dict[str, Any] | None = None,
+        revocations=None,
     ) -> ReasoningOutcome:
         started = self._clock()
         execution_id = uuid.uuid4().hex
@@ -269,6 +270,14 @@ class ReasoningGateway:
                     "context_content_digest": cv["context_content_digest"], "selected_notes": cv["payload"]["selected_notes"],
                     "evidence_references": cv["payload"]["evidence_references"], "conflicts": cv["payload"]["conflicts"],
                     "uncertainty": cv["payload"]["uncertainty"], "limitations": cv["payload"]["limitations"]}
+                snapshot = revocations or KnowledgeRevocationRegistry.built_in()
+                now = datetime.now(timezone.utc)
+                for note in provider_context["selected_notes"]:
+                    for target_type, target_id in (("item", note["item_id"]), ("source", note["provenance_references"][0])):
+                        record = snapshot.record(target_type, target_id)
+                        if record and datetime.strptime(record.revoked_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) <= now:
+                            failure = "context_revoked"
+                            raise InvalidReasoningRequest("reasoning context material is revoked")
                 context_digest = cv["context_content_digest"]
             strategy, provider = self._implementations.resolve()
 

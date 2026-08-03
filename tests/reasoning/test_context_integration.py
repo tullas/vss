@@ -4,6 +4,7 @@ from pathlib import Path
 
 from vss_reasoning.gateway import ReasoningGateway
 from vss_reasoning.errors import InvalidReasoningRequest
+from vss_knowledge_contracts.revocation import KnowledgeRevocationRegistry, RevocationRecord
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,6 +41,13 @@ class ContextReasoningIntegrationTests(unittest.TestCase):
         gateway = ReasoningGateway.built_in()
         outcome = gateway.execute(self.request, environment="development", correlation_id=self.request["correlation_id"])
         self.assertNotIn("context_qualification", {item["id"] for item in outcome.validated_result.value["payload"]["common_sections"]["limitations"]})
+
+    def test_current_revocation_is_checked_before_delivery(self):
+        revocations = KnowledgeRevocationRegistry((RevocationRecord(
+            target_identity="local-validation-principle", target_type="item",
+            reason_category="owner_request", revoked_at="2026-01-01T00:00:00Z"),))
+        with self.assertRaises(InvalidReasoningRequest):
+            ReasoningGateway.built_in().execute(self.request, environment="development", correlation_id=self.request["correlation_id"], context_data=self.context, revocations=revocations)
 
 
 if __name__ == "__main__":
