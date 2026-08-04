@@ -111,6 +111,10 @@ def _parser() -> argparse.ArgumentParser:
     movie_assemble.add_argument("--story", type=Path, required=True)
     movie_assemble.add_argument("--environment", required=True)
     movie_assemble.add_argument("--correlation-id", required=True)
+    movie_prod = movie_actions.add_parser("context-assemble-scene-production-options")
+    movie_prod.add_argument("--request", type=Path, required=True); movie_prod.add_argument("--scene-breakdown", type=Path, required=True); movie_prod.add_argument("--environment", required=True); movie_prod.add_argument("--correlation-id", required=True)
+    movie_gen = movie_actions.add_parser("generate-scene-production-options")
+    movie_gen.add_argument("--request", type=Path, required=True); movie_gen.add_argument("--context", type=Path, required=True); movie_gen.add_argument("--environment", required=True); movie_gen.add_argument("--correlation-id", required=True); movie_gen.add_argument("--dry-run",action="store_true")
     return parser
 
 
@@ -245,10 +249,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.action == "movie":
         request, input_error = _read_reasoning_input(args.request)
-        if args.movie_action == "break-down-scenes":
+        if args.movie_action in {"break-down-scenes","generate-scene-production-options"}:
             context, context_error = _read_context_file(args.context)
             input_error = input_error or context_error
             input_data = {"request": request, "context": context} if input_error is None else None
+        elif args.movie_action == "context-assemble-scene-production-options":
+            scene_breakdown, scene_error = _read_reasoning_input(args.scene_breakdown); input_error=input_error or scene_error
+            input_data={"request":request,"scene_breakdown":scene_breakdown} if input_error is None else None
         else:
             story, story_error = _read_reasoning_input(args.story)
             input_error = input_error or story_error
@@ -304,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.action == "context":
         command_name = f"context.{args.context_action}"
     elif args.action == "movie":
-        command_name = "movie.break-down-scenes" if args.movie_action == "break-down-scenes" else "movie.context-assemble-scene-breakdown"
+        command_name = {"break-down-scenes":"movie.break-down-scenes","context-assemble-scene-breakdown":"movie.context-assemble-scene-breakdown","context-assemble-scene-production-options":"movie.context-assemble-scene-production-options","generate-scene-production-options":"movie.generate-scene-production-options"}[args.movie_action]
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret

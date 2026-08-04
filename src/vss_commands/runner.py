@@ -26,6 +26,8 @@ CONTEXT_ASSEMBLE_COMMAND = "context.assemble"
 CONTEXT_VALIDATE_COMMAND = "context.validate"
 MOVIE_BREAKDOWN_COMMAND = "movie.break-down-scenes"
 MOVIE_CONTEXT_COMMAND = "movie.context-assemble-scene-breakdown"
+MOVIE_PROD_CONTEXT_COMMAND = "movie.context-assemble-scene-production-options"
+MOVIE_PROD_COMMAND = "movie.generate-scene-production-options"
 
 
 def utc_now() -> str:
@@ -86,7 +88,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND, MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND}:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND, MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND}:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -96,7 +98,7 @@ class CommandRunner:
         payload = input_data if input_data is not None else {}
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
-        if command in {MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND}:
+        if command in {MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND}:
             try:
                 if command == MOVIE_CONTEXT_COMMAND:
                     if frozenset(payload) != {"request", "story"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie context input is invalid"])
@@ -106,6 +108,17 @@ class CommandRunner:
                     from vss_movie_scene_breakdown import scene_context_report
                     report=scene_context_report(context)
                     return finish("success", ExitCode.SUCCESS, {"context": context.to_json_value(), "assembly_report": report, "context_digest": context.digest}, [])
+                if command == MOVIE_PROD_CONTEXT_COMMAND:
+                    from vss_movie_production_options import assemble_production_options_context
+                    req, breakdown=payload["request"],payload["scene_breakdown"]
+                    context=assemble_production_options_context(breakdown,request_id=req["request_id"],correlation_id=correlation,project_id=req["project_id"],scene_id=req["scene_id"],scene_content_digest=req["scene_content_digest"],environment=environment)
+                    return finish("success",ExitCode.SUCCESS,{"context":context.to_json_value(),"context_digest":context.digest},[])
+                if command == MOVIE_PROD_COMMAND:
+                    from vss_movie_production_options import generate_production_options, validate_production_options_context
+                    req, context=payload["request"],payload["context"]
+                    if req.get("correlation_id") != correlation or context.get("correlation_id") != correlation or context.get("request_id") != req.get("request_id"): return finish("error",ExitCode.INVALID_INPUT,{},["production request binding mismatch"])
+                    if dry_run: return finish("success",ExitCode.SUCCESS,{"ready":True,"provider_invoked":False},[])
+                    result=generate_production_options(validate_production_options_context(context)); return finish("success",ExitCode.SUCCESS,{"scene_production_option_set":result,"result_digest":canonical_digest(result)},[])
                 if frozenset(payload) != {"request", "context"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie breakdown input is invalid"])
                 req, context = payload["request"], payload["context"]
                 gateway = self._reasoning_gateway
