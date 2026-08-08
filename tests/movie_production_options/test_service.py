@@ -158,3 +158,22 @@ class ProductionOptionsTests(unittest.TestCase):
         self.assertEqual(len({r['semantic_result_digest'] for r in results}),1)
         self.assertEqual(len(self.audit.records),12)
         self.assertTrue(all(r['provider_call_count']==1 for r in self.audit.records))
+
+    def test_shared_gateway_isolates_m3_m42_m43_and_expiry_failure(self):
+        story=load('story-fragment-valid.json')
+        scene_context=assemble_scene_context(story,request_id='m4-2-request-001',correlation_id='m4-2-local-run',project_id=story['project_id'],validation_time='2026-08-02T00:00:00Z').to_json_value()
+        scene_request=load('break-down-scenes-request-runtime-valid.json')
+        semantic=load_json_document((ROOT/'tests/fixtures/reasoning/generate-options-runtime-valid.json').read_bytes())
+        expired=copy.deepcopy(self.context); expired['expires_at']=expired['constructed_at']; expired['integrity']['complete_context_sha256']=canonical_digest({**expired,'integrity':{}})
+        def invoke(kind):
+            if kind=='m3': return self.gateway.execute(semantic,environment='development',correlation_id=semantic['correlation_id']).content_digest
+            if kind=='m42': return self.gateway.execute_scene_breakdown(scene_request,scene_context,environment='development',correlation_id='m4-2-local-run')['result_digest']
+            if kind=='m43': return self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')['semantic_result_digest']
+            try: self.gateway.execute_scene_production_options(self.request,expired,environment='development',correlation_id='m4-3-local-run')
+            except InvalidReasoningRequest: return 'expired'
+            return 'false-success'
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            values=list(pool.map(invoke,['m3','m42','m43','expired']*4))
+        self.assertNotIn('false-success',values); self.assertEqual(values.count('expired'),4)
+        self.assertEqual(len(set(values[0::4])),1); self.assertEqual(len(set(values[1::4])),1); self.assertEqual(len(set(values[2::4])),1)
+        self.assertEqual(len(self.audit.records),16)

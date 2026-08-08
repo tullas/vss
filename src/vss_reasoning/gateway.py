@@ -478,7 +478,7 @@ class ReasoningGateway:
 
     def execute_scene_breakdown(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
         """Admit the bounded movie task through the existing Gateway boundary."""
-        started = self._clock(); execution_id = uuid.uuid4().hex; calls = 0
+        started = self._clock(); execution_id = uuid.uuid4().hex; calls = 0; audit_attempted = False
         request_id = request_data.get("request_id") if isinstance(request_data, dict) else None
         try:
             if type(correlation_id) is not str or not _CORRELATION_ID.fullmatch(correlation_id):
@@ -501,6 +501,8 @@ class ReasoningGateway:
             from vss_movie_scene_breakdown import MovieRevocationSnapshot, provider_view_from_context
             snapshot = revocations or MovieRevocationSnapshot.built_in()
             now = "2026-08-02T00:00:01Z" if context_data.get("constructed_at") == "2026-08-02T00:00:00Z" else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) >= datetime.strptime(context_data["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc):
+                raise InvalidReasoningRequest("movie Context is expired")
             source = context_data["payload"]["story_fragment"]
             revocation = snapshot.evaluate("story_fragment", source["fragment_id"], source["fragment_digest"], now)
             if revocation != "eligible": raise InvalidReasoningRequest("movie source is revoked")
@@ -515,9 +517,13 @@ class ReasoningGateway:
                 output = strategy.execute(context_data, now=fixture_now)
                 calls = 1
             record = {"event_type": "movie_scene_breakdown_readiness_completed" if dry_run else "movie_scene_breakdown_completed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "result_family": "scene_breakdown", "provider_call_count": calls, "context_id": context_data["context_id"], "context_content_sha256": context_data["context_content_digest"], "complete_context_sha256": context_digest, "provider_context_sha256": provider_digest, "invocation_binding_sha256": invocation_digest, "revocation_result": revocation, "result_sha256": None if dry_run else canonical_digest(output), "status": "success", "duration_ms": max(0, int((self._clock() - started) * 1000))}
+            audit_attempted = True
             self._audit.append(record)
             return {"readiness": output} if dry_run else {"scene_breakdown": output, "result_digest": canonical_digest(output)}
-        except Exception:
+        except Exception as exc:
+            if audit_attempted:
+                if isinstance(exc, ReasoningAuditFailure): raise
+                raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
             try:
                 self._audit.append({"event_type": "movie_scene_breakdown_failed", "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id, "task_identity": "break_down_scenes", "provider_call_count": calls, "status": "failed"})
             except Exception as audit_exc:
