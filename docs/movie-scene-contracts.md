@@ -47,6 +47,18 @@ Trusted Python remains in-process. Any future audit remains development-only;
 production rights verification, persistent revocation, isolation, and durable
 audit are deferred.
 
+## M5.1 character continuity contracts
+
+M5.1 adds six validation-only Movie contracts: `character_reference/1`,
+`character_identity/1`, `continuity_sequence/1`, `character_observation/1`,
+`analyze_character_continuity/1`, and
+`character_continuity_observation_set/1`. They do not change any M4 contract.
+The exact task/result compatibility is registered; the expected future
+`character_continuity_context/1` is named by the task but is not registered or
+implemented until M5.2. These artifacts are inert and provide no analysis,
+planning, approval, execution, or provider authority. See
+[Character Continuity Contracts](character-continuity-contracts.md).
+
 ### M4.1 precision notes
 
 The validated Story Fragment `digest` is the complete canonical digest of the
