@@ -204,7 +204,7 @@ class CommandRunner:
                     if dry_run:
                         return finish("success", ExitCode.SUCCESS, outcome, [])
                     return finish("success", ExitCode.SUCCESS, {"context": outcome.context.to_json_value(), "assembly_report": outcome.report.to_json_value(), "summary": dict(outcome.summary)}, [])
-                if payload.get("correlation_id") != correlation or payload.get("environment") != environment:
+                if payload.get("context_family") == "scene_production_options_context" and (payload.get("correlation_id") != correlation or payload.get("environment") != environment):
                     return finish("error", ExitCode.INVALID_INPUT, {}, ["context binding is invalid"])
                 validated = validate_context(payload, assembler.registry)
                 return finish("success", ExitCode.SUCCESS, {"valid": True, "summary": {"context_id": validated.value["context_id"], "context_content_digest": validated.value["context_content_digest"], "complete_context_digest": validated.digest}}, [])
