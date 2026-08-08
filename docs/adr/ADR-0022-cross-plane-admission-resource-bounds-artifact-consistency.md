@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -248,6 +248,11 @@ User-facing aliases such as `latest`, `approved`, `current`, or `hero-model`
 may exist for discovery. They must resolve before Runtime admission to an exact
 immutable logical identity, revision/version, and digest.
 
+Alias resolution is identification only. It grants no authorization, approval,
+classification change, purpose expansion, lifecycle eligibility, or artifact
+admission; Runtime and the owning artifact domain evaluate those constraints
+separately.
+
 ```text
 hero-model/current
   -> governed resolution before admission
@@ -332,7 +337,8 @@ Potential safe gates are:
 
 Not every operation uses every gate. Every future effectful long-running
 operation family declares applicable gates, validation obligations, failure
-behavior, and policy-owned frequency. Constant polling is not required.
+behavior, and bounded policy-owned frequency. Constant polling is not required,
+and a gate must not create an unbounded dependency on irrelevant domains.
 
 At applicable gates, validation may cover current authorization,
 cancellation, expiry, revocation, artifact identity/revision/digest,
@@ -431,10 +437,10 @@ approval. ADR-0022 defines no universal lineage schema.
 
 A technically successful output may remain ineligible when generated from a
 revoked or policy-superseded input, after authorization expiry or cancellation,
-by an incompatible worker, or with an invalid output contract/digest. It is
-quarantined, rejected, reconciled, or explicitly revalidated according to
-domain policy. Worker success never automatically creates an admitted
-production artifact.
+by an incompatible worker, with incomplete required lineage, or with an invalid
+output contract/digest. It is quarantined, rejected, reconciled, or explicitly
+revalidated according to domain policy. Worker success never automatically
+creates an admitted production artifact.
 
 ## Concurrency and scalability
 
@@ -531,6 +537,7 @@ bounded evidence and retain independent lifecycle meanings.
 | Cross-project substitution | exact project/purpose/classification and artifact scope | authenticated tenancy/storage isolation |
 | God Admission Object/global mutable state | federated intersection and immutable invocation snapshots | conformance automation |
 | Central Runtime data bottleneck | governed direct Data Plane transport | measured topology-specific transport controls |
+| Global synchronization outage/partition | exact immutable snapshots and local consumption verification; synchronized discovery is never correctness authority | distributed invalidation and offline-worker policy |
 
 Path traversal, unsafe file types, credential leakage, network exfiltration,
 worker isolation, cancellation enforcement, retries, and partial effects remain
