@@ -80,7 +80,19 @@ class ProductionOptionsTests(unittest.TestCase):
         self.assertFalse(exposed & {'context','assembly_report','policy','revocation','registry','schema','audit','runtime','workflow','path','file','connector','callback'})
         with self.assertRaises(Exception): view.scene_id='x'
         with self.assertRaises(Exception): view.source_observations[0]['text']='x'
-        with self.assertRaises(TypeError): DeterministicSceneProductionOptionsProvider().generate(self.context,{})
+        with self.assertRaises(TypeError): DeterministicSceneProductionOptionsProvider().generate(self.context)
+
+    def test_provider_receives_only_the_minimal_view(self):
+        observed=[]
+        original=DeterministicSceneProductionOptionsProvider.generate
+        def capture(provider, *args):
+            observed.append(args)
+            return original(provider, *args)
+        with patch.object(DeterministicSceneProductionOptionsProvider,'generate',autospec=True,side_effect=capture):
+            self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')
+        self.assertEqual(len(observed),1)
+        self.assertEqual(len(observed[0]),1)
+        self.assertIs(type(observed[0][0]),SceneProductionOptionsProviderView)
 
     def test_gateway_executes_once_validates_result_and_is_deterministic(self):
         with patch.object(DeterministicSceneProductionOptionsProvider,'generate',autospec=True,side_effect=DeterministicSceneProductionOptionsProvider.generate) as generate:
@@ -114,6 +126,24 @@ class ProductionOptionsTests(unittest.TestCase):
         for key in ('rank','recommended','workflow','prompt'):
             bad=copy.deepcopy(result); bad['payload']['options'][0][key]=True; bad['integrity']['payload_sha256']=canonical_digest(bad['payload']); bad['integrity']['complete_result_sha256']=canonical_digest({**bad,'integrity':{'payload_sha256':bad['integrity']['payload_sha256']}})
             with self.assertRaises(MovieContractError): validate_production_option_set(bad)
+
+    def test_result_rejects_affirmative_semantic_honesty_claims(self):
+        result=self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')['scene_production_option_set']
+        claims=('This option is best.','This option is feasible.','Cost is verified.','Performers are available.','Rights are cleared.','Conflicts are resolved.','Artistic intent is understood.')
+        for claim in claims:
+            bad=copy.deepcopy(result); bad['payload']['options'][0]['qualified_rationale']=claim
+            option=bad['payload']['options'][0]; material=dict(option); material.pop('option_content_digest'); material.pop('option_id'); option['option_content_digest']=canonical_digest(material)
+            bad['payload']['semantic_result_digest']=canonical_digest({**bad['payload'],'semantic_result_digest':None})
+            bad['integrity']['payload_sha256']=canonical_digest(bad['payload']); bad['integrity']['complete_result_sha256']=canonical_digest({**bad,'integrity':{'payload_sha256':bad['integrity']['payload_sha256']}})
+            with self.assertRaises(MovieContractError): validate_production_option_set(bad)
+
+    def test_context_assembly_rejects_revoked_scene(self):
+        snapshot=MovieRevocationSnapshot((MovieRevocation('scene',self.request['scene_id'],self.request['scene_content_digest'],'2026-08-02T00:00:00Z','test'),))
+        with patch.object(DeterministicSceneProductionOptionsProvider,'generate',autospec=True) as generate:
+            with self.assertRaises(Exception):
+                ContextAssembler(audit=self.audit).assemble_scene_production_options(self.request,self.breakdown,correlation_id='m4-3-local-run',environment='development',validation_time='2026-08-02T00:00:00Z',revocations=snapshot)
+            self.assertEqual(generate.call_count,0)
+        self.assertEqual(len(self.audit.records),1)
 
     def test_audit_is_bound_and_failure_is_fatal(self):
         self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')

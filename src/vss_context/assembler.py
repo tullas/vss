@@ -203,16 +203,26 @@ class ContextAssembler:
         from vss_movie_scene_breakdown import assemble_scene_context
         return assemble_scene_context(story, request_id=request_id, correlation_id=correlation_id, project_id=project_id, environment=environment, validation_time=validation_time)
 
-    def assemble_scene_production_options(self, request_value: dict[str, Any], scene_breakdown: dict[str, Any], *, correlation_id: str, environment: str, validation_time: str | None = None) -> Any:
+    def assemble_scene_production_options(self, request_value: dict[str, Any], scene_breakdown: dict[str, Any], *, correlation_id: str, environment: str, validation_time: str | None = None, revocations=None) -> Any:
         """Assemble one scene-specific production Context and one terminal safe audit."""
         started = time.monotonic(); request = request_value if isinstance(request_value, dict) else {}; context = None; report = None; audit_attempted = False
         try:
-            from vss_movie_contracts import validate_production_options_task
-            from vss_movie_production_options import assemble_production_options_context, production_context_report
+            from vss_movie_contracts import validate_production_options_task, validate_scene_breakdown
+            from vss_movie_production_options import ProductionProfileCatalogue, assemble_production_options_context, production_context_report
+            from vss_movie_scene_breakdown import MovieRevocationSnapshot
             task = validate_production_options_task(request).to_json_value()
             if task["correlation_id"] != correlation_id or task["environment"] != environment:
                 raise ContextPolicyDenied("production Context request binding is invalid")
-            context = assemble_production_options_context(scene_breakdown, request_id=task["request_id"], correlation_id=correlation_id, project_id=task["project_id"], scene_id=task["scene_id"], scene_content_digest=task["scene_content_digest"], environment=environment, validation_time=validation_time)
+            breakdown = validate_scene_breakdown(scene_breakdown)
+            if breakdown.digest != task["scene_breakdown_digest"]:
+                raise ContextPackageFailure("Scene Breakdown digest mismatch")
+            construction_time = validation_time or _iso(datetime.now(timezone.utc).replace(microsecond=0))
+            catalogue = ProductionProfileCatalogue.built_in()
+            snapshot = revocations or MovieRevocationSnapshot.built_in()
+            for target_type, target_id, digest in (("scene_breakdown","scene_breakdown",breakdown.digest),("scene",task["scene_id"],task["scene_content_digest"]),("profile_catalogue",catalogue.identity,catalogue.digest),("policy","scene_production_options_context_local",None)):
+                if snapshot.evaluate(target_type,target_id,digest,construction_time) != "eligible":
+                    raise ContextPolicyDenied("production Context material is revoked")
+            context = assemble_production_options_context(breakdown.to_json_value(), request_id=task["request_id"], correlation_id=correlation_id, project_id=task["project_id"], scene_id=task["scene_id"], scene_content_digest=task["scene_content_digest"], environment=environment, validation_time=construction_time)
             if context.value["payload"]["scene_breakdown_digest"] != task["scene_breakdown_digest"]:
                 raise ContextPackageFailure("Scene Breakdown digest mismatch")
             report = production_context_report(context)

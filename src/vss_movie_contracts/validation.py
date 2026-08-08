@@ -86,9 +86,30 @@ def validate_production_option_set(value, registry=None):
         elif isinstance(node, (list, tuple)):
             for child in node: reject(child)
     reject(data)
+    affirmative_claims = (
+        r"\b(?:is|are|was|were)\s+(?:the\s+)?(?:best|recommended|preferred|selected|feasible)\b",
+        r"\b(?:cost|duration)\s+(?:is|was)\s+verified\b",
+        r"\bquality\s+(?:is|was)\s+guaranteed\b",
+        r"\b(?:performers?|locations?|assets?)\s+(?:are|were)\s+available\b",
+        r"\b(?:rights?|permits?)\s+(?:are|were)\s+cleared\b",
+        r"\b(?:conflicts?|ambiguity)\s+(?:is|are|was|were)\s+resolved\b",
+        r"\bartistic intent\s+(?:is|was)\s+(?:understood|known)\b",
+    )
+    honesty_fields = (
+        "qualified_rationale", "source_supported_considerations",
+        "rule_derived_considerations", "assumptions", "unknowns", "conflicts",
+        "limitations", "external_validation_requirements",
+    )
+    def strings(node):
+        if isinstance(node, str): yield node
+        elif isinstance(node, (list, tuple)):
+            for child in node: yield from strings(child)
     for option in options:
         material = dict(option); digest = material.pop("option_content_digest"); material.pop("option_id")
         if digest != canonical_digest(material): raise MovieContractError("production option content digest mismatch")
         if not option["unknowns"] or not option["limitations"] or not option["external_validation_requirements"]:
             raise MovieContractError("production option qualifications are incomplete")
+        text = " ".join(text for field in honesty_fields for text in strings(option[field])).lower()
+        if any(re.search(pattern, text) for pattern in affirmative_claims):
+            raise MovieContractError("production option makes a prohibited semantic claim")
     return result
