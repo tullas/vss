@@ -1,6 +1,6 @@
 from .service import (
-    ProductionProfile, ProductionProfileCatalogue, SceneProductionOptionsContext,
+    ProductionProfile, ProductionProfileCatalogue, SceneProductionOptionsContext, SceneProductionOptionsProviderView,
     assemble_production_options_context, validate_production_options_context,
-    generate_production_options, production_provider_view,
+    generate_production_options, production_provider_view, production_context_report, create_production_option_candidates, create_production_option_set,
 )
-__all__=["ProductionProfile","ProductionProfileCatalogue","SceneProductionOptionsContext","assemble_production_options_context","validate_production_options_context","generate_production_options","production_provider_view"]
+__all__=["ProductionProfile","ProductionProfileCatalogue","SceneProductionOptionsContext","SceneProductionOptionsProviderView","assemble_production_options_context","validate_production_options_context","generate_production_options","production_provider_view","production_context_report","create_production_option_candidates","create_production_option_set"]

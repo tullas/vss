@@ -8,7 +8,13 @@ from .models import MovieRegistration
 from vss_reasoning_contracts.canonicalization import freeze_json
 
 ROOT = Path(__file__).resolve().parents[2] / "schemas"
-FILES = MappingProxyType({"story_fragment/1":"story-fragment-v1.schema.json", "break_down_scenes/1":"break-down-scenes-task-v1.schema.json", "scene_breakdown/1":"scene-breakdown-v1.schema.json"})
+FILES = MappingProxyType({
+    "story_fragment/1":"story-fragment-v1.schema.json",
+    "break_down_scenes/1":"break-down-scenes-task-v1.schema.json",
+    "scene_breakdown/1":"scene-breakdown-v1.schema.json",
+    "generate_scene_production_options/1":"generate-scene-production-options-task-v1.schema.json",
+    "scene_production_option_set/1":"scene-production-option-set-v1.schema.json",
+})
 def _pairs(pairs):
     out={}
     for k,v in pairs:

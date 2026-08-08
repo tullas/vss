@@ -24,6 +24,7 @@ _FILES = MappingProxyType({
     "vss.context_object/1": "context-object-v1.schema.json",
     "vss.generate_options_context/1": "generate-options-context-v1.schema.json",
     "vss.scene_breakdown_context/1": "scene-breakdown-context-v1.schema.json",
+    "vss.scene_production_options_context/1": "scene-production-options-context-v1.schema.json",
     "vss.context_assembly_report/1": "context-assembly-report-v1.schema.json",
 })
 
@@ -101,6 +102,7 @@ class ContextContractRegistry:
             ContextRegistration("context_object", "1", "vss.context_object/1"),
             ContextRegistration("generate_options_context", "1", "vss.generate_options_context/1"),
             ContextRegistration("scene_breakdown_context", "1", "vss.scene_breakdown_context/1"),
+            ContextRegistration("scene_production_options_context", "1", "vss.scene_production_options_context/1"),
             ContextRegistration("context_assembly_report", "1", "vss.context_assembly_report/1"),
         )
         registrations = self.registrations or expected
@@ -112,7 +114,7 @@ class ContextContractRegistry:
         object.__setattr__(self, "digest", canonical_digest({
             "registrations": [r.__dict__ if hasattr(r, "__dict__") else {name: getattr(r, name) for name in r.__dataclass_fields__} for r in registrations],
             "schemas": {key: schemas[key].sha256 for key in sorted(schemas)},
-            "compatibility": {"generate_options/1": {"context": "generate_options_context/1", "knowledge": "knowledge_package/1", "item": "reference_note/1", "purpose": "local_validation_context"}},
+            "compatibility": dict(self.compatibility()),
         }))
 
     @classmethod
@@ -145,4 +147,15 @@ class ContextContractRegistry:
             "scene_breakdown_policy": "scene_breakdown_context_local/1",
             "scene_breakdown_strategy": "vss.break-down-scenes.deterministic/1.0.0",
             "scene_breakdown_provider": "vss.reasoning.deterministic-scene-breakdown/1.0.0",
+            "production_input_result": "scene_breakdown/1",
+            "production_context": "scene_production_options_context/1",
+            "production_task": "generate_scene_production_options/1",
+            "production_result": "scene_production_option_set/1",
+            "production_purpose": "scene_production_options_local_validation",
+            "production_environment": "development",
+            "production_policy": "scene_production_options_context_local/1",
+            "production_catalogue": "vss.scene-production-profiles.deterministic/1.0.0",
+            "production_strategy": "vss.generate-scene-production-options.deterministic/1.0.0",
+            "production_provider": "vss.reasoning.deterministic-scene-production-options/1.0.0",
+            "production_provider_api": "1",
         })

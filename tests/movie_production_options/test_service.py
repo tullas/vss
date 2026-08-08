@@ -1,18 +1,160 @@
-import json, unittest
+import copy
+import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from vss_movie_scene_breakdown import assemble_scene_context, break_down_scenes
+from unittest.mock import patch
+
+from vss_context import ContextAssembler
+from vss_context_contracts import ContextContractRegistry, validate_context
+from vss_movie_contracts import MovieContractRegistry, validate_production_option_set, validate_production_options_task
+from vss_movie_contracts.errors import MovieContractError
 from vss_movie_production_options import *
-from vss_reasoning_contracts import load_json_document
+from vss_movie_scene_breakdown import MovieRevocation, MovieRevocationSnapshot, assemble_scene_context, break_down_scenes
+from vss_reasoning import InvalidReasoningRequest, ReasoningAuditFailure
+from vss_reasoning.gateway import ReasoningGateway
+from vss_reasoning.registry import ReasoningImplementationRegistry
+from vss_reasoning_contracts import canonical_digest, load_json_document
+from vss_reasoning_providers import DeterministicSceneProductionOptionsProvider
+
 ROOT=Path(__file__).resolve().parents[2]
+def load(name): return load_json_document((ROOT/'tests/fixtures/movie'/name).read_bytes())
+
+class Audit:
+    def __init__(self, fail=False): self.records=[]; self.fail=fail
+    def append(self, record):
+        if self.fail: raise RuntimeError("unavailable")
+        self.records.append(record)
+
 class ProductionOptionsTests(unittest.TestCase):
     def setUp(self):
-        story=load_json_document((ROOT/'tests/fixtures/movie/story-fragment-valid.json').read_bytes()); c=assemble_scene_context(story,request_id='r',correlation_id='c',project_id=story['project_id'],validation_time='2026-08-02T00:00:00Z'); b=break_down_scenes(c,now='2026-08-02T00:00:01Z'); s=b['payload']['ordered_scenes'][0]; self.ctx=assemble_production_options_context(b,request_id='p',correlation_id='c',project_id=story['project_id'],scene_id=s['scene_id'],scene_content_digest=s['scene_content_digest'],validation_time='2026-08-02T00:00:00Z')
-    def test_options_are_stable_and_not_ranked(self):
-        a=generate_production_options(self.ctx); b=generate_production_options(self.ctx); self.assertEqual(a,b); self.assertEqual([x['ordinal'] for x in a['payload']['options']],[1,2,3,4]); self.assertNotIn('recommended_option',a['payload'])
-    def test_view_is_immutable_and_scene_selection_exact(self):
-        view=production_provider_view(self.ctx)
-        with self.assertRaises(TypeError): view['scene_id']='x'
-        bad=json.loads(json.dumps(self.ctx.to_json_value())); bad['payload']['scene_id']='unknown'; bad['integrity']['complete_context_sha256']='0'*64
-        with self.assertRaises(ValueError): validate_production_options_context(bad)
-    def test_profile_catalogue_is_stable(self):
-        a=ProductionProfileCatalogue.built_in(); b=ProductionProfileCatalogue.built_in(); self.assertEqual(a.digest,b.digest); self.assertEqual([p.identity for p in a.profiles],['minimal_stage','location_live_action','stylized_2d','stylized_3d'])
+        self.request=load('generate-scene-production-options-request-valid.json')
+        self.context=load('scene-production-options-context-valid.json')
+        self.breakdown=load('scene-breakdown-valid.json')
+        self.audit=Audit()
+        self.gateway=ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(),audit=self.audit)
+
+    def test_registries_are_exact_immutable_and_deterministic(self):
+        movie=MovieContractRegistry.built_in(); context=ContextContractRegistry.built_in()
+        self.assertEqual(movie.digest,MovieContractRegistry.built_in().digest)
+        self.assertIn('generate_scene_production_options/1',{r.identity for r in movie.registrations})
+        self.assertIn('scene_production_option_set/1',{r.identity for r in movie.registrations})
+        self.assertEqual(context.resolve('scene_production_options_context','1').schema_identity,'vss.scene_production_options_context/1')
+        self.assertEqual(context.digest,ContextContractRegistry.built_in().digest)
+        with self.assertRaises(Exception): context.registrations[0].identity='x'
+
+    def test_task_is_strict_and_rejects_policy_overrides(self):
+        validate_production_options_task(self.request)
+        for key in ('rank','provider','model','prompt','metadata','selected'):
+            bad=copy.deepcopy(self.request); bad[key]=True
+            with self.assertRaises(MovieContractError): validate_production_options_task(bad)
+
+    def test_context_generic_validation_and_exact_scene_binding(self):
+        validated=validate_context(self.context,ContextContractRegistry.built_in())
+        self.assertEqual(validated.value['payload']['selected_scene_id'],self.request['scene_id'])
+        bad=copy.deepcopy(self.context); bad['payload']['selected_scene_digest']='0'*64; bad['context_content_digest']=canonical_digest(bad['payload']); bad['integrity']['complete_context_sha256']=canonical_digest({**bad,'integrity':{}})
+        with self.assertRaises(Exception): validate_context(bad,ContextContractRegistry.built_in())
+
+    def test_assembly_preserves_qualifications_and_generates_no_options(self):
+        outcome=ContextAssembler(audit=self.audit).assemble_scene_production_options(self.request,self.breakdown,correlation_id='m4-3-local-run',environment='development',validation_time='2026-08-02T00:00:00Z')
+        self.assertNotIn('options',outcome.context.value['payload'])
+        self.assertTrue(outcome.context.value['payload']['ambiguity'])
+        self.assertTrue(outcome.context.value['payload']['unknowns'])
+        self.assertEqual(outcome.report['status'],'success')
+        self.assertEqual(len(self.audit.records),1)
+
+    def test_unknown_scene_and_digest_substitution_are_rejected(self):
+        for scene_id,digest in (('unknown',self.request['scene_content_digest']),(self.request['scene_id'],'0'*64)):
+            with self.assertRaises(ValueError): assemble_production_options_context(self.breakdown,request_id='r',correlation_id='c',project_id='movie-local',scene_id=scene_id,scene_content_digest=digest,validation_time='2026-08-02T00:00:00Z')
+
+    def test_catalogue_is_frozen_complete_stable_and_nonranking(self):
+        a=ProductionProfileCatalogue.built_in(); b=ProductionProfileCatalogue.built_in()
+        self.assertEqual(a.digest,b.digest); self.assertEqual([p.ordinal for p in a.profiles],[1,2,3,4])
+        self.assertEqual([p.identity for p in a.profiles],['minimal_stage','location_live_action','stylized_2d','stylized_3d'])
+        self.assertTrue(all(p.mandatory_unknowns and p.mandatory_external_validation and p.mandatory_limitations for p in a.profiles))
+        self.assertFalse(any({'vendor','rank','score','recommended','selected'} & set(p.material()) for p in a.profiles))
+        with self.assertRaises(Exception): a.profiles += (a.profiles[0],)
+
+    def test_provider_view_is_deeply_immutable_and_structurally_isolated(self):
+        view=production_provider_view(self.context)
+        exposed={field for field in view.__dataclass_fields__}
+        self.assertFalse(exposed & {'context','assembly_report','policy','revocation','registry','schema','audit','runtime','workflow','path','file','connector','callback'})
+        with self.assertRaises(Exception): view.scene_id='x'
+        with self.assertRaises(Exception): view.source_observations[0]['text']='x'
+        with self.assertRaises(TypeError): DeterministicSceneProductionOptionsProvider().generate(self.context)
+
+    def test_provider_receives_only_the_minimal_view(self):
+        observed=[]
+        original=DeterministicSceneProductionOptionsProvider.generate
+        def capture(provider, *args):
+            observed.append(args)
+            return original(provider, *args)
+        with patch.object(DeterministicSceneProductionOptionsProvider,'generate',autospec=True,side_effect=capture):
+            self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')
+        self.assertEqual(len(observed),1)
+        self.assertEqual(len(observed[0]),1)
+        self.assertIs(type(observed[0][0]),SceneProductionOptionsProviderView)
+
+    def test_gateway_executes_once_validates_result_and_is_deterministic(self):
+        with patch.object(DeterministicSceneProductionOptionsProvider,'generate',autospec=True,side_effect=DeterministicSceneProductionOptionsProvider.generate) as generate:
+            first=self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')
+            self.assertEqual(generate.call_count,1)
+        second=self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')
+        self.assertEqual(first['semantic_result_digest'],second['semantic_result_digest'])
+        self.assertEqual([o['ordinal'] for o in first['scene_production_option_set']['payload']['options']],[1,2,3,4])
+        self.assertEqual(first['provider_call_count'],1); validate_production_option_set(first['scene_production_option_set'])
+        self.assertTrue(first['scene_production_option_set']['payload']['stable_order_is_not_ranking'])
+
+    def test_dry_run_completes_binding_and_calls_zero_providers(self):
+        with patch.object(DeterministicSceneProductionOptionsProvider,'generate',autospec=True) as generate:
+            result=self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run',dry_run=True)
+            self.assertEqual(generate.call_count,0)
+        self.assertEqual(result['readiness']['provider_call_count'],0); self.assertIsNone(result['readiness']['result_digest'])
+        self.assertRegex(result['readiness']['invocation_binding_digest'],r'^[0-9a-f]{64}$')
+
+    def test_invalid_expired_and_revoked_contexts_make_zero_calls(self):
+        cases=[]
+        invalid=copy.deepcopy(self.context); invalid['payload']['selected_scene_id']='substitute'; cases.append((invalid,None))
+        expired=copy.deepcopy(self.context); expired['expires_at']=expired['constructed_at']; expired['integrity']['complete_context_sha256']=canonical_digest({**expired,'integrity':{}}); cases.append((expired,None))
+        rev=MovieRevocationSnapshot((MovieRevocation('scene',self.request['scene_id'],self.request['scene_content_digest'],'2026-08-02T00:00:01Z','test'),)); cases.append((self.context,rev))
+        with patch.object(DeterministicSceneProductionOptionsProvider,'generate',autospec=True) as generate:
+            for value,snapshot in cases:
+                with self.assertRaises(InvalidReasoningRequest): self.gateway.execute_scene_production_options(self.request,value,environment='development',correlation_id='m4-3-local-run',revocations=snapshot)
+            self.assertEqual(generate.call_count,0)
+
+    def test_result_rejects_hidden_ranking_and_execution_fields(self):
+        result=self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')['scene_production_option_set']
+        for key in ('rank','recommended','workflow','prompt'):
+            bad=copy.deepcopy(result); bad['payload']['options'][0][key]=True; bad['integrity']['payload_sha256']=canonical_digest(bad['payload']); bad['integrity']['complete_result_sha256']=canonical_digest({**bad,'integrity':{'payload_sha256':bad['integrity']['payload_sha256']}})
+            with self.assertRaises(MovieContractError): validate_production_option_set(bad)
+
+    def test_result_rejects_affirmative_semantic_honesty_claims(self):
+        result=self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')['scene_production_option_set']
+        claims=('This option is best.','This option is feasible.','Cost is verified.','Performers are available.','Rights are cleared.','Conflicts are resolved.','Artistic intent is understood.')
+        for claim in claims:
+            bad=copy.deepcopy(result); bad['payload']['options'][0]['qualified_rationale']=claim
+            option=bad['payload']['options'][0]; material=dict(option); material.pop('option_content_digest'); material.pop('option_id'); option['option_content_digest']=canonical_digest(material)
+            bad['payload']['semantic_result_digest']=canonical_digest({**bad['payload'],'semantic_result_digest':None})
+            bad['integrity']['payload_sha256']=canonical_digest(bad['payload']); bad['integrity']['complete_result_sha256']=canonical_digest({**bad,'integrity':{'payload_sha256':bad['integrity']['payload_sha256']}})
+            with self.assertRaises(MovieContractError): validate_production_option_set(bad)
+
+    def test_context_assembly_rejects_revoked_scene(self):
+        snapshot=MovieRevocationSnapshot((MovieRevocation('scene',self.request['scene_id'],self.request['scene_content_digest'],'2026-08-02T00:00:00Z','test'),))
+        with patch.object(DeterministicSceneProductionOptionsProvider,'generate',autospec=True) as generate:
+            with self.assertRaises(Exception):
+                ContextAssembler(audit=self.audit).assemble_scene_production_options(self.request,self.breakdown,correlation_id='m4-3-local-run',environment='development',validation_time='2026-08-02T00:00:00Z',revocations=snapshot)
+            self.assertEqual(generate.call_count,0)
+        self.assertEqual(len(self.audit.records),1)
+
+    def test_audit_is_bound_and_failure_is_fatal(self):
+        self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')
+        record=self.audit.records[-1]
+        for key in ('scene_breakdown_digest','scene_id','context_content_digest','provider_visible_digest','invocation_binding_digest','provider_call_count','revocation_result','result_digest'): self.assertIsNotNone(record[key])
+        failing=ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(),audit=Audit(fail=True))
+        with self.assertRaises(ReasoningAuditFailure): failing.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run')
+
+    def test_concurrent_requests_do_not_contaminate_results_or_audit(self):
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results=list(pool.map(lambda _: self.gateway.execute_scene_production_options(self.request,self.context,environment='development',correlation_id='m4-3-local-run'),range(12)))
+        self.assertEqual(len({r['semantic_result_digest'] for r in results}),1)
+        self.assertEqual(len(self.audit.records),12)
+        self.assertTrue(all(r['provider_call_count']==1 for r in self.audit.records))

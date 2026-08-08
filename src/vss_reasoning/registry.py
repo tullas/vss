@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from vss_reasoning_contracts import canonical_digest
 
 from vss_reasoning_providers import BuiltinDeterministicOptionsProvider, DeterministicOptionsProvider
 from vss_reasoning_strategies import DeterministicGenerateOptionsStrategy
 
 from .errors import ReasoningUnavailable
 from .models import ImplementationIdentity
+from vss_reasoning_providers import DeterministicSceneProductionOptionsProvider
+from vss_reasoning_strategies import DeterministicSceneProductionOptionsStrategy
 
 STRATEGY_IDENTITY = ImplementationIdentity(
     "vss.generate-options.deterministic", "1.0.0", "1", "active", "trusted_builtin"
@@ -62,3 +65,21 @@ class ReasoningImplementationRegistry:
                 "trust": self.provider_identity.trust,
             },
         }
+
+@dataclass(frozen=True, slots=True)
+class SceneProductionOptionsImplementationRegistry:
+    strategy: DeterministicSceneProductionOptionsStrategy
+    provider: DeterministicSceneProductionOptionsProvider
+    @classmethod
+    def built_in(cls):
+        return cls(DeterministicSceneProductionOptionsStrategy(), DeterministicSceneProductionOptionsProvider())
+    def resolve(self):
+        if type(self.strategy) is not DeterministicSceneProductionOptionsStrategy or type(self.provider) is not DeterministicSceneProductionOptionsProvider:
+            raise ReasoningUnavailable("production-options implementation substitution rejected")
+        expected = ("vss.generate-scene-production-options.deterministic","1.0.0","vss.reasoning.deterministic-scene-production-options","1.0.0","1")
+        actual = (self.strategy.identity,self.strategy.version,self.provider.identity,self.provider.version,self.provider.api_version)
+        if actual != expected: raise ReasoningUnavailable("production-options implementation is incompatible")
+        return self.strategy, self.provider
+    @property
+    def digest(self):
+        return canonical_digest({"strategy":[self.strategy.identity,self.strategy.version],"provider":[self.provider.identity,self.provider.version,self.provider.api_version],"calls":1,"iterations":1,"retry":False,"fallback":False,"ranking":False})
