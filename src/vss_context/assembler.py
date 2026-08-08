@@ -199,9 +199,23 @@ class ContextAssembler:
             raise
 
     def assemble_scene_breakdown(self, story: dict[str, Any], *, request_id: str, correlation_id: str, project_id: str, environment: str, validation_time: str | None = None) -> Any:
-        """Movie-specific Context admission routed through the Context layer."""
-        from vss_movie_scene_breakdown import assemble_scene_context
-        return assemble_scene_context(story, request_id=request_id, correlation_id=correlation_id, project_id=project_id, environment=environment, validation_time=validation_time)
+        """Movie-specific Context admission with one terminal safe audit attempt."""
+        started = time.monotonic(); audit_attempted = False
+        try:
+            from vss_movie_scene_breakdown import assemble_scene_context, scene_context_report
+            context = assemble_scene_context(story, request_id=request_id, correlation_id=correlation_id, project_id=project_id, environment=environment, validation_time=validation_time)
+            report = scene_context_report(context)
+            audit_attempted = True
+            self._audit_sink.append({"event_type":"scene_breakdown_context_assembly_completed","recorded_at":_iso(datetime.now(timezone.utc)),"assembly_execution_id":uuid.uuid4().hex,"correlation_id":correlation_id,"request_id":request_id,"project_id":project_id,"environment":environment,"purpose":"scene_breakdown_local_validation","story_fragment_id":report["story_fragment_id"],"story_fragment_digest":report["story_fragment_digest"],"context_identity":"scene_breakdown_context/1","context_content_digest":report["context_content_digest"],"complete_context_digest":report["complete_context_digest"],"rule_catalogue":report["rule_catalogue"],"report_digest":report["report_digest"],"status":"success","exit_code":0,"duration_ms":max(0,int((time.monotonic()-started)*1000))})
+            return context
+        except Exception:
+            if audit_attempted:
+                raise ContextAuditFailure("context audit failed")
+            try:
+                self._audit_sink.append({"event_type":"scene_breakdown_context_assembly_failed","recorded_at":_iso(datetime.now(timezone.utc)),"assembly_execution_id":uuid.uuid4().hex,"correlation_id":correlation_id,"request_id":request_id,"project_id":project_id,"environment":environment,"purpose":"scene_breakdown_local_validation","context_identity":"scene_breakdown_context/1","status":"failed","exit_code":1,"duration_ms":max(0,int((time.monotonic()-started)*1000))})
+            except Exception as audit_exc:
+                raise ContextAuditFailure("context audit failed") from audit_exc
+            raise
 
     def assemble_scene_production_options(self, request_value: dict[str, Any], scene_breakdown: dict[str, Any], *, correlation_id: str, environment: str, validation_time: str | None = None, revocations=None) -> Any:
         """Assemble one scene-specific production Context and one terminal safe audit."""
