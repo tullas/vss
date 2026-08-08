@@ -237,3 +237,39 @@ it is not artistic or historical truth. The provider receives no package,
 filesystem, network, Runtime, capability, workflow, or audit handle. Advanced
 screenplay parsing, persistent revocation, rights verification, cultural expert
 review, process isolation, production options, and Plan IR remain deferred.
+
+## M4.3 governed production-options boundary
+
+M4.3 treats every option as an inert alternative, never a plan, ranking,
+recommendation, selection, approval, or executable instruction. Strict schemas
+and recursive field rejection prevent hidden ranking, winner, workflow,
+capability, model, prompt, and execution fields. Catalogue order is explicitly
+labelled non-ranking.
+
+Exact breakdown, scene ID/content digest, Context, catalogue, policy,
+strategy/provider/API, option-content, payload, semantic-result, and
+complete-result bindings mitigate scene, Context, catalogue/profile, option,
+and result substitution. Purpose expansion, classification downgrade, trust
+promotion, invalid-Context fallback, excessive option generation, and mutation
+after validation fail closed. Expiry and current revocation are checked
+immediately before the sole provider call; pre-provider failure has zero calls
+and no retry or fallback.
+
+The Gateway-owned provider view limits overexposure and contains no full
+Context/breakdown, report, policy object, revocation snapshot, registry, schema,
+audit, Runtime, capability, workflow, path, file, connector, callback, network,
+subprocess, approval, or execution object. Rights and cultural values remain
+qualified claims, never clearance or authority. Ambiguity, conflicts, unknowns,
+limitations, and external-validation requirements cannot be suppressed.
+Independent semantic-honesty checks reject fabricated feasibility, verified
+cost/duration, guaranteed quality, availability, clearance, conflict
+resolution, or artistic understanding. Safe audit metadata excludes scene and
+option bodies; audit failure prevents false success. CommandRunner only loads
+bounded files and routes calls, preventing policy drift.
+
+Implemented here are local structural contracts, Context/reasoning audit
+association, deterministic in-process provider isolation by interface, and
+known-empty local revocation. Deferred are ranking, selection, approval, Plan
+IR, execution, scheduling, budgeting, external AI, media generation, durable
+audit, persistent revocation, and process isolation. Local JSONL is
+development-only and trusted Python remains in-process.

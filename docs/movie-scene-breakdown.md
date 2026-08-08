@@ -29,4 +29,5 @@ are routing-only CLI commands. Dry-run validates readiness and invokes zero
 providers. There is no external AI, prompt, screenplay parser, production
 option, Plan IR, approval, execution, media generation, or production audit.
 Local JSONL audit remains development-only where applicable. M4.3 owns scene
-production options.
+production options through an independently validated exact scene ID/digest
+binding; it does not reinterpret or mutate Scene Breakdown.

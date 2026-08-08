@@ -1,58 +1,191 @@
-from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
-from vss_reasoning_contracts import canonical_digest, canonical_bytes
-from vss_reasoning_contracts.canonicalization import freeze_json, thaw_json
-from vss_movie_contracts import MovieContractRegistry, validate_scene_breakdown
+from __future__ import annotations
 
-POLICY="scene_production_options_context_local/1"; CATALOGUE="vss.scene-production-profiles.deterministic/1.0.0"
-PROFILES=("minimal_stage","location_live_action","stylized_2d","stylized_3d")
-@dataclass(frozen=True,slots=True)
+import hashlib
+from dataclasses import dataclass, fields
+from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
+from typing import Any
+
+from jsonschema import Draft202012Validator
+
+from vss_context_contracts import ContextContractRegistry
+from vss_movie_contracts import MovieContractRegistry, validate_production_option_set, validate_scene_breakdown
+from vss_reasoning_contracts import canonical_bytes, canonical_digest
+from vss_reasoning_contracts.canonicalization import freeze_json, thaw_json, validate_json_value
+
+POLICY_IDENTITY = "scene_production_options_context_local"
+POLICY_VERSION = "1"
+POLICY = f"{POLICY_IDENTITY}/{POLICY_VERSION}"
+CATALOGUE_IDENTITY = "vss.scene-production-profiles.deterministic"
+CATALOGUE_VERSION = "1.0.0"
+CATALOGUE = f"{CATALOGUE_IDENTITY}/{CATALOGUE_VERSION}"
+STRATEGY_IDENTITY = "vss.generate-scene-production-options.deterministic"
+STRATEGY_VERSION = "1.0.0"
+PROVIDER_IDENTITY = "vss.reasoning.deterministic-scene-production-options"
+PROVIDER_VERSION = "1.0.0"
+PROVIDER_API_VERSION = "1"
+MAX_CONTEXT_BYTES = 32768
+
+def _ts(value: str) -> datetime:
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+def _iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+@dataclass(frozen=True, slots=True)
 class ProductionProfile:
-    identity:str; version:str; approach:str; complexity:str; limitations:tuple
+    identity: str
+    version: str
+    ordinal: int
+    approach_category: str
+    complexity_qualification: str
+    performer_implications: tuple[str, ...]
+    location_implications: str
+    asset_implications: tuple[str, ...]
+    effects_qualification: str
+    audio_considerations: tuple[str, ...]
+    prototype_suitability: str
+    mandatory_unknowns: tuple[str, ...]
+    mandatory_external_validation: tuple[str, ...]
+    mandatory_limitations: tuple[str, ...]
+
+    def material(self) -> dict[str, Any]:
+        return {field.name: list(getattr(self, field.name)) if isinstance(getattr(self, field.name), tuple) else getattr(self, field.name) for field in fields(self)}
+
 class ProductionProfileCatalogue:
-    identity=CATALOGUE; version="1.0.0"
-    def __init__(self): self.profiles=tuple(ProductionProfile(p,"1.0.0",p,"qualified",("Feasibility, cost, duration, quality, and availability are unknown.",)) for p in PROFILES)
+    __slots__ = ("profiles", "digest")
+    identity = CATALOGUE_IDENTITY
+    version = CATALOGUE_VERSION
+
+    def __init__(self) -> None:
+        common_unknowns = ("Feasibility, cost, duration, quality, availability, rights, permits, and artistic suitability are unknown.",)
+        common_validation = ("Validate feasibility, people, locations, assets, effects, audio, rights, permits, cost, duration, and quality externally.",)
+        common_limits = ("This profile is an inert structural alternative, not a plan, ranking, recommendation, approval, or execution instruction.",)
+        profiles = (
+            ProductionProfile("minimal_stage", CATALOGUE_VERSION, 1, "bounded_minimal_stage", "qualified_low_relative_complexity", ("performer categories remain unverified",), "controlled local setting category", ("minimal representational asset categories",), "bounded practical effects category", ("dialogue and ambient audio remain unverified",), "qualified local prototype candidate", common_unknowns, common_validation, common_limits),
+            ProductionProfile("location_live_action", CATALOGUE_VERSION, 2, "location_live_action", "qualified_context_dependent_complexity", ("performer categories and availability remain unverified",), "source-indicated location category; availability unverified", ("location and practical asset categories",), "context-dependent effects category", ("location audio conditions remain unverified",), "qualified only after external location validation", common_unknowns, common_validation, common_limits),
+            ProductionProfile("stylized_2d", CATALOGUE_VERSION, 3, "stylized_2d_representation", "qualified_medium_structural_complexity", ("voice/performance categories remain unverified",), "represented location category", ("2D design and animation asset categories",), "stylized visual effects category", ("voice, sound design, and music requirements remain unverified",), "qualified visualization prototype candidate", common_unknowns, common_validation, common_limits),
+            ProductionProfile("stylized_3d", CATALOGUE_VERSION, 4, "stylized_3d_representation", "qualified_high_structural_complexity", ("voice/motion performance categories remain unverified",), "represented 3D location category", ("3D model, rig, material, and animation asset categories",), "stylized 3D effects category", ("voice, sound design, and music requirements remain unverified",), "qualified technical prototype candidate", common_unknowns, common_validation, common_limits),
+        )
+        if [p.ordinal for p in profiles] != [1, 2, 3, 4] or len({(p.identity, p.version) for p in profiles}) != 4:
+            raise ValueError("production profile catalogue is invalid")
+        object.__setattr__(self, "profiles", profiles)
+        object.__setattr__(self, "digest", canonical_digest({"identity": self.identity, "version": self.version, "stable_order_is_not_ranking": True, "profiles": [p.material() for p in profiles]}))
+
+    def __setattr__(self, name, value):
+        raise TypeError("production profile catalogue is immutable")
+
     @classmethod
-    def built_in(cls): return cls()
-    @property
-    def digest(self): return canonical_digest([{"identity":p.identity,"version":p.version,"approach":p.approach,"complexity":p.complexity,"limitations":list(p.limitations)} for p in self.profiles])
-@dataclass(frozen=True,slots=True,init=False)
+    def built_in(cls) -> "ProductionProfileCatalogue": return cls()
+
+@dataclass(frozen=True, slots=True, init=False)
 class SceneProductionOptionsContext:
-    value:object; digest:str
+    value: Any
+    digest: str
     @classmethod
-    def create(cls,value):
-        obj=object.__new__(cls); frozen=freeze_json(value); object.__setattr__(obj,"value",frozen); object.__setattr__(obj,"digest",canonical_digest(frozen)); return obj
-    def to_json_value(self): return thaw_json(self.value)
-def _ts(v): return datetime.strptime(v,"%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-def _iso(v): return v.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-def validate_production_options_context(value):
-    if isinstance(value, SceneProductionOptionsContext): value=value.value
-    value=thaw_json(value) if hasattr(value,"keys") else value
-    required={"schema_version","context_id","context_family","context_family_version","request_id","correlation_id","semantic_task","semantic_task_version","purpose","environment","project_id","classification","policy_identity","policy_version","constructed_at","expires_at","lifecycle","context_content_digest","integrity","payload"}
-    if not isinstance(value,dict) or set(value)!=required: raise ValueError("production Context is invalid")
-    if value["context_family"]!="scene_production_options_context" or value["semantic_task"]!="generate_scene_production_options" or value["purpose"]!="scene_production_options_local_validation" or value["lifecycle"]!="validated": raise ValueError("production Context compatibility is invalid")
-    if _ts(value["constructed_at"])>=_ts(value["expires_at"]): raise ValueError("production Context expiry is invalid")
-    if canonical_digest(value["payload"])!=value["context_content_digest"]: raise ValueError("production Context digest mismatch")
-    material=dict(value); integ=dict(material["integrity"]); expected=integ.pop("complete_context_sha256"); material["integrity"]=integ
-    if expected!=canonical_digest(material): raise ValueError("production Context integrity mismatch")
+    def create(cls, value: dict[str, Any]) -> "SceneProductionOptionsContext":
+        obj = object.__new__(cls); frozen = freeze_json(value)
+        object.__setattr__(obj, "value", frozen); object.__setattr__(obj, "digest", canonical_digest(frozen)); return obj
+    def to_json_value(self) -> dict[str, Any]: return thaw_json(self.value)
+
+@dataclass(frozen=True, slots=True)
+class SceneProductionOptionsProviderView:
+    project_id: str
+    scene_breakdown_digest: str
+    scene_id: str
+    scene_content_digest: str
+    source_observations: tuple[Any, ...]
+    source_claims: tuple[Any, ...]
+    boundary_basis: str
+    boundary_rule_identity: str
+    ambiguity: tuple[str, ...]
+    assumptions: tuple[str, ...]
+    unknowns: tuple[str, ...]
+    conflicts: tuple[str, ...]
+    limitations: tuple[str, ...]
+    evidence_references: tuple[str, ...]
+    rights_qualification: str
+    cultural_qualification: str
+    local_resource_constraints: tuple[str, ...]
+    profiles: tuple[ProductionProfile, ...]
+    option_limit: int
+    provider_visible_digest: str
+
+def validate_production_options_context(value: Any, *, registry: ContextContractRegistry | None = None) -> SceneProductionOptionsContext:
+    if isinstance(value, SceneProductionOptionsContext): value = value.value
+    value = thaw_json(value) if hasattr(value, "keys") else value
+    try: validate_json_value(value, maximum_bytes=MAX_CONTEXT_BYTES)
+    except Exception as exc: raise ValueError("production Context is unsafe") from exc
+    required = {"schema_version","context_id","context_family","context_family_version","request_id","correlation_id","semantic_task","semantic_task_version","result_family","result_version","purpose","environment","project_id","classification","trust","policy_identity","policy_version","constructed_at","expires_at","lifecycle","context_content_digest","integrity","payload"}
+    if not isinstance(value, dict) or set(value) != required: raise ValueError("production Context fields are invalid")
+    expected = ("scene_production_options_context","1","generate_scene_production_options","1","scene_production_option_set","1","scene_production_options_local_validation","development",POLICY_IDENTITY,POLICY_VERSION,"validated")
+    actual = (value["context_family"],value["context_family_version"],value["semantic_task"],value["semantic_task_version"],value["result_family"],value["result_version"],value["purpose"],value["environment"],value["policy_identity"],value["policy_version"],value["lifecycle"])
+    if actual != expected or value["classification"] not in {"public","internal"} or value["trust"] != "approved_fixture": raise ValueError("production Context compatibility is invalid")
+    reg = registry or ContextContractRegistry.built_in()
+    schema = reg.schema("vss.scene_production_options_context/1").schema
+    if list(Draft202012Validator(schema).iter_errors(value["payload"])): raise ValueError("production Context payload is invalid")
+    payload = value["payload"]; catalogue = ProductionProfileCatalogue.built_in()
+    if (payload["profile_catalogue_identity"], payload["profile_catalogue_version"], payload["profile_catalogue_digest"], payload["option_count_limit"]) != (catalogue.identity, catalogue.version, catalogue.digest, len(catalogue.profiles)):
+        raise ValueError("production catalogue substitution rejected")
+    if payload["selected_scene_id"] == "" or payload["selected_scene_digest"] == "0"*64 or payload["scene_breakdown_digest"] == "0"*64: raise ValueError("selected scene binding is invalid")
+    if _ts(value["constructed_at"]) >= _ts(value["expires_at"]): raise ValueError("production Context expiry is invalid")
+    if canonical_digest(payload) != value["context_content_digest"]: raise ValueError("production Context content digest mismatch")
+    material = dict(value); integrity = dict(material["integrity"]); expected_digest = integrity.pop("complete_context_sha256"); material["integrity"] = integrity
+    if expected_digest != canonical_digest(material): raise ValueError("production Context integrity mismatch")
     return SceneProductionOptionsContext.create(value)
-def assemble_production_options_context(scene_breakdown, *, request_id, correlation_id, project_id, scene_id, scene_content_digest, environment="development", validation_time=None):
-    result=validate_scene_breakdown(scene_breakdown,MovieContractRegistry.built_in()); value=thaw_json(result.value)
-    if value["project_id"]!=project_id: raise ValueError("project mismatch")
-    matches=[s for s in value["payload"]["ordered_scenes"] if s["scene_id"]==scene_id and s["scene_content_digest"]==scene_content_digest]
-    if len(matches)!=1: raise ValueError("exact scene selection failed")
-    scene=matches[0]; now=_ts(validation_time) if validation_time else datetime.now(timezone.utc).replace(microsecond=0); expiry=now+timedelta(seconds=300)
-    payload={"scene_breakdown_digest":result.digest,"scene_id":scene_id,"scene_content_digest":scene_content_digest,"scene":scene,"profile_catalogue":CATALOGUE,"option_limit":len(PROFILES),"limitations":["Options are alternatives, not recommendations or plans."],"unknowns":["Feasibility, cost, duration, quality, rights, permits, performers, and assets are unknown."],"conflicts":scene["conflicts"],"evidence_references":scene["evidence_references"]}
-    content=canonical_digest(payload); context={"schema_version":"1","context_id":"production-context-"+content[:32],"context_family":"scene_production_options_context","context_family_version":"1","request_id":request_id,"correlation_id":correlation_id,"semantic_task":"generate_scene_production_options","semantic_task_version":"1","purpose":"scene_production_options_local_validation","environment":environment,"project_id":project_id,"classification":"public","policy_identity":POLICY,"policy_version":"1","constructed_at":_iso(now),"expires_at":_iso(expiry),"lifecycle":"validated","context_content_digest":content,"integrity":{"complete_context_sha256":"0"*64},"payload":payload}
-    context["integrity"]["complete_context_sha256"]=canonical_digest({**context,"integrity":{}}); return validate_production_options_context(context)
-def production_provider_view(context):
-    c=thaw_json(validate_production_options_context(context.value if isinstance(context,SceneProductionOptionsContext) else context).value); p=c["payload"]; material={"project_id":c["project_id"],"scene_breakdown_digest":p["scene_breakdown_digest"],"scene_id":p["scene_id"],"scene_content_digest":p["scene_content_digest"],"scene":p["scene"],"profile_catalogue":p["profile_catalogue"],"option_limit":p["option_limit"],"limitations":p["limitations"],"unknowns":p["unknowns"],"conflicts":p["conflicts"],"evidence_references":p["evidence_references"]}; return freeze_json({**material,"provider_visible_digest":canonical_digest(material)})
-def generate_production_options(context, *, now=None):
-    c=validate_production_options_context(context); v=production_provider_view(c); now=_ts(now) if now else datetime.now(timezone.utc)
-    if now>=_ts(v["constructed_at"] if "constructed_at" in v else thaw_json(c.value)["expires_at"]): pass
-    catalogue=ProductionProfileCatalogue.built_in(); options=[]
-    for i,p in enumerate(catalogue.profiles,1):
-        material={"project_id":v["project_id"],"scene_breakdown_digest":v["scene_breakdown_digest"],"scene_id":v["scene_id"],"scene_content_digest":v["scene_content_digest"],"profile_identity":p.identity,"profile_version":p.version,"catalogue":catalogue.identity}
-        options.append({"option_id":"option-"+canonical_digest(material)[:24],"ordinal":i,"profile_identity":p.identity,"profile_version":p.version,"approach":p.approach,"rationale":"A bounded alternative requiring external validation; not a recommendation.","unknowns":list(p.limitations),"limitations":["No feasibility, cost, duration, quality, rights, or availability was verified."],"evidence_references":list(v["evidence_references"]),"confidence":"low","option_content_digest":canonical_digest(material)})
-    payload={"scene_breakdown_digest":v["scene_breakdown_digest"],"scene_id":v["scene_id"],"scene_content_digest":v["scene_content_digest"],"profile_catalogue":catalogue.identity,"profile_catalogue_digest":catalogue.digest,"options":options,"confidence":"low","limitations":["Stable catalogue order is not ranking.","Options are inert alternatives, not plans or recommendations."],"unknowns":v["unknowns"],"conflicts":v["conflicts"],"evidence_references":v["evidence_references"]}
-    return {"schema_version":"1","result_family":"scene_production_option_set","result_version":"1","project_id":v["project_id"],"payload":payload,"integrity":{"payload_sha256":canonical_digest(payload)}}
+
+def assemble_production_options_context(scene_breakdown: Any, *, request_id: str, correlation_id: str, project_id: str, scene_id: str, scene_content_digest: str, environment: str = "development", validation_time: str | None = None) -> SceneProductionOptionsContext:
+    result = validate_scene_breakdown(scene_breakdown, MovieContractRegistry.built_in()); breakdown = result.to_json_value()
+    if breakdown["project_id"] != project_id or environment != "development": raise ValueError("production Context project or environment mismatch")
+    by_id = [scene for scene in breakdown["payload"]["ordered_scenes"] if scene["scene_id"] == scene_id]
+    if len(by_id) != 1 or by_id[0]["scene_content_digest"] != scene_content_digest: raise ValueError("exact scene selection failed")
+    scene = by_id[0]; catalogue = ProductionProfileCatalogue.built_in()
+    now = _ts(validation_time) if validation_time else datetime.now(timezone.utc).replace(microsecond=0)
+    observations = list(scene["source_observations"]); claims = list(scene["events"])
+    payload = {
+        "scene_breakdown_identity":"scene_breakdown","scene_breakdown_version":"1","scene_breakdown_digest":result.digest,
+        "selected_scene_id":scene_id,"selected_scene_digest":scene_content_digest,
+        "selected_scene":{"source_observations":observations,"declared_characters":scene["declared_characters"],"declared_locations":scene["declared_locations"],"time_indicators":scene["time_indicators"],"events":claims},
+        "source_binding_identity":scene["source_binding"],"source_binding_digest":canonical_digest({"identity":scene["source_binding"],"breakdown":result.digest}),
+        "source_observations":observations,"source_claims":claims,"boundary_basis":scene["boundary_basis"],"boundary_rule_identity":scene["boundary_rule"],
+        "ambiguity":["Scene boundary is ambiguous."] if scene["ambiguous_boundary"] else [],"assumptions":scene["assumptions"] + breakdown["payload"]["assumptions"],"unknowns":scene["unknowns"] + breakdown["payload"]["unknowns"],"conflicts":scene["conflicts"] + breakdown["payload"]["conflicts"],"limitations":scene["limitations"] + breakdown["payload"]["limitations"] + ["Production options are inert alternatives; stable order is not ranking."],"evidence_references":scene["evidence_references"],
+        "rights_qualification":"not available in scene_breakdown/1; external validation required","cultural_qualification":"not available in scene_breakdown/1; external validation required","local_resource_constraints":["Local deterministic validation only; no external retrieval or execution."],
+        "profile_catalogue_identity":catalogue.identity,"profile_catalogue_version":catalogue.version,"profile_catalogue_digest":catalogue.digest,"option_count_limit":len(catalogue.profiles),"budget_summary":{"maximum_context_bytes":MAX_CONTEXT_BYTES,"maximum_nodes":1024,"maximum_depth":12},
+    }
+    content = canonical_digest(payload)
+    context = {"schema_version":"1","context_id":"production-context-"+content[:32],"context_family":"scene_production_options_context","context_family_version":"1","request_id":request_id,"correlation_id":correlation_id,"semantic_task":"generate_scene_production_options","semantic_task_version":"1","result_family":"scene_production_option_set","result_version":"1","purpose":"scene_production_options_local_validation","environment":environment,"project_id":project_id,"classification":"public","trust":"approved_fixture","policy_identity":POLICY_IDENTITY,"policy_version":POLICY_VERSION,"constructed_at":_iso(now),"expires_at":_iso(now+timedelta(seconds=300)),"lifecycle":"validated","context_content_digest":content,"integrity":{"complete_context_sha256":"0"*64},"payload":payload}
+    context["integrity"]["complete_context_sha256"] = canonical_digest({**context,"integrity":{}})
+    return validate_production_options_context(context)
+
+def production_context_report(context: SceneProductionOptionsContext) -> dict[str, Any]:
+    c = validate_production_options_context(context).to_json_value(); p = c["payload"]
+    report = {"schema_version":"1","report_family":"scene_production_options_context_assembly_report","report_version":"1","request_id":c["request_id"],"correlation_id":c["correlation_id"],"scene_breakdown_identity":p["scene_breakdown_identity"],"scene_breakdown_digest":p["scene_breakdown_digest"],"selected_scene_id":p["selected_scene_id"],"selected_scene_digest":p["selected_scene_digest"],"context_id":c["context_id"],"context_family":c["context_family"],"context_version":"1","context_content_digest":c["context_content_digest"],"complete_context_digest":canonical_digest(c),"project_id":c["project_id"],"environment":c["environment"],"purpose":c["purpose"],"classification":c["classification"],"trust":c["trust"],"rights_qualification_status":"claim_preserved","cultural_qualification_status":"claim_preserved","profile_catalogue_identity":p["profile_catalogue_identity"],"profile_catalogue_version":p["profile_catalogue_version"],"included_count":1,"omitted_count":0,"ambiguity_count":len(p["ambiguity"]),"conflict_count":len(p["conflicts"]),"unknown_count":len(p["unknowns"]),"limitation_count":len(p["limitations"]),"budget_use":{"context_bytes":len(canonical_bytes(c)),"maximum_context_bytes":MAX_CONTEXT_BYTES},"constructed_at":c["constructed_at"],"expires_at":c["expires_at"],"status":"success"}
+    report["report_digest"] = canonical_digest(report); return freeze_json(report)
+
+def production_provider_view(context: Any) -> SceneProductionOptionsProviderView:
+    c = validate_production_options_context(context).to_json_value(); p = c["payload"]; catalogue = ProductionProfileCatalogue.built_in()
+    material = {"project_id":c["project_id"],"scene_breakdown_digest":p["scene_breakdown_digest"],"scene_id":p["selected_scene_id"],"scene_content_digest":p["selected_scene_digest"],"source_observations":p["source_observations"],"source_claims":p["source_claims"],"boundary_basis":p["boundary_basis"],"boundary_rule_identity":p["boundary_rule_identity"],"ambiguity":p["ambiguity"],"assumptions":p["assumptions"],"unknowns":p["unknowns"],"conflicts":p["conflicts"],"limitations":p["limitations"],"evidence_references":p["evidence_references"],"rights_qualification":p["rights_qualification"],"cultural_qualification":p["cultural_qualification"],"local_resource_constraints":p["local_resource_constraints"],"profiles":[profile.material() for profile in catalogue.profiles],"option_limit":p["option_count_limit"]}
+    return SceneProductionOptionsProviderView(c["project_id"],p["scene_breakdown_digest"],p["selected_scene_id"],p["selected_scene_digest"],tuple(freeze_json(x) for x in p["source_observations"]),tuple(freeze_json(x) for x in p["source_claims"]),p["boundary_basis"],p["boundary_rule_identity"],tuple(p["ambiguity"]),tuple(p["assumptions"]),tuple(p["unknowns"]),tuple(p["conflicts"]),tuple(p["limitations"]),tuple(p["evidence_references"]),p["rights_qualification"],p["cultural_qualification"],tuple(p["local_resource_constraints"]),catalogue.profiles,p["option_count_limit"],canonical_digest(material))
+
+def create_production_option_set(view: SceneProductionOptionsProviderView, binding: dict[str, Any]) -> dict[str, Any]:
+    if type(view) is not SceneProductionOptionsProviderView: raise TypeError("provider requires SceneProductionOptionsProviderView")
+    options = []
+    for profile in view.profiles[:view.option_limit]:
+        option = {"option_id":"pending","ordinal":profile.ordinal,"profile_identity":profile.identity,"profile_version":profile.version,"scene_id":view.scene_id,"scene_content_digest":view.scene_content_digest,"approach_category":profile.approach_category,"complexity_qualification":profile.complexity_qualification,"qualified_rationale":"A deterministic profile-derived alternative requiring external validation; not a recommendation.","source_supported_considerations":[x["text"] for x in map(thaw_json, view.source_observations)],"rule_derived_considerations":[f"Boundary basis: {view.boundary_basis}; rule: {view.boundary_rule_identity}."],"performer_requirement_categories":list(profile.performer_implications),"location_approach_category":profile.location_implications,"asset_requirement_categories":list(profile.asset_implications),"effects_intensity_category":profile.effects_qualification,"audio_considerations":list(profile.audio_considerations),"prototype_suitability":profile.prototype_suitability,"assumptions":list(view.assumptions),"unknowns":list(dict.fromkeys(view.unknowns+profile.mandatory_unknowns)),"conflicts":list(view.conflicts),"limitations":list(dict.fromkeys(view.limitations+profile.mandatory_limitations)),"external_validation_requirements":list(profile.mandatory_external_validation),"evidence_references":list(view.evidence_references),"qualified_confidence":"low"}
+        content_material = dict(option); content_material.pop("option_id")
+        option["option_content_digest"] = canonical_digest(content_material)
+        id_material = {"project":view.project_id,"scene_breakdown":view.scene_breakdown_digest,"scene_id":view.scene_id,"scene_digest":view.scene_content_digest,"profile":[profile.identity,profile.version],"context_content":binding["context_content_digest"],"policy":[POLICY_IDENTITY,POLICY_VERSION],"option_content":option["option_content_digest"]}
+        option["option_id"] = "option-"+canonical_digest(id_material)[:24]
+        options.append(option)
+    payload = {"options":options,"stable_order_is_not_ranking":True,"ambiguity":list(view.ambiguity),"assumptions":list(view.assumptions),"unknowns":list(view.unknowns),"conflicts":list(view.conflicts),"limitations":list(view.limitations),"rights_qualification":view.rights_qualification,"cultural_qualification":view.cultural_qualification,"evidence_references":list(view.evidence_references),"semantic_result_digest":"0"*64}
+    payload["semantic_result_digest"] = canonical_digest({**payload,"semantic_result_digest":None})
+    result = {"schema_version":"1","result_family":"scene_production_option_set","result_version":"1","request_id":binding["request_id"],"correlation_id":binding["correlation_id"],"project_id":view.project_id,"scene_breakdown_identity":"scene_breakdown","scene_breakdown_version":"1","scene_breakdown_digest":view.scene_breakdown_digest,"scene_id":view.scene_id,"scene_content_digest":view.scene_content_digest,"context_identity":binding["context_id"],"context_family":"scene_production_options_context","context_version":"1","context_content_digest":binding["context_content_digest"],"complete_context_digest":binding["complete_context_digest"],"profile_catalogue_identity":CATALOGUE_IDENTITY,"profile_catalogue_version":CATALOGUE_VERSION,"profile_catalogue_digest":ProductionProfileCatalogue.built_in().digest,"policy_identity":POLICY_IDENTITY,"policy_version":POLICY_VERSION,"strategy_identity":STRATEGY_IDENTITY,"strategy_version":STRATEGY_VERSION,"provider_identity":PROVIDER_IDENTITY,"provider_version":PROVIDER_VERSION,"provider_api_version":PROVIDER_API_VERSION,"payload":payload,"integrity":{"payload_sha256":canonical_digest(payload),"complete_result_sha256":"0"*64}}
+    result["integrity"]["complete_result_sha256"] = canonical_digest({**result,"integrity":{"payload_sha256":result["integrity"]["payload_sha256"]}})
+    return validate_production_option_set(result).to_json_value()
+
+def generate_production_options(context: Any, *, now: str | None = None) -> dict[str, Any]:
+    """Compatibility helper; the public command uses the Reasoning Gateway."""
+    c = validate_production_options_context(context); value = c.to_json_value()
+    if ( _ts(now) if now else datetime.now(timezone.utc)) >= _ts(value["expires_at"]): raise ValueError("production Context expired")
+    binding = {"request_id":value["request_id"],"correlation_id":value["correlation_id"],"context_id":value["context_id"],"context_content_digest":value["context_content_digest"],"complete_context_digest":c.digest}
+    return create_production_option_set(production_provider_view(c), binding)

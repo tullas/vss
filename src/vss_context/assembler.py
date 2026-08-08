@@ -202,3 +202,28 @@ class ContextAssembler:
         """Movie-specific Context admission routed through the Context layer."""
         from vss_movie_scene_breakdown import assemble_scene_context
         return assemble_scene_context(story, request_id=request_id, correlation_id=correlation_id, project_id=project_id, environment=environment, validation_time=validation_time)
+
+    def assemble_scene_production_options(self, request_value: dict[str, Any], scene_breakdown: dict[str, Any], *, correlation_id: str, environment: str, validation_time: str | None = None) -> Any:
+        """Assemble one scene-specific production Context and one terminal safe audit."""
+        started = time.monotonic(); request = request_value if isinstance(request_value, dict) else {}; context = None; report = None; audit_attempted = False
+        try:
+            from vss_movie_contracts import validate_production_options_task
+            from vss_movie_production_options import assemble_production_options_context, production_context_report
+            task = validate_production_options_task(request).to_json_value()
+            if task["correlation_id"] != correlation_id or task["environment"] != environment:
+                raise ContextPolicyDenied("production Context request binding is invalid")
+            context = assemble_production_options_context(scene_breakdown, request_id=task["request_id"], correlation_id=correlation_id, project_id=task["project_id"], scene_id=task["scene_id"], scene_content_digest=task["scene_content_digest"], environment=environment, validation_time=validation_time)
+            if context.value["payload"]["scene_breakdown_digest"] != task["scene_breakdown_digest"]:
+                raise ContextPackageFailure("Scene Breakdown digest mismatch")
+            report = production_context_report(context)
+            audit_attempted = True
+            self._audit_sink.append({"event_type":"scene_production_options_context_assembly_completed","recorded_at":_iso(datetime.now(timezone.utc)),"assembly_execution_id":uuid.uuid4().hex,"correlation_id":correlation_id,"request_id":task["request_id"],"project_id":task["project_id"],"environment":environment,"purpose":task["purpose"],"scene_breakdown_identity":"scene_breakdown/1","scene_breakdown_digest":task["scene_breakdown_digest"],"selected_scene_id":task["scene_id"],"selected_scene_digest":task["scene_content_digest"],"context_identity":"scene_production_options_context/1","context_content_digest":context.value["context_content_digest"],"complete_context_digest":context.digest,"profile_catalogue":"vss.scene-production-profiles.deterministic/1.0.0","policy":"scene_production_options_context_local/1","classification":context.value["classification"],"trust":context.value["trust"],"ambiguity_count":len(context.value["payload"]["ambiguity"]),"conflict_count":len(context.value["payload"]["conflicts"]),"unknown_count":len(context.value["payload"]["unknowns"]),"limitation_count":len(context.value["payload"]["limitations"]),"expiry":context.value["expires_at"],"report_digest":report["report_digest"],"status":"success","exit_code":0,"duration_ms":max(0,int((time.monotonic()-started)*1000))})
+            return type("ProductionAssemblyResult", (), {"context":context,"report":report,"summary":MappingProxyType({"context_id":context.value["context_id"],"context_content_digest":context.value["context_content_digest"],"complete_context_digest":context.digest,"report_digest":report["report_digest"],"registry_digest":self._registry.digest})})()
+        except Exception:
+            if audit_attempted:
+                raise
+            try:
+                self._audit_sink.append({"event_type":"scene_production_options_context_assembly_failed","recorded_at":_iso(datetime.now(timezone.utc)),"assembly_execution_id":uuid.uuid4().hex,"correlation_id":correlation_id,"request_id":request.get("request_id"),"project_id":request.get("project_id"),"environment":environment,"purpose":request.get("purpose"),"scene_breakdown_digest":request.get("scene_breakdown_digest"),"selected_scene_id":request.get("scene_id"),"selected_scene_digest":request.get("scene_content_digest"),"context_identity":"scene_production_options_context/1","status":"failed","exit_code":1,"duration_ms":max(0,int((time.monotonic()-started)*1000))})
+            except Exception as audit_exc:
+                raise ContextAuditFailure("context audit failed") from audit_exc
+            raise

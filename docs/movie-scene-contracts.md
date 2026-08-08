@@ -36,7 +36,10 @@ qualification. No third-party screenplay, prose, lyrics, private data, or
 cultural/historical claim is included.
 
 M4.2 owns `scene_breakdown_context/1`, Context Assembly, and the deterministic
-scene-breakdown implementation. Later milestones may add production-option
+scene-breakdown implementation. M4.3 separately admits the exact
+`generate_scene_production_options/1` and `scene_production_option_set/1`
+contracts; this federation does not widen the M4.1 contracts or grant execution
+authority. Later milestones may add production-option
 contracts and Context. No Plan IR is defined until concrete movie outputs show
 repeated sequencing, dependency, resource, effect, or approval requirements.
 

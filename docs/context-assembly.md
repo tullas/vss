@@ -124,3 +124,17 @@ production audit, process isolation, or autonomous behavior. Trusted Python
 remains in-process. Persistent revocation, signing/authentication, privacy and
 residency enforcement, durable storage, and long-running recovery remain
 deferred.
+
+## M4.3 scene production Context
+
+`scene_production_options_context/1` is a federated task-specific Context
+family. Its compatibility is exact: validated `scene_breakdown/1`, one scene
+ID/content digest, `generate_scene_production_options/1`,
+`scene_production_option_set/1`, development,
+`scene_production_options_local_validation`,
+`scene_production_options_context_local/1`, the deterministic profile
+catalogue, and the admitted strategy/provider/API. No latest, wildcard,
+name-only, implicit-semver, caller-defined, upgrade, downgrade, or
+registration-order fallback exists. Assembly preserves qualifications,
+minimizes the selected scene, independently validates the Context, emits a
+bounded report, and writes one fatal-on-failure terminal Context audit attempt.

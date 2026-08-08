@@ -174,3 +174,16 @@ boundaries.
 M3.3's [local performance laboratory](performance-laboratory.md) now exercises
 this same Gateway concurrently without calling the provider directly or
 changing those boundaries.
+
+## M4.3 governed production-options lifecycle
+
+The same Reasoning Gateway admits the movie-specific M4.3 task. It validates
+the strict request and Context, exact breakdown/scene and correlation bindings,
+policy attributes, integrity, expiry, current revocation, immutable catalogue,
+explicit strategy/provider/API, budgets, and deadline. The Gateway alone
+extracts the minimal immutable provider view and creates the invocation
+binding. Expiry and revocation are the final gates before the one permitted
+provider call. Independent result and semantic-honesty validation precede one
+terminal audit attempt. Dry-run performs all admission and binding steps but
+calls zero providers and returns no result digest. Invalid Context never falls
+back to M3, M4.2, or another provider.

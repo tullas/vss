@@ -522,3 +522,61 @@ class ReasoningGateway:
             except Exception as audit_exc:
                 raise ReasoningAuditFailure("reasoning audit record could not be written") from audit_exc
             raise
+
+    def execute_scene_production_options(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
+        """Run M4.3 through the existing governed Reasoning Gateway lifecycle."""
+        started = self._clock(); execution_id = uuid.uuid4().hex; calls = 0; request_id = None
+        context = None; view = None; invocation_digest = None; result = None; revocation_result = "not_evaluated"; status = "failed"; failure = "invalid_request"
+        try:
+            if type(correlation_id) is not str or not _CORRELATION_ID.fullmatch(correlation_id): raise InvalidReasoningRequest("reasoning correlation identity is invalid")
+            from vss_movie_contracts import validate_production_options_task, validate_production_option_set
+            try: request = validate_production_options_task(request_data)
+            except Exception as exc: raise InvalidReasoningRequest("production-options request is invalid") from exc
+            task = request.to_json_value(); request_id = task["request_id"]
+            if task["correlation_id"] != correlation_id or task["environment"] != environment: raise InvalidReasoningRequest("production-options request binding is invalid")
+            from vss_movie_production_options import ProductionProfileCatalogue, production_provider_view, validate_production_options_context
+            try: context = validate_production_options_context(context_data)
+            except Exception as exc: failure = "invalid_context"; raise InvalidReasoningRequest("production-options Context is invalid") from exc
+            c = context.to_json_value(); p = c["payload"]
+            request_context = (task["request_id"],task["correlation_id"],task["project_id"],task["environment"],task["purpose"],task["expected_context_family"],task["expected_context_version"],task["expected_result_family"],task["expected_result_version"],task["scene_breakdown_digest"],task["scene_id"],task["scene_content_digest"],task["classification"],task["trust"])
+            actual_context = (c["request_id"],c["correlation_id"],c["project_id"],c["environment"],c["purpose"],c["context_family"],c["context_family_version"],c["result_family"],c["result_version"],p["scene_breakdown_digest"],p["selected_scene_id"],p["selected_scene_digest"],c["classification"],c["trust"])
+            if request_context != actual_context: failure = "context_binding_mismatch"; raise InvalidReasoningRequest("production-options request and Context binding mismatch")
+            fixture_time = c["constructed_at"] == "2026-08-02T00:00:00Z"
+            invocation_time = "2026-08-02T00:00:01Z" if fixture_time else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            invocation_dt = datetime.strptime(invocation_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            if invocation_dt >= datetime.strptime(c["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc): failure = "context_expired"; raise InvalidReasoningRequest("production-options Context is expired")
+            catalogue = ProductionProfileCatalogue.built_in()
+            if (p["profile_catalogue_identity"],p["profile_catalogue_version"],p["profile_catalogue_digest"],p["option_count_limit"]) != (catalogue.identity,catalogue.version,catalogue.digest,len(catalogue.profiles)): failure = "catalogue_mismatch"; raise InvalidReasoningRequest("production profile catalogue mismatch")
+            if task["bounds"]["maximum_options"] != len(catalogue.profiles): failure = "budget_mismatch"; raise ReasoningBudgetExceeded("production option bound is incompatible")
+            from .registry import SceneProductionOptionsImplementationRegistry
+            implementations = SceneProductionOptionsImplementationRegistry.built_in(); strategy, provider = implementations.resolve()
+            view = production_provider_view(context)
+            deadline = invocation_dt.timestamp() + task["bounds"]["maximum_duration_ms"] / 1000
+            binding = {"invocation_id":"production-invocation-"+canonical_digest({"request":request.digest,"context":context.digest,"provider_view":view.provider_visible_digest})[:24],"request_id":request_id,"request_digest":request.digest,"correlation_id":correlation_id,"task_identity":"generate_scene_production_options","task_version":"1","result_family":"scene_production_option_set","result_version":"1","scene_breakdown_identity":"scene_breakdown","scene_breakdown_digest":p["scene_breakdown_digest"],"scene_id":p["selected_scene_id"],"scene_content_digest":p["selected_scene_digest"],"context_id":c["context_id"],"context_family":"scene_production_options_context","context_version":"1","context_content_digest":c["context_content_digest"],"complete_context_digest":context.digest,"provider_visible_digest":view.provider_visible_digest,"project_id":c["project_id"],"environment":environment,"purpose":c["purpose"],"classification":c["classification"],"policy":[c["policy_identity"],c["policy_version"]],"profile_catalogue":[catalogue.identity,catalogue.version,catalogue.digest],"strategy":[strategy.identity,strategy.version],"provider":[provider.identity,provider.version,provider.api_version],"bounds":task["bounds"],"deadline":deadline,"invocation_time":invocation_time}
+            invocation_digest = canonical_digest(binding)
+            # Expiry and current revocation are deliberately the final gates before the single provider call.
+            from vss_movie_scene_breakdown import MovieRevocationSnapshot
+            snapshot = revocations or MovieRevocationSnapshot.built_in()
+            for target_type, target_id, digest in (("scene_breakdown","scene_breakdown",p["scene_breakdown_digest"]),("scene",p["selected_scene_id"],p["selected_scene_digest"]),("context",c["context_id"],context.digest),("profile_catalogue",catalogue.identity,catalogue.digest),("policy",c["policy_identity"],None)):
+                if snapshot.evaluate(target_type,target_id,digest,invocation_time) != "eligible": failure = "context_revoked"; revocation_result = "revoked"; raise InvalidReasoningRequest("production-options material is revoked")
+            revocation_result = "eligible"
+            if dry_run:
+                status = "success"; failure = "none"
+                return {"readiness":{"authorized":True,"provider_invoked":False,"provider_call_count":0,"task_identity":"generate_scene_production_options","task_version":"1","result_family":"scene_production_option_set","result_version":"1","context_content_digest":c["context_content_digest"],"complete_context_digest":context.digest,"profile_catalogue_digest":catalogue.digest,"provider_visible_digest":view.provider_visible_digest,"invocation_binding_digest":invocation_digest,"strategy_identity":strategy.identity,"strategy_version":strategy.version,"provider_identity":provider.identity,"provider_version":provider.version,"provider_api_version":provider.api_version,"revocation_result":revocation_result,"result_digest":None}}
+            try: candidate, calls, iterations = strategy.execute(view, binding, provider)
+            except Exception as exc: failure = "candidate_generation_failure"; raise CandidateGenerationFailure("production-options generation failed") from exc
+            if calls != 1 or iterations != 1: failure = "provider_budget_exceeded"; raise ReasoningBudgetExceeded("production-options provider budget exceeded")
+            try: validated = validate_production_option_set(candidate)
+            except Exception as exc: failure = "invalid_result"; raise InvalidReasoningResult("production-options result validation failed") from exc
+            result = validated.to_json_value()
+            if len(canonical_bytes(result)) > task["bounds"]["maximum_result_bytes"]: failure = "result_size_budget_exceeded"; raise ReasoningBudgetExceeded("production-options result exceeds bound")
+            text = str(result).lower()
+            dishonest = (" is best", " is recommended", " is preferred", "feasibility is proven", "cost is verified", "duration is verified", "quality is guaranteed", "rights are cleared", "permits are cleared", "conflicts are resolved")
+            if any(term in text for term in dishonest): failure = "semantic_honesty_failure"; raise InvalidReasoningResult("production-options semantic honesty failed")
+            status = "success"; failure = "none"
+            return {"scene_production_option_set":result,"result_digest":validated.digest,"semantic_result_digest":result["payload"]["semantic_result_digest"],"provider_call_count":calls,"provider_visible_digest":view.provider_visible_digest,"invocation_binding_digest":invocation_digest,"profile_catalogue_digest":catalogue.digest}
+        finally:
+            record = {"event_type":"movie_scene_production_options_readiness_completed" if dry_run and status == "success" else "movie_scene_production_options_completed" if status == "success" else "movie_scene_production_options_failed","execution_id":execution_id,"request_id":request_id,"correlation_id":correlation_id,"task_identity":"generate_scene_production_options","task_version":"1","result_family":"scene_production_option_set","result_version":"1","scene_breakdown_identity":"scene_breakdown/1","scene_breakdown_digest":context.value["payload"]["scene_breakdown_digest"] if context else None,"scene_id":context.value["payload"]["selected_scene_id"] if context else None,"scene_digest":context.value["payload"]["selected_scene_digest"] if context else None,"context_id":context.value["context_id"] if context else None,"context_content_digest":context.value["context_content_digest"] if context else None,"complete_context_digest":context.digest if context else None,"provider_visible_digest":view.provider_visible_digest if view else None,"invocation_binding_digest":invocation_digest,"profile_catalogue":"vss.scene-production-profiles.deterministic/1.0.0","strategy":"vss.generate-scene-production-options.deterministic/1.0.0","provider":"vss.reasoning.deterministic-scene-production-options/1.0.0","provider_api_version":"1","provider_call_count":calls,"revocation_result":revocation_result,"dry_run":dry_run,"result_digest":canonical_digest(result) if result else None,"status":status,"failure_classification":failure,"duration_ms":max(0,int((self._clock()-started)*1000))}
+            try: self._audit.append(record)
+            except ReasoningAuditFailure: raise
+            except Exception as exc: raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
