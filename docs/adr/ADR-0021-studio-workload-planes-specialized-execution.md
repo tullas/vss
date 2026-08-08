@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -28,6 +28,9 @@ with responsibilities they were not designed to own.
 The permanent architectural principle is:
 
 > **Shared governance does not imply shared execution topology.**
+
+Equivalently: centralize authority and governance; specialize data movement
+and execution according to workload needs.
 
 VSS needs common authorization, policy, identity, lifecycle, and governance
 obligations while allowing operations to use workload-specialized paths. The
@@ -84,6 +87,19 @@ never changes authority or contract meaning.
 The diagram expresses responsibility, not mandatory process or network
 boundaries. A domain can contain operations in several planes. VSS classifies
 operations and workloads, not whole domains.
+
+### Plane responsibility classification
+
+| Plane | Owns | References | Validates | Authorizes | Executes | Stores | Resolves | Observes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Governance / Control | policy, admission, authorization, budgets, cancellation, governance audit | bounded identities, work and artifact references | contracts, compatibility, lifecycle eligibility, admission evidence | **yes; Runtime alone** | admission/cancellation decisions only, not production work | bounded control/governance records, not heavy assets | exact contracts and policies | governance decisions |
+| Semantic / Reasoning | Knowledge/Context reasoning mechanics and inert semantic results | bounded source and asset references | Context, provider admission, and semantic results | no | semantic provider invocation only; no effects | bounded semantic artifacts under domain ownership | semantic compatibility and providers | semantic evidence and reasoning audit association |
+| Asset / Data | asset instances, revisions, lineage associations, physical resolution, heavy-byte paths | contract kinds and governed purpose | asset identity/version/digest and resolution constraints | no | no production transformation merely by storing/resolving | heavy artifacts, catalogs, and caches | logical reference to scoped physical access | lineage and data-operation evidence, not authorization |
+| Compute / Execution | admitted attempts and effectful/resource-heavy transformations | authorized work and exact asset references | work scope, inputs, worker compatibility, and outputs | no | admitted operation only | bounded attempt/checkpoint/output state; heavy outputs through Data Plane | scoped inputs through Asset Resolver | operational telemetry and output lineage association |
+
+“Owns” means semantic responsibility, not necessarily one service or database.
+Validation may reject and therefore narrow work; it never grants or expands
+authority.
 
 ## Plane 1 — Governance / Control Plane
 
@@ -232,6 +248,11 @@ path carries USD, geometry, textures, frames, audio, video, caches, and
 generated media. Correlation and exact artifact references connect the paths;
 the central Runtime does not become their bulk-data proxy.
 
+Bytes may bypass Runtime as a transport hop; authorization may not. Every
+Data-Plane read, write, or resolution remains constrained by the exact admitted
+purpose, project, classification, artifact identity, and resource scope even
+when Runtime never handles the payload itself.
+
 ## Plane 4 — Compute / Execution Plane
 
 The Compute / Execution Plane eventually performs authorized effectful or
@@ -276,6 +297,21 @@ It must account for stale/revoked work, bounded admission, queue limits,
 backpressure, starvation prevention, protected critical-control capacity,
 resource exhaustion, cancellation, and failed attempts. Infinite queueing is
 not an accepted failure strategy.
+
+### Failure semantics reserved for future execution
+
+Future designs must classify worker crash, timeout, cancellation, partial
+output, stale or lost lease, duplicate attempt, asset unavailability, cache
+miss, insufficient compatible resources, and revocation while queued or
+running. A cache miss or unavailable worker is a readiness/capacity outcome,
+not authorization failure and not permission to substitute an asset or worker.
+A revoked or expired input/work authorization must fail closed at the latest
+safe pre-effect gate and trigger operation-specific cancellation or
+reconciliation if effects may already exist. Partial outputs remain
+quarantined/unadmitted until independently validated and reconciled.
+
+This ADR defines the obligations, not their state machine, storage, queue,
+lease protocol, retry policy, or recovery implementation.
 
 ### Resource requirements, compatibility, and authority
 
@@ -480,6 +516,12 @@ response.
 Asset, lineage, worker, and future execution registries/catalogs remain
 domain-owned and federated. Shared governance obligations are conceptual
 contracts, not a universal object, registry, lifecycle, or service.
+
+VSS also rejects a universal Work Object or God Worker Manager that accumulates
+every semantic result, asset, resource, attempt, schedule, lifecycle, telemetry,
+lineage, and authorization field. Future work and worker contracts remain
+bounded, operation-oriented, independently versioned, and subordinate to
+Runtime admission.
 
 ## Security and trust boundaries
 
