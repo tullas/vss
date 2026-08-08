@@ -1,17 +1,27 @@
 from jsonschema import Draft202012Validator
 import re
-from vss_reasoning_contracts.canonicalization import validate_json_value
+from vss_reasoning_contracts.canonicalization import validate_json_value, thaw_json
 from .errors import MovieContractError
 from .limits import MAX_STORY_BYTES, MAX_RESULT_BYTES
 from .models import ValidatedMovieArtifact
 from .registry import MovieContractRegistry
+from vss_reasoning_contracts import canonical_digest
+
+def _content_digest(value, field):
+    material = dict(value)
+    material.pop(field, None)
+    return canonical_digest(material)
+
+def _require_digest(value, field, label):
+    if value[field] != _content_digest(value, field):
+        raise MovieContractError(f"{label} content digest mismatch")
 
 def _validate(value, identity, registry, maximum):
     try: validate_json_value(value, maximum_bytes=maximum)
     except Exception as exc: raise MovieContractError("movie artifact is unsafe") from exc
     if not isinstance(value,dict): raise MovieContractError("movie artifact must be an object")
     registry.resolve(identity)
-    errors=list(Draft202012Validator(registry.schemas[identity]["schema"]).iter_errors(value))
+    errors=list(Draft202012Validator(thaw_json(registry.schemas[identity]["schema"])).iter_errors(value))
     if errors: raise MovieContractError("movie artifact does not match its contract: " + errors[0].message)
     return ValidatedMovieArtifact._create(value)
 
@@ -112,4 +122,175 @@ def validate_production_option_set(value, registry=None):
         text = " ".join(text for field in honesty_fields for text in strings(option[field])).lower()
         if any(re.search(pattern, text) for pattern in affirmative_claims):
             raise MovieContractError("production option makes a prohibited semantic claim")
+    return result
+
+def validate_character_reference(value, registry=None):
+    result = _validate(value, "character_reference/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
+    _require_digest(result.value, "content_digest", "character reference")
+    return result
+
+def validate_character_identity(value, references=(), registry=None):
+    result = _validate(value, "character_identity/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
+    _require_digest(result.value, "content_digest", "character identity")
+    if result.value["ambiguity"]:
+        raise MovieContractError("ambiguous references cannot claim an exact character identity")
+    if list(result.value["bound_reference_ids"]) != sorted(result.value["bound_reference_ids"]):
+        raise MovieContractError("character identity reference order is not canonical")
+    if len(result.value["bound_reference_ids"]) != len(result.value["bound_reference_content_digests"]):
+        raise MovieContractError("character identity reference digest binding is incomplete")
+    supplied = {}
+    for artifact in references:
+        ref = artifact.value if isinstance(artifact, ValidatedMovieArtifact) else validate_character_reference(artifact, registry).value
+        if ref["reference_id"] in supplied:
+            raise MovieContractError("supplied character reference identity is duplicated")
+        supplied[ref["reference_id"]] = ref
+    if supplied:
+        if set(supplied) != set(result.value["bound_reference_ids"]):
+            raise MovieContractError("character identity reference set is not exact")
+        for reference_id, reference_digest in zip(result.value["bound_reference_ids"], result.value["bound_reference_content_digests"]):
+            if reference_id not in supplied:
+                raise MovieContractError("character identity references an unknown declaration")
+            if supplied[reference_id]["project_id"] != result.value["project_id"]:
+                raise MovieContractError("character identity project binding mismatch")
+            if supplied[reference_id]["content_digest"] != reference_digest:
+                raise MovieContractError("character identity reference content substitution detected")
+    return result
+
+def validate_continuity_sequence(value, scene_breakdown=None, registry=None):
+    result = _validate(value, "continuity_sequence/1", registry or MovieContractRegistry.built_in(), MAX_RESULT_BYTES)
+    _require_digest(result.value, "content_digest", "continuity sequence")
+    scenes = result.value["selected_scenes"]
+    positions = [scene["continuity_position"] for scene in scenes]
+    if positions != list(range(1, len(scenes) + 1)):
+        raise MovieContractError("continuity positions must be unique, contiguous, and explicitly ordered")
+    if len({scene["scene_id"] for scene in scenes}) != len(scenes):
+        raise MovieContractError("continuity sequence contains a duplicate scene")
+    if scene_breakdown is not None:
+        breakdown = scene_breakdown if isinstance(scene_breakdown, ValidatedMovieArtifact) else validate_scene_breakdown(scene_breakdown, registry)
+        data = breakdown.value
+        if data["project_id"] != result.value["project_id"] or breakdown.digest != result.value["scene_breakdown_digest"]:
+            raise MovieContractError("continuity sequence Scene Breakdown binding mismatch")
+        admitted = {scene["scene_id"]: scene["scene_content_digest"] for scene in data["payload"]["ordered_scenes"]}
+        if any(admitted.get(scene["scene_id"]) != scene["scene_content_digest"] for scene in scenes):
+            raise MovieContractError("continuity sequence scene binding mismatch")
+    return result
+
+def validate_character_observation(value, character_identity=None, continuity_sequence=None, registry=None):
+    result = _validate(value, "character_observation/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
+    _require_digest(result.value, "observation_content_digest", "character observation")
+    data = result.value
+    if data["category"] != data["payload"]["kind"]:
+        raise MovieContractError("character observation category and payload mismatch")
+    if character_identity is not None:
+        identity = character_identity if isinstance(character_identity, ValidatedMovieArtifact) else validate_character_identity(character_identity, registry=registry)
+        if data["character_id"] != identity.value["character_id"] or data["project_id"] != identity.value["project_id"]:
+            raise MovieContractError("character observation identity binding mismatch")
+    if continuity_sequence is not None:
+        sequence = continuity_sequence if isinstance(continuity_sequence, ValidatedMovieArtifact) else validate_continuity_sequence(continuity_sequence, registry=registry)
+        if data["project_id"] != sequence.value["project_id"] or data["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or data["continuity_sequence_digest"] != sequence.value["content_digest"]:
+            raise MovieContractError("character observation sequence binding mismatch")
+        scenes = {scene["scene_id"]: scene for scene in sequence.value["selected_scenes"]}
+        scene = scenes.get(data["scene_id"])
+        if scene is None or scene["scene_content_digest"] != data["scene_content_digest"] or scene["continuity_position"] != data["sequence_position"] or data["scene_breakdown_digest"] != sequence.value["scene_breakdown_digest"]:
+            raise MovieContractError("character observation scene binding mismatch")
+    return result
+
+def validate_character_continuity_task(value, registry=None, *, continuity_sequence=None, character_identities=()):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "analyze_character_continuity/1", registry, MAX_STORY_BYTES)
+    registry.resolve_result("analyze_character_continuity/1", "character_continuity_observation_set/1")
+    _require_digest(result.value, "task_content_digest", "character continuity task")
+    order = {name: index for index, name in enumerate(("presence", "possession", "physical_state"))}
+    if list(result.value["selected_character_ids"]) != sorted(result.value["selected_character_ids"]) or list(result.value["selected_observation_categories"]) != sorted(result.value["selected_observation_categories"], key=order.__getitem__):
+        raise MovieContractError("character continuity task selection order is not canonical")
+    if continuity_sequence is not None:
+        sequence = continuity_sequence if isinstance(continuity_sequence, ValidatedMovieArtifact) else validate_continuity_sequence(continuity_sequence, registry=registry)
+        if result.value["project_id"] != sequence.value["project_id"] or result.value["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or result.value["continuity_sequence_digest"] != sequence.value["content_digest"] or result.value["bounds"]["maximum_scenes"] < len(sequence.value["selected_scenes"]):
+            raise MovieContractError("character continuity task sequence binding mismatch")
+    if character_identities:
+        identities = [artifact if isinstance(artifact, ValidatedMovieArtifact) else validate_character_identity(artifact, registry=registry) for artifact in character_identities]
+        ids = [artifact.value["character_id"] for artifact in identities]
+        if len(ids) != len(set(ids)) or set(ids) != set(result.value["selected_character_ids"]) or any(artifact.value["project_id"] != result.value["project_id"] for artifact in identities) or result.value["bounds"]["maximum_characters"] < len(ids):
+            raise MovieContractError("character continuity task character binding mismatch")
+    return result
+
+def validate_character_continuity_observation_set(value, observations=(), continuity_sequence=None, registry=None, *, task=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "character_continuity_observation_set/1", registry, MAX_RESULT_BYTES)
+    registry.resolve_result("analyze_character_continuity/1", "character_continuity_observation_set/1")
+    data = result.value
+    payload = data["payload"]
+    order = {name: index for index, name in enumerate(("presence", "possession", "physical_state"))}
+    if list(data["selected_character_ids"]) != sorted(data["selected_character_ids"]) or list(data["selected_observation_categories"]) != sorted(data["selected_observation_categories"], key=order.__getitem__):
+        raise MovieContractError("continuity result selection order is not canonical")
+    if data["integrity"]["payload_sha256"] != canonical_digest(payload):
+        raise MovieContractError("continuity result payload digest mismatch")
+    if payload["semantic_result_digest"] != canonical_digest({**payload, "semantic_result_digest": None}):
+        raise MovieContractError("continuity semantic result digest mismatch")
+    if data["integrity"]["complete_result_sha256"] != canonical_digest({**data, "integrity": {"payload_sha256": data["integrity"]["payload_sha256"]}}):
+        raise MovieContractError("continuity complete result digest mismatch")
+    bindings = payload["observations"]
+    if len({item["observation_id"] for item in bindings}) != len(bindings):
+        raise MovieContractError("continuity result observation identity is duplicated")
+    canonical_bindings = sorted(bindings, key=lambda item: (item["sequence_position"], item["character_id"], order[item["category"]], item["observation_id"]))
+    if list(bindings) != canonical_bindings:
+        raise MovieContractError("continuity result observation order is not canonical")
+    if list(payload["explicit_transitions"]) != sorted(payload["explicit_transitions"], key=lambda item: item["transition_id"]) or list(payload["contradictions"]) != sorted(payload["contradictions"], key=lambda item: item["contradiction_id"]):
+        raise MovieContractError("continuity structural record order is not canonical")
+    supplied = {}
+    for artifact in observations:
+        observation = artifact if isinstance(artifact, ValidatedMovieArtifact) else validate_character_observation(artifact, registry=registry)
+        if observation.value["observation_id"] in supplied:
+            raise MovieContractError("supplied character observation identity is duplicated")
+        supplied[observation.value["observation_id"]] = observation
+    if bindings and not supplied:
+        raise MovieContractError("continuity result observations require independently validated artifacts")
+    if set(supplied) != {item["observation_id"] for item in bindings}:
+        raise MovieContractError("continuity result observation set is not exact")
+    selected_characters = set(data["selected_character_ids"])
+    selected_categories = set(data["selected_observation_categories"])
+    for binding in bindings:
+        observation = supplied.get(binding["observation_id"])
+        if observation is None or binding["observation_content_digest"] != observation.value["observation_content_digest"]:
+            raise MovieContractError("continuity result observation resolution failed")
+        item = observation.value
+        if item["character_id"] not in selected_characters or item["category"] not in selected_categories or item["project_id"] != data["project_id"] or item["continuity_sequence_id"] != data["continuity_sequence_id"] or item["continuity_sequence_digest"] != data["continuity_sequence_digest"]:
+            raise MovieContractError("continuity result observation binding mismatch")
+        for field in ("character_id", "scene_id", "scene_content_digest", "sequence_position", "category"):
+            if binding[field] != item[field]: raise MovieContractError("continuity result observation substitution detected")
+    for field in ("character_id", "scene_id"):
+        counts = {}
+        for item in bindings: counts[item[field]] = counts.get(item[field], 0) + 1
+        if any(count > 32 for count in counts.values()):
+            raise MovieContractError("continuity result per-identity observation bound exceeded")
+    if continuity_sequence is not None:
+        sequence = continuity_sequence if isinstance(continuity_sequence, ValidatedMovieArtifact) else validate_continuity_sequence(continuity_sequence, registry=registry)
+        if data["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or data["continuity_sequence_digest"] != sequence.value["content_digest"] or data["project_id"] != sequence.value["project_id"]:
+            raise MovieContractError("continuity result sequence binding mismatch")
+    if task is not None:
+        admitted_task = task if isinstance(task, ValidatedMovieArtifact) else validate_character_continuity_task(task, registry)
+        for field in ("request_id", "correlation_id", "project_id", "continuity_sequence_id", "continuity_sequence_digest", "selected_character_ids", "selected_observation_categories"):
+            if data[field] != admitted_task.value[field]:
+                raise MovieContractError("continuity result task binding mismatch")
+        if len(bindings) > admitted_task.value["bounds"]["maximum_observations"]:
+            raise MovieContractError("continuity result task observation bound exceeded")
+    by_id = {item["observation_id"]: supplied[item["observation_id"]] for item in bindings}
+    for transition in payload["explicit_transitions"]:
+        material = dict(transition); digest = material.pop("transition_content_digest")
+        if digest != canonical_digest(material): raise MovieContractError("continuity transition digest mismatch")
+        first = by_id.get(transition["from_observation_id"]); second = by_id.get(transition["to_observation_id"])
+        if first is None or second is None or first is second or transition["from_observation_digest"] != first.value["observation_content_digest"] or transition["to_observation_digest"] != second.value["observation_content_digest"] or first.value["character_id"] != transition["character_id"] or second.value["character_id"] != transition["character_id"] or first.value["category"] != transition["category"] or second.value["category"] != transition["category"] or first.value["sequence_position"] >= second.value["sequence_position"]:
+            raise MovieContractError("continuity transition binding is invalid")
+    for contradiction in payload["contradictions"]:
+        material = dict(contradiction); digest = material.pop("contradiction_content_digest")
+        if digest != canonical_digest(material): raise MovieContractError("continuity contradiction digest mismatch")
+        refs = contradiction["observation_bindings"]
+        if refs[0]["observation_id"] == refs[1]["observation_id"]: raise MovieContractError("continuity contradiction observations must be distinct")
+        resolved = [by_id.get(ref["observation_id"]) for ref in refs]
+        if any(item is None for item in resolved): raise MovieContractError("continuity contradiction observation is unknown")
+        for ref, item in zip(refs, resolved):
+            if ref["observation_digest"] != item.value["observation_content_digest"] or item.value["character_id"] != contradiction["character_id"] or item.value["category"] != contradiction["category"]:
+                raise MovieContractError("continuity contradiction binding is invalid")
+    if bool(payload["contradictions"]) and not payload["review_suggested"]:
+        raise MovieContractError("unresolved contradictions require semantic review suggestion")
     return result

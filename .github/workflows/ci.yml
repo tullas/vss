@@ -72,7 +72,9 @@ jobs:
           python -m unittest discover -s tests/knowledge -p 'test_*.py'
           vss knowledge package validate --input tests/fixtures/knowledge/knowledge-package-valid.json --environment development --correlation-id m3-4-ci-validation
       - name: Test movie contract validation
-        run: python -m unittest discover -s tests/movie_contracts -p 'test_*.py'
+        run: |
+          python -m unittest discover -s tests/movie_contracts -p 'test_*.py'
+          python -m unittest discover -s tests/character_continuity_contracts -p 'test_*.py'
       - name: Validate deterministic movie contract fixtures
         run: |
           PYTHONPATH=src python - <<'PY'

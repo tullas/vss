@@ -273,3 +273,32 @@ known-empty local revocation. Deferred are ranking, selection, approval, Plan
 IR, execution, scheduling, budgeting, external AI, media generation, durable
 audit, persistent revocation, and process isolation. Local JSONL is
 development-only and trusted Python remains in-process.
+
+## M5.1 character continuity contract threats
+
+M5.1 treats character references, identities, chronology sequences,
+observations, and results as untrusted inert data until strict validation.
+Exact ASCII IDs, project/source/breakdown/scene/sequence bindings, content
+digests, closed category payloads, conservative bounds, immutable schema and
+registry snapshots, recursively immutable validated values, and independent
+cross-field resolution mitigate character or scene substitution, display-name
+collision, alias confusion, actor/character conflation, chronology or sequence
+substitution, observation injection, arbitrary state/category fields, Unicode
+identity confusion, digest substitution, mutation after validation, and
+unbounded observation sets.
+
+Positive-only v1 observation states prevent silence from becoming absence.
+There is no persistence inheritance, contradiction discovery, repair,
+recommendation, Plan, approval, or execution field. Nested transition and
+contradiction records require exact resolved observations and remain explicit,
+qualified, inert structures. Provenance and confidence establish traceability
+and qualification only; they do not establish truth, rights clearance,
+cultural authority, performer identity, or Runtime authority.
+
+The future Context name is structural expectation only. No Context family,
+provider, rule engine, Gateway route, fallback, retrieval, or audit path exists
+in M5.1, preventing future-implementation confusion and CommandRunner policy
+drift. Deferred to M5.2/M5.3 are Context expiry/revocation, provider-view
+minimization, governed rule admission, contradiction discovery, and bounded
+analysis performance. Persistent revocation, durable audit, process isolation,
+external AI, alias/entity resolution, and production controls remain deferred.

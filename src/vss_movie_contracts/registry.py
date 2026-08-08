@@ -14,6 +14,15 @@ FILES = MappingProxyType({
     "scene_breakdown/1":"scene-breakdown-v1.schema.json",
     "generate_scene_production_options/1":"generate-scene-production-options-task-v1.schema.json",
     "scene_production_option_set/1":"scene-production-option-set-v1.schema.json",
+    "character_reference/1":"character-reference-v1.schema.json",
+    "character_identity/1":"character-identity-v1.schema.json",
+    "continuity_sequence/1":"continuity-sequence-v1.schema.json",
+    "character_observation/1":"character-observation-v1.schema.json",
+    "analyze_character_continuity/1":"analyze-character-continuity-task-v1.schema.json",
+    "character_continuity_observation_set/1":"character-continuity-observation-set-v1.schema.json",
+})
+COMPATIBILITY = MappingProxyType({
+    "analyze_character_continuity/1": "character_continuity_observation_set/1",
 })
 def _pairs(pairs):
     out={}
@@ -56,12 +65,13 @@ def _load(identity, filename):
     return {"identity":identity,"sha256":hashlib.sha256(raw).hexdigest(),"schema":freeze_json(schema)}
 
 class MovieContractRegistry:
-    __slots__=("registrations","schemas","digest")
+    __slots__=("registrations","schemas","compatibility","digest")
     def __init__(self):
         regs=tuple(MovieRegistration(i,"1",f"vss.movie.{i}/1") for i in FILES)
         schemas={i:_load(i,f) for i,f in FILES.items()}
         self.registrations=regs; self.schemas=freeze_json(schemas)
-        self.digest=canonical_digest({"registry":"movie_domain_contract_registry/1","registrations":[r.__dict__ if hasattr(r,"__dict__") else {"identity":r.identity,"version":r.version,"schema_identity":r.schema_identity,"lifecycle":r.lifecycle,"owner":r.owner} for r in regs],"schemas":{k:v["sha256"] for k,v in sorted(schemas.items())}})
+        self.compatibility=freeze_json(dict(COMPATIBILITY))
+        self.digest=canonical_digest({"registry":"movie_domain_contract_registry/1","registrations":[r.__dict__ if hasattr(r,"__dict__") else {"identity":r.identity,"version":r.version,"schema_identity":r.schema_identity,"lifecycle":r.lifecycle,"owner":r.owner} for r in regs],"schemas":{k:v["sha256"] for k,v in sorted(schemas.items())},"compatibility":dict(COMPATIBILITY)})
     @classmethod
     def built_in(cls): return cls()
     def resolve(self, identity, version=None):
@@ -71,3 +81,9 @@ class MovieContractRegistry:
         for r in self.registrations:
             if r.identity == qualified: return r
         raise MovieContractError("unknown movie contract")
+    def resolve_result(self, task_identity, result_identity):
+        self.resolve(task_identity)
+        self.resolve(result_identity)
+        if self.compatibility.get(task_identity) != result_identity:
+            raise MovieContractError("movie task/result compatibility is invalid")
+        return result_identity
