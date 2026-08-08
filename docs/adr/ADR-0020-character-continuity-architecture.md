@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -211,6 +211,10 @@ Presence is positive evidence only. Non-mention never creates an absence
 observation. A negative state must be an explicit admitted claim, not an
 inference from omitted text.
 
+This rule applies uniformly: a character, object, injury, location, costume, or
+other property not mentioned in a later scene does not establish absence,
+recovery, relocation, costume change, state reversal, or contradiction.
+
 ## Continuity state
 
 The architecture distinguishes:
@@ -230,6 +234,12 @@ Physical-state and possession values cannot be compared across categories. A
 state assertion does not persist forever. Persistence is **off by default** and
 exists only where a versioned rule explicitly declares its scope, prerequisites,
 and terminating transition.
+
+A later category may explicitly classify a state as scene-local/instantaneous,
+persistent-until-explicit-transition, or unknown-persistence, but there is no
+universal persistence mode. Such a rule must bind exact identity, sequence and
+known chronology, and must stop at an admitted removal/change transition or
+scope boundary.
 
 The deterministic v1 should prefer direct comparison of explicit claims over
 state propagation. Presence never persists beyond its scene. Possession and
@@ -265,6 +275,9 @@ The following are not automatically contradictions:
 - costume or state differs across an unknown time jump;
 - an explicit transition explains a state change;
 - scenes belong to different or unresolved continuity sequences.
+- a dream, flashback, flashforward, montage, retelling, nested story, or
+  parallel timeline lacks an explicit comparable relationship to the primary
+  sequence.
 
 A contradiction record contains a deterministic contradiction identity,
 category, exact character and sequence identities, involved observation and
@@ -508,6 +521,7 @@ human legal/cultural review; this ADR creates no such workflow.
 | contradiction suppression/fabricated transition | mandatory evidence, unknown/conflict preservation, independent result validation | human adjudication |
 | absence treated as contradiction | positive explicit evidence only; omission remains unknown | none needed for v1 |
 | provenance promoted to truth | semantic honesty and mandatory qualifications | external verification |
+| classification downgrade/trust promotion | exact request/Context/policy binding; classification may not downgrade and trust may not promote | authenticated policy assertions |
 | rights/cultural promotion | claims remain qualified; no clearance/authority fields | legal/cultural review |
 | unbounded combinatorics | fixed scene/character/observation/group/result bounds | measured long-film profiles |
 | provider overexposure | Gateway-owned immutable minimal view | process isolation |
@@ -622,8 +636,10 @@ automatic repair, fixed bounds, no Plan IR, and independent review.
 ## Roadmap
 
 - **ADR-0020:** Character Continuity Architecture (this documentation decision).
-- **M5.1:** character identity and continuity contracts, observation/result
-  schemas, strict validation only.
+- **M5.1:** character semantic identity/reference, continuity-sequence,
+  character-observation, `analyze_character_continuity/1`, and
+  `character_continuity_observation_set/1` contracts, schemas, validators, and
+  fixtures only; no Context Assembly or reasoning.
 - **M5.2:** Character Continuity Context Assembly, deterministic rule catalogue,
   and existing-Gateway reasoning path.
 - **M5.3:** bounded cross-scene contradiction/transition analysis and direct
