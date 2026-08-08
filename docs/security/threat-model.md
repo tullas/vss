@@ -302,3 +302,10 @@ drift. Deferred to M5.2/M5.3 are Context expiry/revocation, provider-view
 minimization, governed rule admission, contradiction discovery, and bounded
 analysis performance. Persistent revocation, durable audit, process isolation,
 external AI, alias/entity resolution, and production controls remain deferred.
+
+Cross-artifact dependencies are mandatory at the M5.1 validator boundary.
+Raw dictionaries, omitted dependencies, incomplete or extra reference sets,
+and artifacts of the wrong validated family cannot be promoted into a returned
+validated identity, sequence, observation, task, or result. Public validation
+errors use stable Movie-domain messages and do not concatenate jsonschema
+messages that could echo source-controlled values or schema details.

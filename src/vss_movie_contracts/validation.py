@@ -22,7 +22,7 @@ def _validate(value, identity, registry, maximum):
     if not isinstance(value,dict): raise MovieContractError("movie artifact must be an object")
     registry.resolve(identity)
     errors=list(Draft202012Validator(thaw_json(registry.schemas[identity]["schema"])).iter_errors(value))
-    if errors: raise MovieContractError("movie artifact does not match its contract: " + errors[0].message)
+    if errors: raise MovieContractError("movie artifact does not match its contract")
     return ValidatedMovieArtifact._create(value)
 
 def validate_story_fragment(value, registry=None):
@@ -129,7 +129,7 @@ def validate_character_reference(value, registry=None):
     _require_digest(result.value, "content_digest", "character reference")
     return result
 
-def validate_character_identity(value, references=(), registry=None):
+def validate_character_identity(value, references=None, registry=None):
     result = _validate(value, "character_identity/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
     _require_digest(result.value, "content_digest", "character identity")
     if result.value["ambiguity"]:
@@ -138,22 +138,23 @@ def validate_character_identity(value, references=(), registry=None):
         raise MovieContractError("character identity reference order is not canonical")
     if len(result.value["bound_reference_ids"]) != len(result.value["bound_reference_content_digests"]):
         raise MovieContractError("character identity reference digest binding is incomplete")
+    if not references:
+        raise MovieContractError("character identity requires independently validated references")
     supplied = {}
     for artifact in references:
-        ref = artifact.value if isinstance(artifact, ValidatedMovieArtifact) else validate_character_reference(artifact, registry).value
+        if not isinstance(artifact, ValidatedMovieArtifact) or artifact.value.get("contract_identity") != "character_reference":
+            raise MovieContractError("character identity requires independently validated references")
+        ref = artifact.value
         if ref["reference_id"] in supplied:
             raise MovieContractError("supplied character reference identity is duplicated")
         supplied[ref["reference_id"]] = ref
-    if supplied:
-        if set(supplied) != set(result.value["bound_reference_ids"]):
-            raise MovieContractError("character identity reference set is not exact")
-        for reference_id, reference_digest in zip(result.value["bound_reference_ids"], result.value["bound_reference_content_digests"]):
-            if reference_id not in supplied:
-                raise MovieContractError("character identity references an unknown declaration")
-            if supplied[reference_id]["project_id"] != result.value["project_id"]:
-                raise MovieContractError("character identity project binding mismatch")
-            if supplied[reference_id]["content_digest"] != reference_digest:
-                raise MovieContractError("character identity reference content substitution detected")
+    if set(supplied) != set(result.value["bound_reference_ids"]):
+        raise MovieContractError("character identity reference set is not exact")
+    for reference_id, reference_digest in zip(result.value["bound_reference_ids"], result.value["bound_reference_content_digests"]):
+        if supplied[reference_id]["project_id"] != result.value["project_id"]:
+            raise MovieContractError("character identity project binding mismatch")
+        if supplied[reference_id]["content_digest"] != reference_digest:
+            raise MovieContractError("character identity reference content substitution detected")
     return result
 
 def validate_continuity_sequence(value, scene_breakdown=None, registry=None):
@@ -165,14 +166,15 @@ def validate_continuity_sequence(value, scene_breakdown=None, registry=None):
         raise MovieContractError("continuity positions must be unique, contiguous, and explicitly ordered")
     if len({scene["scene_id"] for scene in scenes}) != len(scenes):
         raise MovieContractError("continuity sequence contains a duplicate scene")
-    if scene_breakdown is not None:
-        breakdown = scene_breakdown if isinstance(scene_breakdown, ValidatedMovieArtifact) else validate_scene_breakdown(scene_breakdown, registry)
-        data = breakdown.value
-        if data["project_id"] != result.value["project_id"] or breakdown.digest != result.value["scene_breakdown_digest"]:
-            raise MovieContractError("continuity sequence Scene Breakdown binding mismatch")
-        admitted = {scene["scene_id"]: scene["scene_content_digest"] for scene in data["payload"]["ordered_scenes"]}
-        if any(admitted.get(scene["scene_id"]) != scene["scene_content_digest"] for scene in scenes):
-            raise MovieContractError("continuity sequence scene binding mismatch")
+    if not isinstance(scene_breakdown, ValidatedMovieArtifact) or scene_breakdown.value.get("result_family") != "scene_breakdown":
+        raise MovieContractError("continuity sequence requires an independently validated Scene Breakdown")
+    breakdown = scene_breakdown
+    data = breakdown.value
+    if data["project_id"] != result.value["project_id"] or breakdown.digest != result.value["scene_breakdown_digest"]:
+        raise MovieContractError("continuity sequence Scene Breakdown binding mismatch")
+    admitted = {scene["scene_id"]: scene["scene_content_digest"] for scene in data["payload"]["ordered_scenes"]}
+    if any(admitted.get(scene["scene_id"]) != scene["scene_content_digest"] for scene in scenes):
+        raise MovieContractError("continuity sequence scene binding mismatch")
     return result
 
 def validate_character_observation(value, character_identity=None, continuity_sequence=None, registry=None):
@@ -181,21 +183,22 @@ def validate_character_observation(value, character_identity=None, continuity_se
     data = result.value
     if data["category"] != data["payload"]["kind"]:
         raise MovieContractError("character observation category and payload mismatch")
-    if character_identity is not None:
-        identity = character_identity if isinstance(character_identity, ValidatedMovieArtifact) else validate_character_identity(character_identity, registry=registry)
-        if data["character_id"] != identity.value["character_id"] or data["project_id"] != identity.value["project_id"]:
-            raise MovieContractError("character observation identity binding mismatch")
-    if continuity_sequence is not None:
-        sequence = continuity_sequence if isinstance(continuity_sequence, ValidatedMovieArtifact) else validate_continuity_sequence(continuity_sequence, registry=registry)
-        if data["project_id"] != sequence.value["project_id"] or data["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or data["continuity_sequence_digest"] != sequence.value["content_digest"]:
-            raise MovieContractError("character observation sequence binding mismatch")
-        scenes = {scene["scene_id"]: scene for scene in sequence.value["selected_scenes"]}
-        scene = scenes.get(data["scene_id"])
-        if scene is None or scene["scene_content_digest"] != data["scene_content_digest"] or scene["continuity_position"] != data["sequence_position"] or data["scene_breakdown_digest"] != sequence.value["scene_breakdown_digest"]:
-            raise MovieContractError("character observation scene binding mismatch")
+    if not isinstance(character_identity, ValidatedMovieArtifact) or character_identity.value.get("contract_identity") != "character_identity":
+        raise MovieContractError("character observation requires an independently validated character identity")
+    if not isinstance(continuity_sequence, ValidatedMovieArtifact) or continuity_sequence.value.get("contract_identity") != "continuity_sequence":
+        raise MovieContractError("character observation requires an independently validated continuity sequence")
+    identity = character_identity; sequence = continuity_sequence
+    if data["character_id"] != identity.value["character_id"] or data["project_id"] != identity.value["project_id"]:
+        raise MovieContractError("character observation identity binding mismatch")
+    if data["project_id"] != sequence.value["project_id"] or data["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or data["continuity_sequence_digest"] != sequence.value["content_digest"]:
+        raise MovieContractError("character observation sequence binding mismatch")
+    scenes = {scene["scene_id"]: scene for scene in sequence.value["selected_scenes"]}
+    scene = scenes.get(data["scene_id"])
+    if scene is None or scene["scene_content_digest"] != data["scene_content_digest"] or scene["continuity_position"] != data["sequence_position"] or data["scene_breakdown_digest"] != sequence.value["scene_breakdown_digest"]:
+        raise MovieContractError("character observation scene binding mismatch")
     return result
 
-def validate_character_continuity_task(value, registry=None, *, continuity_sequence=None, character_identities=()):
+def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     result = _validate(value, "analyze_character_continuity/1", registry, MAX_STORY_BYTES)
     registry.resolve_result("analyze_character_continuity/1", "character_continuity_observation_set/1")
@@ -203,18 +206,20 @@ def validate_character_continuity_task(value, registry=None, *, continuity_seque
     order = {name: index for index, name in enumerate(("presence", "possession", "physical_state"))}
     if list(result.value["selected_character_ids"]) != sorted(result.value["selected_character_ids"]) or list(result.value["selected_observation_categories"]) != sorted(result.value["selected_observation_categories"], key=order.__getitem__):
         raise MovieContractError("character continuity task selection order is not canonical")
-    if continuity_sequence is not None:
-        sequence = continuity_sequence if isinstance(continuity_sequence, ValidatedMovieArtifact) else validate_continuity_sequence(continuity_sequence, registry=registry)
-        if result.value["project_id"] != sequence.value["project_id"] or result.value["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or result.value["continuity_sequence_digest"] != sequence.value["content_digest"] or result.value["bounds"]["maximum_scenes"] < len(sequence.value["selected_scenes"]):
-            raise MovieContractError("character continuity task sequence binding mismatch")
-    if character_identities:
-        identities = [artifact if isinstance(artifact, ValidatedMovieArtifact) else validate_character_identity(artifact, registry=registry) for artifact in character_identities]
-        ids = [artifact.value["character_id"] for artifact in identities]
-        if len(ids) != len(set(ids)) or set(ids) != set(result.value["selected_character_ids"]) or any(artifact.value["project_id"] != result.value["project_id"] for artifact in identities) or result.value["bounds"]["maximum_characters"] < len(ids):
-            raise MovieContractError("character continuity task character binding mismatch")
+    if not isinstance(continuity_sequence, ValidatedMovieArtifact) or continuity_sequence.value.get("contract_identity") != "continuity_sequence":
+        raise MovieContractError("character continuity task requires an independently validated continuity sequence")
+    if not character_identities or any(not isinstance(artifact, ValidatedMovieArtifact) or artifact.value.get("contract_identity") != "character_identity" for artifact in character_identities):
+        raise MovieContractError("character continuity task requires independently validated character identities")
+    sequence = continuity_sequence
+    if result.value["project_id"] != sequence.value["project_id"] or result.value["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or result.value["continuity_sequence_digest"] != sequence.value["content_digest"] or result.value["bounds"]["maximum_scenes"] < len(sequence.value["selected_scenes"]):
+        raise MovieContractError("character continuity task sequence binding mismatch")
+    identities = list(character_identities)
+    ids = [artifact.value["character_id"] for artifact in identities]
+    if len(ids) != len(set(ids)) or set(ids) != set(result.value["selected_character_ids"]) or any(artifact.value["project_id"] != result.value["project_id"] for artifact in identities) or result.value["bounds"]["maximum_characters"] < len(ids):
+        raise MovieContractError("character continuity task character binding mismatch")
     return result
 
-def validate_character_continuity_observation_set(value, observations=(), continuity_sequence=None, registry=None, *, task=None):
+def validate_character_continuity_observation_set(value, observations=(), continuity_sequence=None, task=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     result = _validate(value, "character_continuity_observation_set/1", registry, MAX_RESULT_BYTES)
     registry.resolve_result("analyze_character_continuity/1", "character_continuity_observation_set/1")
@@ -239,7 +244,9 @@ def validate_character_continuity_observation_set(value, observations=(), contin
         raise MovieContractError("continuity structural record order is not canonical")
     supplied = {}
     for artifact in observations:
-        observation = artifact if isinstance(artifact, ValidatedMovieArtifact) else validate_character_observation(artifact, registry=registry)
+        if not isinstance(artifact, ValidatedMovieArtifact) or artifact.value.get("contract_identity") != "character_observation":
+            raise MovieContractError("continuity result requires independently validated observations")
+        observation = artifact
         if observation.value["observation_id"] in supplied:
             raise MovieContractError("supplied character observation identity is duplicated")
         supplied[observation.value["observation_id"]] = observation
@@ -263,17 +270,18 @@ def validate_character_continuity_observation_set(value, observations=(), contin
         for item in bindings: counts[item[field]] = counts.get(item[field], 0) + 1
         if any(count > 32 for count in counts.values()):
             raise MovieContractError("continuity result per-identity observation bound exceeded")
-    if continuity_sequence is not None:
-        sequence = continuity_sequence if isinstance(continuity_sequence, ValidatedMovieArtifact) else validate_continuity_sequence(continuity_sequence, registry=registry)
-        if data["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or data["continuity_sequence_digest"] != sequence.value["content_digest"] or data["project_id"] != sequence.value["project_id"]:
-            raise MovieContractError("continuity result sequence binding mismatch")
-    if task is not None:
-        admitted_task = task if isinstance(task, ValidatedMovieArtifact) else validate_character_continuity_task(task, registry)
-        for field in ("request_id", "correlation_id", "project_id", "continuity_sequence_id", "continuity_sequence_digest", "selected_character_ids", "selected_observation_categories"):
-            if data[field] != admitted_task.value[field]:
-                raise MovieContractError("continuity result task binding mismatch")
-        if len(bindings) > admitted_task.value["bounds"]["maximum_observations"]:
-            raise MovieContractError("continuity result task observation bound exceeded")
+    if not isinstance(continuity_sequence, ValidatedMovieArtifact) or continuity_sequence.value.get("contract_identity") != "continuity_sequence":
+        raise MovieContractError("continuity result requires an independently validated continuity sequence")
+    if not isinstance(task, ValidatedMovieArtifact) or task.value.get("task_identity") != "analyze_character_continuity":
+        raise MovieContractError("continuity result requires an independently validated task")
+    sequence = continuity_sequence; admitted_task = task
+    if data["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or data["continuity_sequence_digest"] != sequence.value["content_digest"] or data["project_id"] != sequence.value["project_id"]:
+        raise MovieContractError("continuity result sequence binding mismatch")
+    for field in ("request_id", "correlation_id", "project_id", "continuity_sequence_id", "continuity_sequence_digest", "selected_character_ids", "selected_observation_categories"):
+        if data[field] != admitted_task.value[field]:
+            raise MovieContractError("continuity result task binding mismatch")
+    if len(bindings) > admitted_task.value["bounds"]["maximum_observations"]:
+        raise MovieContractError("continuity result task observation bound exceeded")
     by_id = {item["observation_id"]: supplied[item["observation_id"]] for item in bindings}
     for transition in payload["explicit_transitions"]:
         material = dict(transition); digest = material.pop("transition_content_digest")

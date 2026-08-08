@@ -93,6 +93,41 @@ jobs:
           assert first == second
           print('movie registry/story/scene digests:', *first)
           PY
+      - name: Validate deterministic M5.1 character continuity fixtures
+        run: | # pragma: allowlist secret -- deterministic SHA-256 acceptance values below
+          PYTHONPATH=src:tests/character_continuity_contracts python - <<'PY'
+          from fixtures import identity, observation, reference, result, scene_breakdown, sequence, task
+          from vss_movie_contracts import (MovieContractRegistry, validate_character_reference,
+              validate_character_identity, validate_character_observation,
+              validate_character_continuity_observation_set, validate_character_continuity_task,
+              validate_continuity_sequence, validate_scene_breakdown)
+          expected = (
+              '7038570898b930aaea1193b7434b0781b303b9dc0a9022b1d03881be122213ab',
+              'f58e461dfa72934457109b301c00faac53df3efe7f5e4c99c6e2356fa95a301b',
+              '23f6062d723c948e2f1f5c64717d0e0d7f7afa019e5ef60f3052099aefe1f6d9',
+              '0b182656c967875794fce9489b9e0f29095f219c39f5d1f79d642eba66745a6f',
+              '6364ed22b81f711f9db631ebeab01b12f11cfeb1f80f2113ba1f8eefa85490c4',
+              '6b08807f038fe6d073ecfd5db2518aabc0599397aa0740f8bc6e7499283a3976',
+              '472ed146c7b0bd6334ab8db4c831971ce0df256ab8aab3751bc33fd4c396c295')
+          def run():
+              registry=MovieContractRegistry.built_in()
+              breakdown=validate_scene_breakdown(scene_breakdown(),registry)
+              sequence_value=sequence(breakdown)
+              admitted_sequence=validate_continuity_sequence(sequence_value,breakdown,registry)
+              reference_value=reference()
+              admitted_reference=validate_character_reference(reference_value,registry)
+              admitted_identity=validate_character_identity(identity([reference_value]),[admitted_reference],registry)
+              values=[observation(sequence_value,c,n) for c,n in (('presence',1),('possession',1),('physical_state',3))]
+              observations=[validate_character_observation(value,admitted_identity,admitted_sequence,registry) for value in values]
+              admitted_task=validate_character_continuity_task(task(sequence_value),admitted_sequence,[admitted_identity],registry)
+              admitted_result=validate_character_continuity_observation_set(result(sequence_value,values),observations,admitted_sequence,admitted_task,registry)
+              return (registry.digest, admitted_reference.value['content_digest'], admitted_identity.value['content_digest'],
+                  admitted_sequence.value['content_digest'], admitted_task.value['task_content_digest'],
+                  admitted_result.value['payload']['semantic_result_digest'], admitted_result.value['integrity']['complete_result_sha256'])
+          assert run() == expected
+          assert run() == expected
+          print('M5.1 deterministic fixture digests:', *expected)
+          PY
       - name: Test deterministic movie scene breakdown
         run: |
           PYTHONPATH=src python - <<'PY'

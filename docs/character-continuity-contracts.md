@@ -88,6 +88,23 @@ schemas reject unknown fields, remote/dynamic references, duplicate keys at
 hardened JSON loading, non-finite values, custom mappings, booleans as
 integers, excessive depth/nodes/bytes, and unsupported types.
 
+M5.1 validator APIs use one unambiguous guarantee: an artifact whose semantics
+depend on another artifact is returned as validated only after every dependency
+has been supplied as an independently validated immutable artifact and all
+identity, project, and digest bindings resolve exactly. Identity requires its
+complete reference set; a sequence requires its Scene Breakdown; an
+observation requires its character identity and sequence; a task requires its
+sequence and complete character set; and a result requires its exact
+observations, sequence, and task. Omitted, raw, incomplete, duplicate, or extra
+dependencies fail closed. There is no structurally-only validated-object mode.
+
+Content digests exclude their own digest field. The semantic-result digest uses
+the complete semantic payload with `semantic_result_digest` replaced by JSON
+`null`; the complete-result digest excludes itself by retaining only the
+already-verified payload digest in `integrity`. These domains remain distinct:
+a content, semantic, payload, complete-result, or registry digest cannot
+substitute for another.
+
 Limits include 2–8 scenes, 1–8 selected characters, 1–3 categories, at most
 128 observations, 32 transitions, 32 contradictions, 32 evidence references
 per observation, and a 64 KiB result. Validation never truncates and performs
