@@ -109,16 +109,20 @@ class CommandRunner:
                     report=scene_context_report(context)
                     return finish("success", ExitCode.SUCCESS, {"context": context.to_json_value(), "assembly_report": report, "context_digest": context.digest}, [])
                 if command == MOVIE_PROD_CONTEXT_COMMAND:
-                    from vss_movie_production_options import assemble_production_options_context
-                    req, breakdown=payload["request"],payload["scene_breakdown"]
-                    context=assemble_production_options_context(breakdown,request_id=req["request_id"],correlation_id=correlation,project_id=req["project_id"],scene_id=req["scene_id"],scene_content_digest=req["scene_content_digest"],environment=environment)
-                    return finish("success",ExitCode.SUCCESS,{"context":context.to_json_value(),"context_digest":context.digest},[])
+                    if frozenset(payload) != {"request","scene_breakdown"}: return finish("error",ExitCode.INVALID_INPUT,{},["production Context input is invalid"])
+                    from vss_context import ContextAssembler
+                    outcome=ContextAssembler().assemble_scene_production_options(payload["request"],payload["scene_breakdown"],correlation_id=correlation,environment=environment)
+                    from vss_reasoning_contracts.canonicalization import thaw_json
+                    return finish("success",ExitCode.SUCCESS,{"context":outcome.context.to_json_value(),"assembly_report":thaw_json(outcome.report),"summary":dict(outcome.summary)},[])
                 if command == MOVIE_PROD_COMMAND:
-                    from vss_movie_production_options import generate_production_options, validate_production_options_context
+                    if frozenset(payload) != {"request","context"}: return finish("error",ExitCode.INVALID_INPUT,{},["production request input is invalid"])
                     req, context=payload["request"],payload["context"]
-                    if req.get("correlation_id") != correlation or context.get("correlation_id") != correlation or context.get("request_id") != req.get("request_id"): return finish("error",ExitCode.INVALID_INPUT,{},["production request binding mismatch"])
-                    if dry_run: return finish("success",ExitCode.SUCCESS,{"ready":True,"provider_invoked":False},[])
-                    result=generate_production_options(validate_production_options_context(context)); return finish("success",ExitCode.SUCCESS,{"scene_production_option_set":result,"result_digest":canonical_digest(result)},[])
+                    gateway = self._reasoning_gateway
+                    if gateway is None:
+                        from vss_reasoning.gateway import ReasoningGateway
+                        gateway = ReasoningGateway.built_in()
+                    result=gateway.execute_scene_production_options(req,context,environment=environment,correlation_id=correlation,dry_run=dry_run)
+                    return finish("success",ExitCode.SUCCESS,result,[])
                 if frozenset(payload) != {"request", "context"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie breakdown input is invalid"])
                 req, context = payload["request"], payload["context"]
                 gateway = self._reasoning_gateway
@@ -127,8 +131,13 @@ class CommandRunner:
                     gateway = ReasoningGateway.built_in()
                 result = gateway.execute_scene_breakdown(req, context, environment=environment, correlation_id=correlation, dry_run=dry_run)
                 return finish("success", ExitCode.SUCCESS, result, [])
-            except Exception:
-                return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["movie scene breakdown failed"])
+            except Exception as exc:
+                from vss_context.audit import ContextAuditFailure
+                from vss_reasoning import InvalidReasoningRequest, ReasoningAuditFailure, ReasoningBudgetExceeded, ReasoningUnavailable
+                if isinstance(exc, (InvalidReasoningRequest, ReasoningBudgetExceeded)): return finish("error",ExitCode.INVALID_INPUT,{},["movie input is invalid"])
+                if isinstance(exc, ReasoningUnavailable): return finish("error",ExitCode.NOT_READY,{},["movie implementation is unavailable"])
+                if isinstance(exc, (ContextAuditFailure, ReasoningAuditFailure)): return finish("error",ExitCode.INTERNAL_ERROR,{},["movie audit failed"])
+                return finish("error", ExitCode.EXECUTION_FAILURE, {}, ["movie operation failed"])
         if command == PERFORMANCE_COMMAND:
             from vss_performance import (
                 InvalidPerformanceProfile,
@@ -195,6 +204,8 @@ class CommandRunner:
                     if dry_run:
                         return finish("success", ExitCode.SUCCESS, outcome, [])
                     return finish("success", ExitCode.SUCCESS, {"context": outcome.context.to_json_value(), "assembly_report": outcome.report.to_json_value(), "summary": dict(outcome.summary)}, [])
+                if payload.get("correlation_id") != correlation or payload.get("environment") != environment:
+                    return finish("error", ExitCode.INVALID_INPUT, {}, ["context binding is invalid"])
                 validated = validate_context(payload, assembler.registry)
                 return finish("success", ExitCode.SUCCESS, {"valid": True, "summary": {"context_id": validated.value["context_id"], "context_content_digest": validated.value["context_content_digest"], "complete_context_digest": validated.digest}}, [])
             except ContextAuditFailure:

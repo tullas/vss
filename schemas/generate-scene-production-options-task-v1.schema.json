@@ -1,0 +1,17 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"vss.movie.generate_scene_production_options/1",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","task_identity","task_version","request_id","correlation_id","project_id","environment","purpose","expected_context_family","expected_context_version","expected_result_family","expected_result_version","scene_breakdown_identity","scene_breakdown_version","scene_breakdown_digest","scene_id","scene_content_digest","classification","trust","bounds","lifecycle","implementation_availability"],
+  "properties":{
+    "schema_version":{"const":"1"},"task_identity":{"const":"generate_scene_production_options"},"task_version":{"const":"1"},
+    "request_id":{"type":"string","pattern":"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},"correlation_id":{"type":"string","pattern":"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "project_id":{"type":"string","pattern":"^[a-z][a-z0-9._-]{0,63}$"},"environment":{"const":"development"},"purpose":{"const":"scene_production_options_local_validation"},
+    "expected_context_family":{"const":"scene_production_options_context"},"expected_context_version":{"const":"1"},"expected_result_family":{"const":"scene_production_option_set"},"expected_result_version":{"const":"1"},
+    "scene_breakdown_identity":{"const":"scene_breakdown"},"scene_breakdown_version":{"const":"1"},"scene_breakdown_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "scene_id":{"type":"string","pattern":"^[a-z][a-z0-9._:-]{0,127}$"},"scene_content_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "classification":{"enum":["public","internal"]},"trust":{"const":"approved_fixture"},
+    "bounds":{"type":"object","additionalProperties":false,"required":["maximum_options","maximum_result_bytes","maximum_duration_ms"],"properties":{"maximum_options":{"type":"integer","minimum":1,"maximum":4},"maximum_result_bytes":{"type":"integer","minimum":4096,"maximum":65536},"maximum_duration_ms":{"type":"integer","minimum":1,"maximum":30000}}},
+    "lifecycle":{"const":"active"},"implementation_availability":{"const":"required"}
+  }
+}

@@ -65,6 +65,13 @@ def validate_context(value: Any, registry: ContextContractRegistry) -> Validated
             return validate_scene_context(value)
         except Exception as exc:
             raise InvalidContextInput("scene context is invalid") from exc
+    if value.get("context_family") == "scene_production_options_context":
+        from vss_movie_production_options import validate_production_options_context
+        try:
+            validated = validate_production_options_context(value, registry=registry)
+            return ValidatedContext.create(validated.to_json_value())
+        except Exception as exc:
+            raise InvalidContextInput("scene production options context is invalid") from exc
     _schema(value, registry.schema("vss.context_object/1").schema, "context is invalid")
     _schema(value["payload"], registry.schema("vss.generate_options_context/1").schema, "context payload is invalid")
     if value["context_family"] != "generate_options_context" or value["context_family_version"] != "1" or value["purpose"] != "generate_options_local_validation" or value["semantic_task"] != "generate_options" or value["semantic_task_version"] != "1" or value["lifecycle"] != "validated":

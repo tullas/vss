@@ -248,16 +248,16 @@ def main(argv: list[str] | None = None) -> int:
             return int(exc.exit_code)
 
     if args.action == "movie":
-        request, input_error = _read_reasoning_input(args.request)
+        request, input_error = _read_context_file(args.request)
         if args.movie_action in {"break-down-scenes","generate-scene-production-options"}:
             context, context_error = _read_context_file(args.context)
             input_error = input_error or context_error
             input_data = {"request": request, "context": context} if input_error is None else None
         elif args.movie_action == "context-assemble-scene-production-options":
-            scene_breakdown, scene_error = _read_reasoning_input(args.scene_breakdown); input_error=input_error or scene_error
+            scene_breakdown, scene_error = _read_context_file(args.scene_breakdown); input_error=input_error or scene_error
             input_data={"request":request,"scene_breakdown":scene_breakdown} if input_error is None else None
         else:
-            story, story_error = _read_reasoning_input(args.story)
+            story, story_error = _read_context_file(args.story)
             input_error = input_error or story_error
             input_data = {"request": request, "story": story} if input_error is None else None
     elif args.action == "reasoning":

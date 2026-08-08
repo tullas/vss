@@ -104,6 +104,28 @@ jobs:
               return context.digest, canonical_digest(result)
           assert run()==run(); print('scene context/result digests:', *run())
           PY
+      - name: Test governed movie scene production options
+        run: |
+          python -m unittest discover -s tests/movie_production_options -p 'test_*.py'
+          vss movie context-assemble-scene-production-options --request tests/fixtures/movie/scene-production-options-context-request-valid.json --scene-breakdown tests/fixtures/movie/scene-breakdown-valid.json --environment development --correlation-id m4-3-local-run
+          vss context validate --input tests/fixtures/movie/scene-production-options-context-valid.json --environment development --correlation-id m4-3-local-run
+          vss movie generate-scene-production-options --request tests/fixtures/movie/generate-scene-production-options-request-valid.json --context tests/fixtures/movie/scene-production-options-context-valid.json --environment development --correlation-id m4-3-local-run
+          vss movie generate-scene-production-options --request tests/fixtures/movie/generate-scene-production-options-request-valid.json --context tests/fixtures/movie/scene-production-options-context-valid.json --environment development --correlation-id m4-3-local-run --dry-run
+          python - <<'PY'
+          import json, subprocess
+          base=['vss','movie','generate-scene-production-options','--request','tests/fixtures/movie/generate-scene-production-options-request-valid.json','--context','tests/fixtures/movie/scene-production-options-context-valid.json','--environment','development','--correlation-id','m4-3-local-run']
+          one=json.loads(subprocess.run(base,check=True,capture_output=True,text=True).stdout)
+          two=json.loads(subprocess.run(base,check=True,capture_output=True,text=True).stdout)
+          dry=json.loads(subprocess.run(base+['--dry-run'],check=True,capture_output=True,text=True).stdout)
+          for result in (one,two,dry):
+              assert result['exit_code']==0 and result['correlation_id']=='m4-3-local-run' and result['status']=='success'
+          a,b=one['output'],two['output']
+          assert a['semantic_result_digest']==b['semantic_result_digest']
+          assert [o['option_id'] for o in a['scene_production_option_set']['payload']['options']]==[o['option_id'] for o in b['scene_production_option_set']['payload']['options']]
+          assert a['provider_call_count']==1 and dry['output']['readiness']['provider_call_count']==0
+          assert dry['output']['readiness']['result_digest'] is None
+          assert a['provider_visible_digest'] and a['invocation_binding_digest'] and a['profile_catalogue_digest']
+          PY
       - name: Test deterministic Context Assembly
         run: |
           python -m unittest discover -s tests/context -p 'test_*.py'
