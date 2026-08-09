@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -53,15 +53,17 @@ VSS adopts four implementation principles:
 > benchmarks.**
 
 Minimalism is subordinate to correctness, governance, security, reliability,
-and required quality. It removes unjustified machinery, never required safety
-controls.
+durability, recovery, performance, maintainability, and required quality. The
+operative rule is the **smallest sufficient reliable implementation**. It
+removes unjustified machinery, never required safety controls.
 
 ## Open-source-first, not open-source maximalism
 
 VSS prefers open standards and open-source implementations when they satisfy
 quality, security, performance, maintenance, portability, and licensing
-requirements. GitHub availability is not proof of acceptable licensing,
-maintenance, security, or cost.
+requirements, including ecosystem health and resource/operational cost. GitHub
+availability is not proof of acceptable licensing, maintenance, security, or
+cost.
 
 Open-source-first does not mean installing every useful open-source component.
 A candidate is rejected when it duplicates an existing capability, imposes
@@ -89,9 +91,13 @@ The default implementation preference is:
 9. a managed or cloud service.
 
 Moving downward requires measured evidence that every simpler applicable level
-is insufficient. A server database is not justified when an embedded store
-meets the workload. A broker is not justified when a bounded local queue meets
-it. Cluster orchestration is not justified to run one process.
+is insufficient. This is a preference order, not a mandatory sequence. A hard
+security, process-isolation, durability, or availability boundary may justify
+a lower level immediately—for example, an untrusted effectful plugin must not
+remain in-process merely to reduce component count. A server database is not
+justified when an embedded store meets the workload. A broker is not justified
+when a bounded local queue meets it. Cluster orchestration is not justified to
+run one process.
 
 ## Modular monolith and process boundaries
 
@@ -121,8 +127,10 @@ High-rate scheduling, hashing/chunking, cache indexing, high-throughput
 networking, host agents, CPU-heavy transformation, and sandbox hosts may later
 justify established native libraries or a bounded native component. Rust and
 C++ are examples, not selections. A benchmark must identify the hot path,
-quality/correctness constraints, expected benefit, interoperability cost, and
-rollback before a rewrite is admitted.
+quality/correctness constraints, memory, latency, throughput, low-level I/O or
+isolation need, expected end-to-end benefit, operational complexity,
+maintenance, portability, interoperability cost, and rollback before a rewrite
+is admitted. Microbenchmark speed alone is insufficient.
 
 ## State and data implementation
 
@@ -136,20 +144,25 @@ selected or mandated.
 
 An embedded transactional candidate must offer low idle CPU/RAM, crash-safe
 transactions, migrations, deterministic backup/export, adequate measured local
-concurrency, inspection, and mature maintenance.
+concurrency, operational observability, corruption detection/recovery,
+inspection, and mature maintenance. Domain data models and export formats must
+not silently depend on one embedded engine's private assumptions.
 
 A server database is considered only when measurements demonstrate multi-host
 concurrent writes, shared durable state, write concurrency beyond the embedded
 design, operational availability requirements, remote access, or transaction
 scale that the embedded solution cannot meet. No server database product is
-preselected.
+preselected. Migration cost, data conversion, rollback, and operating both
+states safely during a transition are part of the scale decision.
 
 ### Transactional state versus analytics
 
 Operational transactional state and analytics are separate concerns. Prefer
 on-demand or in-process analysis before an analytics service. Large scans must
 not burden Runtime's transactional or authorization path. No analytics product
-is selected.
+is selected. Measured volume, shared access, reporting latency, or operational
+reporting needs may later justify a dedicated analytical component through
+Component Admission.
 
 ### Asset storage
 
@@ -161,12 +174,18 @@ logical asset -> exact revision -> authoritative digest -> immutable blob
 
 This supports integrity, deduplication opportunities, stable identity,
 cacheability, migration, and workstation operation. It does not freeze a
-filesystem layout or implement storage.
+filesystem layout or implement storage. Content addressing is a storage
+mechanism, not an Asset Catalog, authorization decision, lifecycle decision, or
+proof of eligibility. Logical asset identity and the exact authoritative
+identity/revision/digest binding remain governed by ADR-0022. Garbage
+collection, retention, and deletion remain unresolved and domain/policy owned.
 
 Distributed or object storage becomes eligible only when measured capacity,
 multi-worker access, durability, remote execution, multi-host scale, archival,
 or geographic distribution exceeds practical local storage. S3, MinIO, Ceph,
-and other products are not selected.
+and other products are not selected. Capacity and demand trends may justify
+migration planning before failure; the trigger is measured forecast evidence,
+not a requirement to exhaust local storage first.
 
 ### Interoperability
 
@@ -182,18 +201,25 @@ Move compute toward data where practical before moving large data toward
 compute. Placement may consider cached assets, storage proximity, bandwidth,
 transfer cost, RAM/VRAM, GPU availability, and software compatibility.
 Locality is execution metadata—never semantic identity, authorization, or
-artifact eligibility.
+artifact eligibility. It cannot justify stale-cache substitution or override
+the exact admitted snapshot bindings of ADR-0022. Placement compares the total
+cost of moving data, moving compute, and recomputation; none is universally
+cheapest.
 
 Every large-data path should measure bytes read and written, network bytes,
 duplicate bytes, cache hit rate, and transfer time. Avoid repeated copying,
 unnecessary conversion, Runtime proxying, central staging, and eager transfer
 of unused content. Use governed references and lazy resolution where
-appropriate.
+appropriate. Copies required for durability, isolation, recovery, archival, or
+safe publication remain permitted and measured; the target is unnecessary
+copies, not zero copies.
 
 Prefer lazy asset resolution, tile/chunk access, bounded caches, demand-driven
 decoding, and streaming over loading entire assets or materializing every
 intermediate. These techniques must preserve equivalent required quality,
-integrity, authorization, and reproducibility evidence.
+integrity, authorization, and reproducibility evidence. Benchmark the actual
+access pattern: eager materialization or a sequential full scan may be cheaper
+or more correct for some codecs, libraries, and algorithms.
 
 The preferred locality hierarchy is same-process, same-machine, local-network,
 then remote-network when security and workload semantics permit. Crossing a
@@ -216,14 +242,22 @@ semantic validation
 
 Examples include preview before final render, low samples before full ray
 tracing, selected frames before a complete sequence, and proxy before final
-simulation. Quality thresholds remain domain- and policy-owned.
+simulation. Stages are used only where applicable; no operation must traverse
+every stage. A proxy cannot approve final output or replace an expensive check
+that is necessary to reveal final-resolution defects. Domain policy defines
+which final-quality checks remain mandatory. Quality thresholds and approval
+remain domain- and policy-owned.
 
 Cost optimization must not silently lower accepted final quality. The primary
 future measure is resource or cost per quality-approved artifact, not cost per
 invocation. Relevant evidence may include wall time, CPU/GPU seconds, peak
 RAM/VRAM, bytes read/written/transferred, storage growth, AI tokens,
 estimated/actual monetary cost, retries, rejections, and output acceptance. A
-cheap component that repeatedly fails may cost more than a higher-quality one.
+complete evaluation also accounts for downstream failures, human-review cost,
+latency, and delivery deadlines. A cheap component that repeatedly fails may
+cost more than a higher-quality one. Semantic correctness, render quality,
+audio quality, and other acceptance definitions remain domain owned; there is
+no universal quality score.
 
 ## Deterministic-first and AI escalation
 
@@ -243,7 +277,11 @@ deterministic rule
 
 Each escalation retains typed semantic contracts, qualification, provenance,
 classification, purpose, budget, and human approval where required. No model,
-runtime, API, or provider is selected.
+runtime, API, or provider is selected. Escalation is policy- and evidence-owned
+per task, not a globally hard-coded ladder. It stops only when the applicable
+acceptance criteria are satisfied or the governed budget/policy returns a
+qualified failure. This mechanism does not grant ranking, selection,
+authorization, or approval authority to a semantic provider.
 
 Local inference is considered before permanent remote use when quality,
 hardware, latency, energy/cost, privacy, and classification support it. Shared
@@ -251,7 +289,9 @@ inference becomes eligible when concurrency evidence shows per-process model
 copies or GPU underutilization cost more. A smaller model is preferred when it
 meets the quality threshold; a larger model requires measurable quality gain.
 Model admission later evaluates size, quantization, VRAM, CPU, latency,
-throughput, quality, provenance, licensing, security, update cadence, and cost.
+throughput, uncertainty, quality, provenance, privacy/classification,
+licensing, security, update cadence, and monetary/resource cost. Lower cost
+never permits silently lower accepted quality.
 
 ## Rendering and durable execution evolution
 
@@ -265,13 +305,17 @@ single workstation
 ```
 
 Do not build a render farm while workstation execution is adequate. No render
-manager is selected.
+manager is selected. Queue pressure, delivery deadline, total render time,
+utilization, isolation, hardware specialization, and total network/storage/
+operational cost—not worker count alone—govern each transition. Distribution
+is not presumed cheaper.
 
 Durable workflow infrastructure is admitted only after workloads demonstrate
 long-lived state, crash recovery, durable timers/waits, process-spanning
 retries, human approval pauses, resumability, or durable external effects.
 Current semantic operations do not justify it. No orchestration engine is
-selected.
+selected. Once those semantics exist, Component Admission must occur before
+they are implemented; minimalism cannot defer required recovery indefinitely.
 
 There is no default message broker. A broker requires demonstrated durable
 multi-host queues, decoupled independently scaling producers/consumers, event
@@ -289,13 +333,20 @@ Logical planes do not imply Kubernetes. Cluster orchestration requires actual
 deployed services/workers whose operation cannot be met more simply. No
 orchestrator is selected.
 
+These are “not default” decisions, not bans. A future Component Admission may
+approve a shared cache/coordination service, dedicated search, broker, or
+cluster orchestrator when measured requirements and total operational cost
+justify it.
+
 ## Minimum observability
 
 Observability matches deployment topology. Current local semantic work uses
 bounded logs, structured governance audit, simple metrics, and performance
 reports. Distributed Compute may later justify tracing, centralized logs, and
 distributed metrics. Do not operate that stack before distributed diagnosis
-requires it.
+requires it. Minimalism cannot remove the bounded evidence needed for incident
+response, recovery, security investigation, capacity planning, or production
+diagnosis.
 
 ADR-0021 remains authoritative: audit is not telemetry, telemetry is not
 lineage, and lineage is not authorization. Shared correlation identifiers do
@@ -315,12 +366,12 @@ Component Admission section in its ADR or milestone review. It must answer:
 7. What disk cost does it create?
 8. What network cost does it create?
 9. What storage amplification does it create?
-10. What maintenance and operator knowledge does it require?
-11. What backup and recovery obligations does it create?
-12. What security and CVE surface does it add?
+10. What maintenance, observability, and operator knowledge does it require?
+11. What backup, availability, incident-response, and recovery obligations does it create?
+12. What security, CVE, licensing, redistribution, and supply-chain surface does it add?
 13. What credentials and secrets does it introduce?
 14. What are its failure and degraded-mode behaviors?
-15. What upgrade, migration, compatibility, and rollback burden does it add?
+15. What upgrade, data-format/export, migration, compatibility, and rollback burden does it add?
 16. How does it affect local-first operation?
 17. What vendor, format, protocol, or data-layout lock-in does it create?
 18. How is it removed or replaced?
@@ -329,6 +380,9 @@ Component Admission section in its ADR or milestone review. It must answer:
 An unanswered material question rejects admission. Review considers total
 platform tax, not only feature benefit. A technically excellent component may
 be rejected when its marginal platform complexity exceeds measurable value.
+Review depth is proportional to impact: an in-process library receives a
+focused dependency/licensing/security/removal review, while a persistent or
+distributed service must answer the full operational checklist with evidence.
 
 ### Scale-trigger model
 
@@ -344,7 +398,8 @@ Triggers are evidence categories, not arbitrary numbers:
 | Local to distributed observability | Multi-host incidents and cross-service latency/failure attribution |
 
 Measurements establish thresholds in a future workload profile or decision;
-this ADR invents none.
+this ADR invents none. Forecasts and leading indicators may start migration or
+capacity planning before a hard limit or deadline is breached.
 
 ## Measurement discipline
 
@@ -358,7 +413,9 @@ governed end-to-end path, not only in isolation.
 Zero-idle-cost components are preferred: in-process libraries, embedded state,
 and on-demand tools should approach zero resource use when idle. A daemon may
 be justified by measured throughput, latency, cache warmth, model load cost,
-multi-client sharing, or durability.
+multi-client sharing, or durability. Component Admission compares idle cost
+against repeated startup, reload, warm-up, and duplicated-work cost; “turn
+everything off” is not a universal optimization.
 
 Storage efficiency minimizes duplicate immutable blobs, unnecessary
 intermediates, unbounded caches, and duplicate model copies without destroying
@@ -409,7 +466,9 @@ content-defined chunking, and newer vector/SIMD approaches using original
 synthetic, non-sensitive assets. Measure CPU, memory, deduplication ratio,
 storage and network savings, update behavior, and recovery complexity. The
 goal is reduced duplicate storage, backup volume, synchronization, and revision
-transfer. No chunker or layout is selected.
+transfer. Authoritative whole-artifact digest verification remains mandatory;
+chunk boundaries and deduplication cannot redefine canonical asset identity or
+weaken integrity. No chunker or layout is selected.
 
 ### High-speed hashing research
 
@@ -417,7 +476,8 @@ SHA-256 remains authoritative for current governance identities unless a
 future ADR changes it. Faster hashes may be evaluated only for
 non-authoritative chunk lookup, cache indexing, or deduplication when measured
 CPU benefit exceeds dual-hash storage and implementation risk. No digest domain
-changes here.
+changes here. Research must include collision behavior, adversarial inputs,
+namespace/domain separation, and safe fallback to the authoritative digest.
 
 ### WebAssembly/WASI research
 
@@ -425,21 +485,25 @@ WASM/WASI may be evaluated for bounded metadata transforms, validators, and
 lightweight deterministic or agent-generated extensions with explicit imports
 and low startup overhead. It is not presumed suitable for Blender, render
 engines, arbitrary DCC applications, or GPU-heavy work. Promotion requires a
-security/isolation review; no sandbox is implemented.
+security/isolation review covering host imports, filesystem and network scope,
+resource limits, escape risk, reproducibility, and any deterministic claims;
+no sandbox is implemented.
 
 ## Stable core
 
 Core components favor mature, inspectable, broadly supported, testable
 technology with stable formats, low idle resources, and straightforward
-backup/restore. Experimental dependencies remain outside authority,
+backup/restore. They must also be secure, well licensed, portable, and
+recovery-friendly. Experimental dependencies remain outside authority,
 authoritative identity, revocation, approval, and eligibility until promoted.
 This is the practical meaning of boring core, experimental edges.
 
 ## Licensing, supply chain, and build-versus-adopt
 
 Admission evaluates license compatibility, redistribution, commercial use,
-model/data/plugin licensing, and patent concerns where applicable. Open source
-does not waive these obligations.
+model/data/plugin and asset/content licensing, redistribution, commercial use,
+and patent concerns where applicable. Open source does not waive these
+obligations or establish commercial movie rights.
 
 Every dependency adds supply-chain and update cost. Prefer fewer dependencies;
 new ones must justify functionality, provenance, maintenance, security,
@@ -470,7 +534,9 @@ These profiles describe an evolution, not commitments or separate semantics:
   pools, and a large compute fleet.
 
 Deployment changes topology, never Runtime authority, contract meaning,
-identity, classification, purpose, or governance.
+identity, classification, purpose, or governance. Profiles are neither
+mandatory stages nor milestone entitlements; a deployment may remain at or
+skip a profile when evidence supports that topology.
 
 ## Architecture-review integration
 
@@ -487,6 +553,23 @@ test/review evidence that experiments remain non-authoritative. The matrix is
 not changed while this ADR is Proposed and no implementation exists.
 
 ## Relationship to M5 and future planes
+
+ADR-0023 refines physical implementation choice without superseding earlier
+authority or consistency decisions:
+
+- ADR-0014 remains authoritative for bounded workload profiles, measurement,
+  backpressure, failure, recovery, and local-first logical completeness.
+- ADR-0018 Contract Registries remain static, exact, and non-authorizing;
+  operational cost, capacity, component instances, and dynamic state do not
+  become registry content.
+- ADR-0021's four workload planes and Semantic Provider/Compute Worker boundary
+  remain unchanged. A modular monolith co-locates logical owners; it does not
+  merge their authority or responsibilities.
+- ADR-0022 remains authoritative for Runtime admission, control/data
+  separation, direct governed heavy-data access, exact immutable
+  identity/revision/digest snapshots, cache non-substitution, safe gates, and
+  output eligibility. Efficiency never requires heavy bytes through Runtime or
+  weakens those checks.
 
 M5.2 and M5.3 remain unchanged: Python, deterministic-first, bounded, local,
 non-effectful Semantic Plane work with no external service. ADR-0023 neither
@@ -602,6 +685,26 @@ covered GB/TB assets, GPU saturation, long duration, fan-out, disconnection,
 revocation in flight, and mixed local/distributed deployment. The resulting
 rule remains evidence-based: introduce the next component only when its total
 risk-adjusted cost is lower than the measured simpler alternative.
+
+Negative-space review also identified startup and warm-up cost, backup/restore
+time, data migration, operator recovery time, developer/agent cognitive load,
+power and hardware depreciation, licensing fees, cloud egress, cold-archive
+restore, checkpoints, retention, and quality-evaluation cost. They are not all
+universal metrics, but each becomes mandatory evidence when material to the
+proposed component or workload.
+
+Workload stress covered a one-user laptop; 20 concurrent semantic tasks; one
+30B local model and many concurrent AI requests; 10 TB local and 100 TB shared
+assets; 100 and 100,000 render frames; one and 100 GPUs; a disconnected worker;
+expensive cloud GPU and egress; large caches; strict deadlines; and
+security-sensitive proprietary source material. The strategy permits movement
+down the hierarchy when isolation, quality, capacity, deadline, or total cost
+requires it while retaining Runtime authority and exact ADR-0022 bindings.
+
+No web research was required. Comparison against the accepted VSS workload,
+data-locality, durable-execution, observability, and artifact-consistency
+decisions found no contradiction with mature industry principles; this is an
+internal consistency conclusion, not a vendor endorsement.
 
 ## Independent review requirements
 
