@@ -1,0 +1,37 @@
+# ADR Evidence Matrix
+
+This matrix separates accepted decisions from implemented evidence at the
+post-ADR-0022 baseline. Status values are deliberately closed.
+
+| ADR | Material invariant | Current owner | Current evidence | Automated evidence | Status | Future trigger | Review gate |
+|---|---|---|---|---|---|---|---|
+| ADR-0010 | Runtime alone authorizes and invokes capabilities | Runtime policy/controller | Manifest permissions are authorized before handler invocation | Runtime and architecture dependency suites | IMPLEMENTED_TESTED | New authority path | Milestone + Constitutional |
+| ADR-0010 | Capability identity is not authority | Runtime registry/policy | Exact manifest resolution is followed by separate policy authorization | Runtime tests | IMPLEMENTED_TESTED | Distributed authorization artifact | Constitutional |
+| ADR-0010 | Local bounded handler API remains scoped, not a heavy-data mandate | Runtime controller | Bounded dictionaries and local cooperative execution only | Runtime limits/tests | NOT_APPLICABLE_CURRENT_SEMANTIC_SCOPE | First heavy/effectful operation | Constitutional |
+| ADR-0011 | CLI is an adapter and domains do not depend back on it | CommandRunner/domain APIs | Direct domain API routing; legacy workflow adapter is quarantined | Architecture dependency suite | IMPLEMENTED_TESTED | New command/domain route | Milestone |
+| ADR-0011 | Errors and audit records are bounded and payload-minimized | Command/audit layers | Stable response envelope and hardened audit records | Command/security suites | IMPLEMENTED_TESTED | External boundary | Milestone |
+| ADR-0013 | Reasoning Gateway is semantic-only | Reasoning Gateway | Semantic validation, provider view, provider call, result validation, audit; no capabilities/workflows | Reasoning + architecture suites | IMPLEMENTED_TESTED | New reasoning family/provider | Milestone |
+| ADR-0013 | Semantic providers and results are non-authorizing/inert | Reasoning providers/contracts | Immutable bounded views and results; no Runtime/effect imports | Reasoning, contract, architecture suites | IMPLEMENTED_TESTED | External/effectful provider class | Constitutional |
+| ADR-0014 | Current concurrency, deadlines, iterations, calls, and bytes are bounded | Runtime/Reasoning/Performance | Thread-pool bounds, cooperative deadline, result/call limits, `ci_safe` profile | Runtime/reasoning/performance suites | IMPLEMENTED_TESTED | Changed workload class | Milestone |
+| ADR-0014 | Durable attempts, retries, recovery, and backpressure for effectful work | Future Compute Plane | No effectful worker exists | None appropriate now | DEFERRED_COMPUTE_PLANE | First worker/queue | Worker/Durable Execution ADR |
+| ADR-0015 | Knowledge freshness and revocation are domain eligibility only | Knowledge contracts/builder | Exact package lineage, lifecycle, validation-time checks | Knowledge suite | IMPLEMENTED_TESTED | Persistent/external Knowledge | Milestone |
+| ADR-0015 | Persistent production revocation | Future production governance | Current snapshots are repository/development scoped | None appropriate now | DEFERRED_PRODUCTION | Production/external provider | Constitutional |
+| ADR-0017 | Context is bounded, purpose-limited semantic delivery | Context Registry/assembler | Exact family, expiry, revocation, minimization, immutable content | Context/M4 suites | IMPLEMENTED_TESTED | New Context family | Milestone |
+| ADR-0017 | Context validity does not assert physical asset currency | Context APIs | No resolver/cache/path/asset-availability fields or behavior | Architecture dependency suite + source review | IMPLEMENTED_TESTED | First asset reference in Context | Constitutional |
+| ADR-0018 | Contract registries are static, exact, immutable, and non-authorizing | Federated registries | Repository-owned exact entries and deterministic digests | Registry/contract suites | IMPLEMENTED_TESTED | New registry/late registration | Milestone |
+| ADR-0018 | Registry contents exclude instances and dynamic budget/capacity | Federated registries | Entries describe kinds, schemas, compatibility, lifecycle only | Source review; current registry tests | IMPLEMENTED_NEEDS_EVIDENCE | First Asset Catalog or dynamic policy store | Constitutional |
+| ADR-0021 | Four planes are logical and deployment-neutral | Architecture | Decision only; current system occupies Control/Semantic scope | None appropriate now | NOT_APPLICABLE_CURRENT_SEMANTIC_SCOPE | Asset/Data or Compute subsystem | Constitutional |
+| ADR-0021 | Contract Registry differs from Asset Catalog | Future Asset Plane | No Asset Catalog or asset instances exist | Registry source review | DEFERRED_ASSET_PLANE | First asset architecture | Asset Architecture ADR |
+| ADR-0021 | Semantic Provider differs from Compute Worker | Reasoning providers/future Compute | Current providers are semantic-only | Architecture dependency suite | IMPLEMENTED_TESTED | First effectful worker | Constitutional |
+| ADR-0021 | Production worker isolation | Future Compute Plane | Trusted in-process execution is limited to current local semantic scope | None appropriate now | DEFERRED_COMPUTE_PLANE | Before effectful DCC/media worker | Worker/Durable Execution ADR |
+| ADR-0021 | Audit, telemetry, and artifact lineage remain distinct | Audit/Performance/future Asset Plane | Audit records governance; performance reports metrics; no media lineage claim | Audit/performance suites + source review | IMPLEMENTED_TESTED | First production artifact | Constitutional |
+| ADR-0022 | Static contract bounds differ from dynamic admission | Contracts/Runtime policy | Schemas/registries validate structure; Runtime separately authorizes permissions/providers | Contract/runtime suites | IMPLEMENTED_TESTED | Cost/hardware/quota admission | Milestone + Constitutional |
+| ADR-0022 | Full dynamic cost/resource admission | Future Runtime policy | Current policy covers permissions/providers, not cost, capacity, reservation, or pricing | None appropriate now | IMPLEMENTED_NEEDS_EVIDENCE | First resource-heavy operation | Constitutional |
+| ADR-0022 | Exact immutable production-input snapshot | Future Asset Plane | No effectful production input exists | None appropriate now | DEFERRED_ASSET_PLANE | First Asset/Data operation | Asset Architecture ADR |
+| ADR-0022 | Mutable aliases resolve before admission; cache cannot substitute | Future Asset Plane | No aliases, resolver, or cache exists | None appropriate now | DEFERRED_ASSET_PLANE | Resolver/catalog implementation | Asset Architecture ADR |
+| ADR-0022 | Safe-gate revalidation for queued/running work | Future Compute Plane | Current bounded calls revalidate at invocation; no queue/lease/checkpoint | None appropriate now | DEFERRED_COMPUTE_PLANE | First durable worker | Worker/Durable Execution ADR |
+| ADR-0022 | Worker success differs from output admission and preserves lineage | Future production governance | No effectful output admission exists | None appropriate now | DEFERRED_PRODUCTION | First effectful artifact output | Render/Output Admission ADR |
+
+No row is `VIOLATION` at this checkpoint. `IMPLEMENTED_NEEDS_EVIDENCE` does not
+grant the missing guarantee; it identifies an existing boundary whose future
+dynamic or cross-plane coverage is incomplete.
