@@ -26,7 +26,8 @@ Allowed types are `ARCHITECTURE_PRESSURE`, `RESEARCH_THEME`,
 ## Entry discipline
 
 New entries require current evidence, a present consequence, and a concrete
-reconsideration trigger. Resolve or retire entries when the question is decided
-or evidence invalidates it. Do not seed speculative product lists. Historical
-entries remain interpretable after resolution; retirement does not erase their
-decision history.
+reconsideration trigger. Duplicate questions are consolidated. Resolve or
+retire entries when the question is decided or evidence invalidates it;
+resolved/retired entries remain historical but leave the active decision
+surface. The active ledger stays intentionally small and does not seed
+speculative product lists. No archival system is implied.

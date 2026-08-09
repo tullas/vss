@@ -14,8 +14,16 @@ ownership, workload, or security boundary. A higher count never proves a
 problem, and a lower count never proves safety. There is deliberately no
 aggregate entropy score.
 
-Each snapshot records its counting definitions. Later snapshots must retain or
-explicitly revise those definitions before claiming a trend.
+Each snapshot records its counting definitions. If a definition changes, the
+new snapshot states the old definition, the new definition, and the reason.
+Historical snapshots are not rewritten, and no direct trend is drawn across
+incompatible definitions without an explicit qualification.
+
+Metrics must not be gamed. VSS does not refuse a legitimate contract version,
+hide packages, combine unrelated domains or registries, avoid required process
+isolation/services, delete tests, or collapse legitimate authority boundaries
+to improve a count. Counts are observation signals only; architecture quality
+remains a multidimensional evidence decision.
 
 ## Snapshot fields
 
@@ -29,6 +37,13 @@ Every snapshot records:
 - retirement and framework candidates; and
 - decision: `ACCEPTABLE`, `WATCH`, or
   `SIMPLIFY_BEFORE_NEXT_MAJOR_EXPANSION`.
+
+`LOW` means no material pressure currently evidenced. `WATCH` means retain the
+current design while explicitly reassessing the cited evidence at the next
+applicable major checkpoint. `HIGH` normally triggers focused simplification
+or architecture review before another major expansion; it does not mandate
+deletion, freeze unrelated safety work, or override a required reliability or
+security boundary.
 
 Tracked quantitative categories, when applicable, are contract families and
 versions, Context families/versions, registries, strategy/provider families,
@@ -69,6 +84,22 @@ These are scoped counts, not claims that all categories have identical cost.
 Capability, provider, workflow, and revocation registries remain separately
 governed and should be counted in a later snapshot only under a stated stable
 definition if total registry surface becomes a decision concern.
+
+The registration counts are recalculable from the `registrations` tuples of
+the four named Contract Registries. Movie and Context family counts collapse
+only the final `/version` segment of those registrations. First-party package
+count is the number of top-level `src/vss_*` directories. Strategy/provider and
+public-path counts are manual semantic inventories from the versioned built-in
+implementation registrations and Gateway public behavior; authority,
+framework, retirement, deviation, and service counts are explicitly
+reviewer-classified qualitative inventories rather than mechanically objective
+facts. A future snapshot must cite changed source boundaries or scripts.
+
+At 50, 100, or 500 contracts—and at tens of domains, providers, or services—the
+ledger should retain summary counts and pressure evidence rather than become a
+manual item catalogue. If recalculation becomes costly or unreliable, a future
+checkpoint may use a small repository script or generated evidence. Automation
+must preserve definitions and does not turn counts into targets.
 
 ### Change and pressure
 

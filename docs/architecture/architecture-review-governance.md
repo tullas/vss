@@ -74,6 +74,9 @@ Its concise outputs use only `KEEP`, `CHANGE`, `RESEARCH`, `REMOVE/RETIRE`, and
 `MISSION_ALIGNMENT` is `ALIGNED`, `ALIGNED_WITH_DRIFT_RISK`, or
 `REASSESS_BEFORE_MAJOR_EXPANSION`.
 
+The review should be only as long as needed to support those outputs. It is not
+a comprehensive re-acceptance of every ADR or a large recurring report.
+
 Every Strategic Review answers: **If the original VSS mission were reviewed
 against this milestone, would this still be recognizable as the intended
 system?** The answer addresses governed creative intelligence, human intent,
@@ -106,6 +109,12 @@ A framework proposal answers: what repeated, across which independent domains,
 which semantics are genuinely common, which remain domain-owned, what
 complexity disappears, what coupling appears, and whether the framework can be
 removed. Speculative generality is not a benefit.
+
+The progression does not require duplicating security- or correctness-critical
+logic merely to collect occurrences. A shared abstraction may be admitted
+earlier when it is the smallest reliable way to enforce a proven invariant;
+the proposal must still state its coupling, domain boundaries, and removal
+path.
 
 ## Entropy, surfaces, and retirement
 
@@ -161,6 +170,11 @@ assumption. This is not an indefinite freeze. A bounded review resolves to
 `CONTINUE`, `CONTINUE_WITH_GUARDRAIL`, `REMEDIATE_FIRST`, or
 `STRATEGIC_REASSESSMENT`.
 
+The requester must identify the concrete concern and affected scope. The pause
+does not anonymously or indefinitely veto the project, and unrelated safe work
+does not stop automatically. The legitimate project owner or assigned
+architecture reviewer bounds the review and records one of the four outcomes.
+
 ## Proportional governance
 
 Governance has operational and cognitive cost and must remain proportional.
@@ -175,6 +189,21 @@ machine-enforceable: contract packages do not depend on CommandRunner,
 semantic providers do not execute capabilities/workflows, exact version
 resolution remains closed, and the baseline Semantic Plane requires no network
 service. Add no speculative tests for absent Context/worker/service behavior.
+
+### Proportionality examples
+
+| Change | Normally applicable governance |
+|---|---|
+| Small bug fix | Ordinary code review and relevant tests |
+| New Character Continuity fixture | Normal milestone scope and contract tests |
+| New task contract version | Exact contract acceptance and compatibility evidence |
+| New semantic domain | Domain-admission justification and applicable architecture review |
+| New persistent database/service | Component Admission plus applicable architecture review |
+| New Compute Plane worker | Constitutional review and Worker/Durable Execution architecture gate |
+| Mission expansion into Film Learning | Strategic Review and Constitutional review as applicable |
+
+These examples are defaults, not a way to bypass a material authority,
+security, or contradiction concern.
 
 ## Future-workload stress matrix
 

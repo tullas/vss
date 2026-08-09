@@ -2,10 +2,12 @@
 
 ## Purpose
 
-These principles are durable tests for architecture and mission decisions.
-They do not replace accepted ADRs, human judgment, or evidence. When a proposal
-conflicts with a principle, it must identify the conflict and obtain an explicit
-architecture decision rather than weakening the principle by convenience.
+These principles are durable project constraints and a review lens. Specific
+accepted architecture decisions remain recorded in ADRs; this Constitution is
+not a competing approval authority above them. When a future ADR appears to
+conflict with a principle, the review must state and resolve the contradiction
+explicitly rather than silently overriding either document. These principles
+do not replace human judgment or evidence.
 
 ## Principles
 
@@ -60,7 +62,9 @@ VSS refuses to become:
 - an infrastructure zoo accumulated without measured need;
 - a Universal God Registry, Context, Work, Admission, or semantic object;
 - an architecture dependent on one model, vendor, or experimental technology;
-- an imitation or copying engine that loses reference provenance;
+- an imitation or copying engine that loses reference provenance; lawful,
+  eligible reference analysis, artistic study, influence, and learning remain
+  possible when their provenance and governance are preserved;
 - a system where convenience silently weakens authority, eligibility,
   provenance, security, or quality; or
 - a governance system whose paperwork grows faster than its decision value.
