@@ -612,7 +612,7 @@ class ReasoningGateway:
         context = None; view = None; result = None; invocation_digest = None
         request_id = None; calls = 0; status = "failed"; failure = "invalid_request"; revocation_result = "not_evaluated"; expiry_result = "not_evaluated"
         try:
-            from vss_movie_contracts import ValidatedMovieArtifact, validate_executable_character_continuity_task, validate_character_continuity_observation_set
+            from vss_movie_contracts import ValidatedMovieArtifact, validate_executable_character_continuity_task, validate_character_continuity_observation_set, validate_character_continuity_transition_evidence
             if not isinstance(task, ValidatedMovieArtifact):
                 raise InvalidReasoningRequest("character continuity requires an independently validated task")
             try:
@@ -642,8 +642,23 @@ class ReasoningGateway:
             supplied_observations = {item.value["observation_id"]:item.value["observation_content_digest"] for item in observations if isinstance(item, ValidatedMovieArtifact) and item.value.get("contract_identity") == "character_observation"}
             if supplied_observations != {item["observation_id"]:item["observation_content_digest"] for item in p["observations"]}:
                 failure = "observation_binding_mismatch"; raise InvalidReasoningRequest("character continuity observation binding is invalid")
-            supplied_transitions = {item.value["transition_evidence_id"]:item.value["content_digest"] for item in transition_evidence if isinstance(item, ValidatedMovieArtifact) and item.value.get("contract_identity") == "character_continuity_transition_evidence"}
-            if supplied_transitions != {item["transition_evidence_id"]:item["transition_evidence_digest"] for item in p.get("transition_evidence", ())}:
+            supplied_transitions = []
+            supplied_transition_ids = set()
+            transition_projection_keys = ("character_id", "category", "from_observation_id", "from_observation_digest", "to_observation_id", "to_observation_digest", "from_sequence_position", "to_sequence_position", "transition_basis", "evidence_references", "confidence", "assumptions", "unknowns", "limitations")
+            for item in transition_evidence:
+                if not isinstance(item, ValidatedMovieArtifact) or item.value.get("contract_identity") != "character_continuity_transition_evidence":
+                    failure = "transition_binding_mismatch"; raise InvalidReasoningRequest("character continuity transition evidence is not independently validated")
+                try:
+                    validated_transition = validate_character_continuity_transition_evidence(item.to_json_value(), tuple(observations), continuity_sequence)
+                except Exception as exc:
+                    failure = "transition_binding_mismatch"; raise InvalidReasoningRequest("character continuity transition evidence is invalid") from exc
+                if validated_transition.digest != item.digest or item.value["transition_evidence_id"] in supplied_transition_ids:
+                    failure = "transition_binding_mismatch"; raise InvalidReasoningRequest("character continuity transition evidence substitution rejected")
+                supplied_transition_ids.add(item.value["transition_evidence_id"])
+                value = item.to_json_value()
+                supplied_transitions.append({"transition_evidence_id":value["transition_evidence_id"], "transition_evidence_digest":value["content_digest"], **{key:value[key] for key in transition_projection_keys}})
+            supplied_transitions.sort(key=lambda item: item["transition_evidence_id"])
+            if freeze_json(supplied_transitions) != p.get("transition_evidence", ()):
                 failure = "transition_binding_mismatch"; raise InvalidReasoningRequest("character continuity transition evidence binding is invalid")
             now = self._policy_now()
             if now >= datetime.strptime(c["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc):

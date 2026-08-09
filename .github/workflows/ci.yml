@@ -165,8 +165,17 @@ jobs:
           assembled3,code=runner.run('movie.context-assemble-character-continuity','development',bundle3,task3.value['correlation_id']); assert code == 0
           context3=assembled3['output']['context']; validate_context(context3,ContextContractRegistry.built_in())
           result3,code=runner.run('movie.analyze-character-continuity','development',{**bundle3,'context':context3},task3.value['correlation_id']); assert code == 0
+          result3_again,code=runner.run('movie.analyze-character-continuity','development',{**bundle3,'context':context3},task3.value['correlation_id']); assert code == 0
+          dry3,code=runner.run('movie.analyze-character-continuity','development',{**bundle3,'context':context3},task3.value['correlation_id'],dry_run=True); assert code == 0
           assert len(result3['output']['character_continuity_observation_set']['payload']['explicit_transitions']) == 1
           assert result3['output']['character_continuity_observation_set']['payload']['contradictions'] == []
+          assert result3['output']['semantic_result_digest'] == result3_again['output']['semantic_result_digest']
+          assert dry3['output']['readiness']['provider_call_count'] == 0 and dry3['output']['readiness']['result_digest'] is None
+          bundle3_without={**bundle3,'transition_evidence':[]}
+          assembled_without,code=runner.run('movie.context-assemble-character-continuity','development',bundle3_without,task3.value['correlation_id']); assert code == 0
+          without,code=runner.run('movie.analyze-character-continuity','development',{**bundle3_without,'context':assembled_without['output']['context']},task3.value['correlation_id']); assert code == 0
+          assert without['output']['character_continuity_observation_set']['payload']['explicit_transitions'] == []
+          assert without['output']['character_continuity_observation_set']['payload']['contradictions'] == []
           PY
       - name: Test deterministic movie scene breakdown
         run: |

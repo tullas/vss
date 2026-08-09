@@ -328,6 +328,10 @@ def validate_character_continuity_observation_set(value, observations=(), contin
         if first is None or second is None or first is second or transition["from_observation_digest"] != first.value["observation_content_digest"] or transition["to_observation_digest"] != second.value["observation_content_digest"] or first.value["character_id"] != transition["character_id"] or second.value["character_id"] != transition["character_id"] or first.value["category"] != transition["category"] or second.value["category"] != transition["category"] or first.value["sequence_position"] >= second.value["sequence_position"]:
             raise MovieContractError("continuity transition binding is invalid")
     if admitted_task.value["task_version"] == "3":
+        transition_ids = [item["transition_id"] for item in payload["explicit_transitions"]]
+        contradiction_ids = [item["contradiction_id"] for item in payload["contradictions"]]
+        if len(transition_ids) != len(set(transition_ids)) or len(contradiction_ids) != len(set(contradiction_ids)):
+            raise MovieContractError("continuity analysis structural identity is duplicated")
         evidence = {}
         for artifact in transition_evidence:
             validated = validate_character_continuity_transition_evidence(artifact.to_json_value() if isinstance(artifact, ValidatedMovieArtifact) else artifact, observations, continuity_sequence, registry)

@@ -1,5 +1,6 @@
 import unittest
 from copy import deepcopy
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -11,15 +12,18 @@ sys.path.insert(0, str(ROOT / "tests" / "character_continuity_contracts"))
 from fixtures import identity, observation, reference, scene_breakdown, seal, sequence, task, transition_evidence
 from vss_context import ContextAssembler
 from vss_context_contracts import ContextContractRegistry
-from vss_movie_character_continuity import CharacterContinuityAnalysisRuleCatalogue, CharacterContinuityRuleCatalogue
+from vss_movie_character_continuity import CharacterContinuityAnalysisRuleCatalogue, CharacterContinuityRuleCatalogue, character_continuity_provider_view, validate_character_continuity_context
 from vss_movie_contracts import (
     MovieContractRegistry, validate_character_continuity_task,
+    validate_character_continuity_observation_set,
     validate_character_continuity_transition_evidence, validate_character_identity,
     validate_character_observation, validate_character_reference,
     validate_continuity_sequence, validate_executable_character_continuity_task,
     validate_scene_breakdown,
 )
 from vss_reasoning.gateway import ReasoningGateway
+from vss_reasoning.registry import ReasoningImplementationRegistry
+from vss_reasoning_contracts import canonical_digest
 
 
 class Audit:
@@ -112,6 +116,94 @@ class CharacterContinuityM53Tests(unittest.TestCase):
 
     def test_invalid_transition_fails_before_provider(self):
         with self.assertRaises(Exception): self.execute(transitions=())
+
+    def test_duplicate_transition_fails_before_provider(self):
+        audit = Audit()
+        gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=audit)
+        with self.assertRaises(Exception):
+            gateway.execute_character_continuity(
+                self.task_v3, self.assemble(), continuity_sequence=self.sequence,
+                character_identities=(self.identity,), observations=self.observations,
+                transition_evidence=(self.transition, self.transition), environment="development",
+                correlation_id=self.task_v3.value["correlation_id"],
+            )
+        self.assertEqual(audit.records[-1]["provider_call_count"], 0)
+
+    def test_resealed_context_transition_projection_fails_before_provider(self):
+        original = self.assemble()
+        original_digest = character_continuity_provider_view(original).provider_visible_digest
+        context = original.to_json_value()
+        context["payload"]["transition_evidence"][0]["evidence_references"].append("source:forged")
+        context["payload"]["transition_evidence"][0]["evidence_references"].sort()
+        context["context_content_digest"] = canonical_digest(context["payload"])
+        context["context_id"] = "continuity-context-" + context["context_content_digest"][:32]
+        context["integrity"]["complete_context_sha256"] = canonical_digest({**context, "integrity":{}})
+        resealed = validate_character_continuity_context(context)
+        self.assertNotEqual(character_continuity_provider_view(resealed).provider_visible_digest, original_digest)
+        audit = Audit()
+        gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=audit)
+        with self.assertRaises(Exception):
+            gateway.execute_character_continuity(
+                self.task_v3, context, continuity_sequence=self.sequence,
+                character_identities=(self.identity,), observations=self.observations,
+                transition_evidence=(self.transition,), environment="development",
+                correlation_id=self.task_v3.value["correlation_id"],
+            )
+        self.assertEqual(audit.records[-1]["provider_call_count"], 0)
+
+    def test_closed_positive_vocabulary_and_catalogue_reject_injection(self):
+        for category, state in (("presence", "absent"), ("possession", "does_not_possess")):
+            raw = observation(self.sequence.value, category, 1)
+            raw["payload"]["state"] = state
+            seal(raw, "observation_content_digest")
+            with self.assertRaises(Exception):
+                validate_character_observation(raw, self.identity, self.sequence, self.movie)
+        with self.assertRaises(FrozenInstanceError):
+            CharacterContinuityAnalysisRuleCatalogue.built_in().exact_incompatibilities = ("caller_rule",)
+        context = self.assemble().to_json_value()
+        context["payload"]["rule_catalogue_version"] = "latest"
+        context["context_content_digest"] = canonical_digest(context["payload"])
+        context["integrity"]["complete_context_sha256"] = canonical_digest({**context, "integrity":{}})
+        with self.assertRaises(Exception): validate_character_continuity_context(context)
+
+    def test_prior_result_cannot_substitute_for_transition_evidence(self):
+        result = self.execute()["character_continuity_observation_set"]
+        with self.assertRaises(Exception):
+            ContextAssembler(audit=Audit()).assemble_character_continuity(
+                self.task_v3, self.sequence, (self.identity,), self.observations,
+                transition_evidence=(result,), correlation_id=self.task_v3.value["correlation_id"],
+                environment="development",
+            )
+
+    def test_duplicate_result_transition_identity_is_rejected(self):
+        second_raw = transition_evidence(
+            self.sequence.value, self.observations[0].to_json_value(), self.observations[1].to_json_value()
+        )
+        second_raw["transition_evidence_id"] = "continuity-transition-evidence-anaya-physical-secondary"
+        seal(second_raw, "content_digest")
+        second = validate_character_continuity_transition_evidence(second_raw, self.observations, self.sequence, self.movie)
+        transitions = (self.transition, second)
+        context = self.assemble(transitions=transitions)
+        result = self.execute(context=context, transitions=transitions)["character_continuity_observation_set"]
+        result["payload"]["explicit_transitions"][1] = deepcopy(result["payload"]["explicit_transitions"][0])
+        result["payload"]["semantic_result_digest"] = canonical_digest({**result["payload"], "semantic_result_digest":None})
+        result["integrity"]["payload_sha256"] = canonical_digest(result["payload"])
+        result["integrity"]["complete_result_sha256"] = canonical_digest({**result, "integrity":{"payload_sha256":result["integrity"]["payload_sha256"]}})
+        with self.assertRaises(Exception):
+            validate_character_continuity_observation_set(
+                result, self.observations, self.sequence, self.task_v3,
+                transition_evidence=transitions,
+            )
+
+    def test_source_order_does_not_change_explicit_chronology(self):
+        context = ContextAssembler(audit=Audit()).assemble_character_continuity(
+            self.task_v3, self.sequence, (self.identity,), tuple(reversed(self.observations)),
+            transition_evidence=(self.transition,), correlation_id=self.task_v3.value["correlation_id"],
+            environment="development",
+        ).context
+        transition = self.execute(context=context)["character_continuity_observation_set"]["payload"]["explicit_transitions"][0]
+        self.assertEqual((transition["from_observation_id"], transition["to_observation_id"]),
+                         (self.observations[0].value["observation_id"], self.observations[1].value["observation_id"]))
 
     def test_determinism(self):
         context = self.assemble()
