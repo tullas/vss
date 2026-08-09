@@ -27,6 +27,7 @@ class ContextAssemblyTests(unittest.TestCase):
             ("generate_options_context", "1"), ("context_assembly_report", "1"),
             ("scene_breakdown_context", "1"),
             ("scene_production_options_context", "1"),
+            ("character_continuity_context", "1"),
         })
         with self.assertRaises(ContextContractError):
             first.resolve("context_object", "2")
@@ -78,7 +79,7 @@ class ContextAssemblyTests(unittest.TestCase):
         request = load(REQUEST)
         request["validation_time"] = "2020-01-01T00:00:00Z"
         result = ContextAssembler().assemble(request, [load(PACKAGE)], correlation_id=request["correlation_id"])
-        self.assertEqual(result.context.value["context_content_digest"], "18407e80203f3fd2716d1eac8afb1659478c0bbbe15166d00605f237bd8f2666")
+        self.assertEqual(result.context.value["context_content_digest"], "18407e80203f3fd2716d1eac8afb1659478c0bbbe15166d00605f237bd8f2666")  # pragma: allowlist secret
 
     def test_required_item_missing_fails_closed(self):
         request = load(REQUEST)

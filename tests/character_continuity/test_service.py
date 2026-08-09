@@ -1,0 +1,316 @@
+import copy
+import os
+import subprocess
+import sys
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tests" / "character_continuity_contracts"))
+
+from fixtures import identity, observation, reference, scene_breakdown, sequence, task
+from vss_context import CharacterContinuityAssemblyResult, ContextAssembler
+from vss_commands.runner import CommandRunner
+from vss_context_contracts import ContextContractRegistry, validate_context
+from vss_movie_character_continuity import CharacterContinuityProviderView, CharacterContinuityRuleCatalogue, character_continuity_provider_view
+from vss_movie_character_continuity import assemble_character_continuity_context
+from vss_movie_contracts import (
+    MovieContractRegistry, validate_character_identity, validate_character_observation,
+    validate_character_reference, validate_character_continuity_observation_set,
+    validate_character_continuity_task, validate_continuity_sequence,
+    validate_executable_character_continuity_task, validate_scene_breakdown,
+)
+from vss_movie_contracts.errors import MovieContractError
+from vss_movie_scene_breakdown import MovieRevocation, MovieRevocationSnapshot
+from vss_reasoning import InvalidReasoningRequest, ReasoningAuditFailure
+from vss_reasoning.gateway import ReasoningGateway
+from vss_reasoning.registry import ReasoningImplementationRegistry
+from vss_reasoning_contracts import canonical_digest
+from vss_reasoning_contracts.canonicalization import thaw_json
+from vss_reasoning_providers import DeterministicCharacterContinuityProvider
+
+
+class Audit:
+    def __init__(self, fail=False): self.records=[]; self.fail=fail
+    def append(self, record):
+        if self.fail: raise RuntimeError("audit unavailable")
+        self.records.append(record)
+
+
+class CountingFailAudit:
+    def __init__(self): self.attempts = 0
+    def append(self, record):
+        self.attempts += 1
+        raise RuntimeError("audit unavailable")
+
+
+class CharacterContinuityReasoningTests(unittest.TestCase):
+    def setUp(self):
+        self.movie = MovieContractRegistry.built_in(); self.context_registry = ContextContractRegistry.built_in()
+        self.breakdown = validate_scene_breakdown(scene_breakdown(), self.movie)
+        self.sequence = validate_continuity_sequence(sequence(self.breakdown), self.breakdown, self.movie)
+        self.reference = validate_character_reference(reference(), self.movie)
+        self.identity = validate_character_identity(identity([self.reference.to_json_value()]), [self.reference], self.movie)
+        raw = [observation(self.sequence.value, "presence", 1), observation(self.sequence.value, "possession", 1), observation(self.sequence.value, "physical_state", 2), observation(self.sequence.value, "physical_state", 3)]
+        raw[-1]["payload"]["state"] = "restrained"
+        raw[-1]["observation_content_digest"] = canonical_digest({k:v for k,v in raw[-1].items() if k != "observation_content_digest"})
+        self.observations = tuple(validate_character_observation(x, self.identity, self.sequence, self.movie) for x in raw)
+        self.task_v1 = validate_character_continuity_task(task(self.sequence.value), self.sequence, [self.identity], self.movie)
+        self.task = validate_executable_character_continuity_task(task(self.sequence.value, "2"), self.sequence, [self.identity], self.movie)
+        self.context_audit = Audit(); self.reasoning_audit = Audit()
+        assembled = ContextAssembler(audit=self.context_audit).assemble_character_continuity(self.task, self.sequence, (self.identity,), self.observations, correlation_id=self.task.value["correlation_id"], environment="development")
+        self.context = assembled.context; self.report = assembled.report
+        self.gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=self.reasoning_audit)
+
+    def execute(self, **kwargs):
+        return self.gateway.execute_character_continuity(kwargs.pop("task", self.task), kwargs.pop("context", self.context), continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"], **kwargs)
+
+    def test_exact_registry_evolution_and_context_registration(self):
+        self.assertEqual(self.movie.resolve_result("analyze_character_continuity/1", "character_continuity_observation_set/1"), "character_continuity_observation_set/1")
+        self.assertEqual(self.movie.resolve_result("analyze_character_continuity/2", "character_continuity_observation_set/1"), "character_continuity_observation_set/1")
+        self.assertEqual(self.context_registry.resolve("character_continuity_context", "1").schema_identity, "vss.character_continuity_context/1")
+        with self.assertRaises(Exception): self.context_registry.resolve("character_continuity_context", "latest")
+
+    def test_v1_remains_valid_but_cannot_assemble_or_execute(self):
+        self.assertEqual(self.task_v1.value["implementation_availability"], "not_implemented")
+        with self.assertRaises(Exception):
+            ContextAssembler(audit=Audit()).assemble_character_continuity(self.task_v1, self.sequence, (self.identity,), self.observations, correlation_id=self.task_v1.value["correlation_id"], environment="development")
+        with patch.object(DeterministicCharacterContinuityProvider, "analyze", autospec=True) as provider:
+            with self.assertRaises(InvalidReasoningRequest): self.execute(task=self.task_v1)
+            with self.assertRaises(InvalidReasoningRequest): self.execute(task=self.task_v1, dry_run=True)
+            self.assertEqual(provider.call_count, 0)
+
+    def test_context_is_generic_valid_bounded_and_report_is_safe(self):
+        validated = validate_context(self.context.to_json_value(), self.context_registry)
+        self.assertEqual(validated.value["semantic_task_version"], "2")
+        self.assertEqual(len(validated.value["payload"]["selected_scenes"]), 3)
+        self.assertEqual(self.report["observation_count"], 4)
+        self.assertNotIn("observations", self.report)
+        self.assertEqual(len(self.context_audit.records), 1)
+        self.assertIsInstance(ContextAssembler(audit=Audit()).assemble_character_continuity(self.task, self.sequence, (self.identity,), self.observations, correlation_id=self.task.value["correlation_id"], environment="development"), CharacterContinuityAssemblyResult)
+        with self.assertRaises(Exception):
+            self.report["status"] = "forged"
+
+    def test_assembly_requires_validated_bound_artifacts(self):
+        with self.assertRaises(Exception):
+            ContextAssembler(audit=Audit()).assemble_character_continuity(self.task.to_json_value(), self.sequence, (self.identity,), self.observations, correlation_id=self.task.value["correlation_id"], environment="development")
+        with self.assertRaises(Exception):
+            ContextAssembler(audit=Audit()).assemble_character_continuity(self.task, self.sequence.to_json_value(), (self.identity,), self.observations, correlation_id=self.task.value["correlation_id"], environment="development")
+
+    def test_provider_view_is_minimal_deeply_immutable_and_exact(self):
+        view = character_continuity_provider_view(self.context)
+        self.assertIs(type(view), CharacterContinuityProviderView)
+        exposed = set(view.__dataclass_fields__)
+        self.assertFalse(exposed & {"runtime","audit","registry","report","workflow","capability","path","provider","strategy"})
+        self.assertTrue(all("ordinal" not in scene for scene in view.scenes))
+        with self.assertRaises(Exception): view.project_id = "other"
+        with self.assertRaises(Exception): view.observations[0]["category"] = "location"
+        with self.assertRaises(TypeError): DeterministicCharacterContinuityProvider().analyze(self.context)
+        exported = thaw_json(view.observations[0]); exported["payload"]["state"] = "unconscious"
+        self.assertNotEqual(exported["payload"], thaw_json(view.observations[0])["payload"])
+
+    def test_catalogue_is_exact_immutable_and_persistence_is_off(self):
+        catalogue = CharacterContinuityRuleCatalogue.built_in()
+        self.assertEqual(catalogue.persistence, "off")
+        self.assertEqual(catalogue.admitted_categories, ("presence","possession","physical_state"))
+        self.assertEqual(catalogue.digest, CharacterContinuityRuleCatalogue.built_in().digest)
+        with self.assertRaises(Exception): catalogue.persistence = "on"
+
+    def test_gateway_calls_once_and_independently_validates_result(self):
+        with patch.object(DeterministicCharacterContinuityProvider, "analyze", autospec=True, side_effect=DeterministicCharacterContinuityProvider.analyze) as provider:
+            output = self.execute()
+            self.assertEqual(provider.call_count, 1)
+        self.assertEqual(output["provider_call_count"], 1)
+        validate_character_continuity_observation_set(output["character_continuity_observation_set"], self.observations, self.sequence, self.task)
+        self.assertEqual(len(self.reasoning_audit.records), 1)
+
+    def test_nonmention_never_becomes_absence_transition_or_contradiction(self):
+        result = self.execute()["character_continuity_observation_set"]
+        text = str(result).lower()
+        for forbidden in ("does_not_possess", "lost", "removed", "disappearance"):
+            self.assertNotIn(forbidden, text)
+        self.assertEqual(result["payload"]["explicit_transitions"], [])
+        self.assertEqual(result["payload"]["contradictions"], [])
+        self.assertFalse(result["payload"]["review_suggested"])
+
+    def test_changed_state_is_unknown_not_generic_contradiction(self):
+        result = self.execute()["character_continuity_observation_set"]
+        self.assertTrue(any("not generically contradictory" in x for x in result["payload"]["unknowns"]))
+
+    def test_dry_run_calls_zero_providers_and_returns_no_result(self):
+        with patch.object(DeterministicCharacterContinuityProvider, "analyze", autospec=True) as provider:
+            output = self.execute(dry_run=True)
+            self.assertEqual(provider.call_count, 0)
+        self.assertEqual(output["readiness"]["provider_call_count"], 0)
+        self.assertIsNone(output["readiness"]["result_digest"])
+
+    def test_invalid_expired_and_revoked_contexts_call_zero_providers(self):
+        invalid = self.context.to_json_value(); invalid["context_content_digest"] = "0"*64
+        expired = self.context.to_json_value(); expired["expires_at"] = expired["constructed_at"]; expired["integrity"]["complete_context_sha256"] = canonical_digest({**expired, "integrity":{}})
+        revocations = MovieRevocationSnapshot((MovieRevocation("character_observation", self.observations[0].value["observation_id"], self.observations[0].value["observation_content_digest"], "2000-01-01T00:00:00Z", "test"),))
+        with patch.object(DeterministicCharacterContinuityProvider, "analyze", autospec=True) as provider:
+            for context, rev in ((invalid,None),(expired,None),(self.context,revocations)):
+                with self.assertRaises(InvalidReasoningRequest): self.execute(context=context, revocations=rev)
+            self.assertEqual(provider.call_count, 0)
+
+    def test_policy_clock_enforces_before_exact_and_after_expiry(self):
+        expiry = datetime.strptime(self.context.value["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        before = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=Audit(), utc_clock=lambda: expiry - timedelta(seconds=1))
+        self.assertEqual(before.execute_character_continuity(self.task, self.context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"])["provider_call_count"], 1)
+        for instant in (expiry, expiry + timedelta(seconds=1)):
+            audit = Audit()
+            gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=audit, utc_clock=lambda instant=instant: instant)
+            with patch.object(DeterministicCharacterContinuityProvider, "analyze", autospec=True) as provider:
+                with self.assertRaises(InvalidReasoningRequest):
+                    gateway.execute_character_continuity(self.task, self.context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"])
+                self.assertEqual(provider.call_count, 0)
+            self.assertEqual(audit.records[-1]["expiry_result"], "expired")
+
+    def test_final_expiry_gate_uses_same_policy_clock_boundary(self):
+        expiry = datetime.strptime(self.context.value["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        instants = iter((expiry - timedelta(seconds=1), expiry))
+        audit = Audit()
+        gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=audit, utc_clock=lambda: next(instants))
+        with patch.object(DeterministicCharacterContinuityProvider, "analyze", autospec=True) as provider:
+            with self.assertRaises(InvalidReasoningRequest):
+                gateway.execute_character_continuity(self.task, self.context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"])
+            self.assertEqual(provider.call_count, 0)
+        self.assertEqual(audit.records[-1]["expiry_result"], "expired")
+
+    def test_invalid_policy_clock_fails_before_provider(self):
+        audit = Audit()
+        gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=audit, utc_clock=lambda: datetime(2026, 8, 8))
+        with patch.object(DeterministicCharacterContinuityProvider, "analyze", autospec=True) as provider:
+            with self.assertRaises(InvalidReasoningRequest):
+                gateway.execute_character_continuity(self.task, self.context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"])
+            self.assertEqual(provider.call_count, 0)
+
+    def test_post_gate_provider_failure_preserves_actual_audit_outcomes(self):
+        audit = Audit()
+        gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=audit)
+        with patch.object(DeterministicCharacterContinuityProvider, "analyze", autospec=True, side_effect=RuntimeError("provider failed")):
+            with self.assertRaises(Exception):
+                gateway.execute_character_continuity(self.task, self.context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"])
+        self.assertEqual(audit.records[-1]["expiry_result"], "eligible")
+        self.assertEqual(audit.records[-1]["revocation_result"], "eligible")
+        self.assertEqual(audit.records[-1]["provider_call_count"], 1)
+
+    def test_determinism_input_order_and_correlation_domains(self):
+        first = self.execute(); second = self.execute()
+        self.assertEqual(first["semantic_result_digest"], second["semantic_result_digest"])
+        self.assertEqual(first["provider_visible_digest"], second["provider_visible_digest"])
+        reverse = ContextAssembler(audit=Audit()).assemble_character_continuity(self.task, self.sequence, (self.identity,), tuple(reversed(self.observations)), correlation_id=self.task.value["correlation_id"], environment="development").context
+        self.assertEqual(reverse.value["context_content_digest"], self.context.value["context_content_digest"])
+
+    def test_semantic_digests_are_process_cwd_and_hash_seed_independent(self):
+        script = """
+from fixtures import identity,observation,reference,scene_breakdown,sequence,task
+from vss_movie_contracts import *
+from vss_movie_character_continuity import *
+from vss_reasoning_contracts import canonical_digest
+r=MovieContractRegistry.built_in(); b=validate_scene_breakdown(scene_breakdown(),r); s=validate_continuity_sequence(sequence(b),b,r); ref=validate_character_reference(reference(),r); ident=validate_character_identity(identity([ref.to_json_value()]),[ref],r); t=validate_executable_character_continuity_task(task(s.value,'2'),s,[ident],r); obs=validate_character_observation(observation(s.value,'possession',1),ident,s,r); c=assemble_character_continuity_context(t,s,(ident,),(obs,),validation_time='2026-08-08T00:00:00Z'); v=character_continuity_provider_view(c); notes=analyze_explicit_observations(v); out=create_character_continuity_result(v,{'request_id':t.value['request_id'],'correlation_id':t.value['correlation_id']},notes); print(c.value['context_content_digest'],v.provider_visible_digest,out['payload']['semantic_result_digest'])
+"""
+        env = dict(os.environ); env["PYTHONPATH"] = f"{ROOT/'src'}:{ROOT/'tests/character_continuity_contracts'}"
+        values=[]
+        for seed,cwd in (("1",ROOT),("991",Path("/tmp"))):
+            current=dict(env); current["PYTHONHASHSEED"]=seed; current["M5_2_HARMLESS"]="different-"+seed
+            values.append(subprocess.run([sys.executable,"-c",script],cwd=cwd,env=current,check=True,capture_output=True,text=True).stdout.strip())
+        self.assertEqual(values[0], values[1])
+
+    def test_fixed_fixture_acceptance_digests_repeat_exactly(self):
+        context = assemble_character_continuity_context(self.task, self.sequence, (self.identity,), self.observations, validation_time="2026-08-08T00:00:00Z")
+        gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=Audit(), utc_clock=lambda: datetime(2026,8,8,0,0,1,tzinfo=timezone.utc))
+        first = gateway.execute_character_continuity(self.task, context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"])
+        second = gateway.execute_character_continuity(self.task, context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"])
+        self.assertEqual((context.value["context_content_digest"],context.value["integrity"]["complete_context_sha256"],first["provider_visible_digest"],first["invocation_binding_digest"],first["semantic_result_digest"],first["complete_result_digest"]), (
+            "c30f2eb2034626b652b99994804fc9ae8fd0ad497148651e98c7ad0f3f22506d",  # pragma: allowlist secret
+            "a6b5d15047f4c98dd1ba16b58cd68ffe5d0471188d20cda43eb63fc6686a54b5",  # pragma: allowlist secret
+            "b0ee2a41bdaa5a817310847f584f45d6581740d996572abdb8d5fcb0cdb39ab4",  # pragma: allowlist secret
+            "c154285c325288de68d246848fabc1a3cf5de272634d6432dd585946071c2b3c",  # pragma: allowlist secret
+            "9b995b33bc25a37285d477134ec37469cbad2851562ca1cc7b93e3a1097b2abe",  # pragma: allowlist secret
+            "80922b91a072f3440825b3a22f60c0c6e64a3d427ada956addc3002909763323",  # pragma: allowlist secret
+        ))
+        self.assertEqual(first["invocation_binding_digest"], second["invocation_binding_digest"])
+
+    def test_concurrent_requests_are_isolated(self):
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(lambda _: self.execute(), range(12)))
+        self.assertEqual(len({x["semantic_result_digest"] for x in results}), 1)
+        self.assertEqual(len(self.reasoning_audit.records), 12)
+
+    def test_context_and_result_substitution_fail_closed(self):
+        bad = self.context.to_json_value(); bad["project_id"] = "other-project"; bad["integrity"]["complete_context_sha256"] = canonical_digest({**bad, "integrity":{}})
+        with self.assertRaises(InvalidReasoningRequest): self.execute(context=bad)
+        from vss_movie_character_continuity import create_character_continuity_result as create_result
+        def substituted(view, binding, notes):
+            candidate = create_result(view, binding, notes)
+            candidate["project_id"] = "other-project"
+            candidate["integrity"]["complete_result_sha256"] = canonical_digest({**candidate, "integrity":{"payload_sha256":candidate["integrity"]["payload_sha256"]}})
+            return candidate
+        with patch("vss_movie_character_continuity.create_character_continuity_result", side_effect=substituted):
+            with self.assertRaises(Exception): self.execute()
+
+    def test_safe_evidence_identifier_cannot_trigger_repr_based_honesty_failure(self):
+        raw = observation(self.sequence.value, "presence", 1)
+        raw["evidence_references"] = ["workflow-evidence-reference"]
+        raw["observation_content_digest"] = canonical_digest({k:v for k,v in raw.items() if k != "observation_content_digest"})
+        admitted = validate_character_observation(raw, self.identity, self.sequence, self.movie)
+        assembled = ContextAssembler(audit=Audit()).assemble_character_continuity(self.task, self.sequence, (self.identity,), (admitted,), correlation_id=self.task.value["correlation_id"], environment="development")
+        output = self.gateway.execute_character_continuity(self.task, assembled.context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=(admitted,), environment="development", correlation_id=self.task.value["correlation_id"])
+        self.assertEqual(output["provider_call_count"], 1)
+
+    def test_invocation_binding_distinguishes_observation_identity(self):
+        first = self.execute()["invocation_binding_digest"]
+        raw = self.observations[0].to_json_value()
+        raw["observation_id"] = "character-observation-presence-alternate"
+        raw["observation_content_digest"] = canonical_digest({k:v for k,v in raw.items() if k != "observation_content_digest"})
+        alternate = validate_character_observation(raw, self.identity, self.sequence, self.movie)
+        observations = (alternate,) + self.observations[1:]
+        assembled = ContextAssembler(audit=Audit()).assemble_character_continuity(self.task, self.sequence, (self.identity,), observations, correlation_id=self.task.value["correlation_id"], environment="development")
+        second = self.gateway.execute_character_continuity(self.task, assembled.context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=observations, environment="development", correlation_id=self.task.value["correlation_id"])["invocation_binding_digest"]
+        self.assertNotEqual(first, second)
+
+    def test_audit_failure_is_fatal_and_single_attempt(self):
+        audit = CountingFailAudit()
+        gateway = ReasoningGateway._for_testing(implementations=ReasoningImplementationRegistry.built_in(), audit=audit)
+        with self.assertRaises(ReasoningAuditFailure):
+            gateway.execute_character_continuity(self.task, self.context, continuity_sequence=self.sequence, character_identities=(self.identity,), observations=self.observations, environment="development", correlation_id=self.task.value["correlation_id"])
+        self.assertEqual(audit.attempts, 1)
+
+    def test_context_audit_failure_is_fatal_and_single_attempt(self):
+        for task_value in (self.task, self.task_v1):
+            audit = CountingFailAudit()
+            with self.assertRaises(Exception):
+                ContextAssembler(audit=audit).assemble_character_continuity(task_value, self.sequence, (self.identity,), self.observations, correlation_id=task_value.value["correlation_id"], environment="development")
+            self.assertEqual(audit.attempts, 1)
+
+    def test_concurrent_valid_and_pre_provider_failures_do_not_mix(self):
+        expired = self.context.to_json_value(); expired["expires_at"] = expired["constructed_at"]; expired["integrity"]["complete_context_sha256"] = canonical_digest({**expired, "integrity":{}})
+        def run(index):
+            try:
+                if index % 3 == 0: return self.execute(task=self.task_v1)
+                if index % 3 == 1: return self.execute(context=expired)
+                return self.execute()
+            except InvalidReasoningRequest:
+                return None
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            results = list(pool.map(run, range(18)))
+        successes = [item for item in results if item is not None]
+        self.assertEqual(len(successes), 6)
+        self.assertEqual(len({item["semantic_result_digest"] for item in successes}), 1)
+        self.assertEqual(len(self.reasoning_audit.records), 18)
+        self.assertEqual(sum(record["provider_call_count"] for record in self.reasoning_audit.records), 6)
+
+    def test_narrow_command_routes_assemble_and_analyze_without_policy_logic(self):
+        bundle = {"task":self.task.to_json_value(), "scene_breakdown":self.breakdown.to_json_value(), "continuity_sequence":self.sequence.to_json_value(), "character_references":[self.reference.to_json_value()], "character_identities":[self.identity.to_json_value()], "character_observations":[x.to_json_value() for x in self.observations]}
+        assembled, code = CommandRunner(reasoning_gateway=self.gateway).run("movie.context-assemble-character-continuity", "development", bundle, self.task.value["correlation_id"])
+        self.assertEqual(code, 0)
+        analyzed, code = CommandRunner(reasoning_gateway=self.gateway).run("movie.analyze-character-continuity", "development", {**bundle, "context":assembled["output"]["context"]}, self.task.value["correlation_id"])
+        self.assertEqual(code, 0)
+        self.assertEqual(analyzed["output"]["provider_call_count"], 1)
+
+
+if __name__ == "__main__": unittest.main()

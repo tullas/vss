@@ -19,10 +19,12 @@ FILES = MappingProxyType({
     "continuity_sequence/1":"continuity-sequence-v1.schema.json",
     "character_observation/1":"character-observation-v1.schema.json",
     "analyze_character_continuity/1":"analyze-character-continuity-task-v1.schema.json",
+    "analyze_character_continuity/2":"analyze-character-continuity-task-v2.schema.json",
     "character_continuity_observation_set/1":"character-continuity-observation-set-v1.schema.json",
 })
 COMPATIBILITY = MappingProxyType({
     "analyze_character_continuity/1": "character_continuity_observation_set/1",
+    "analyze_character_continuity/2": "character_continuity_observation_set/1",
 })
 def _pairs(pairs):
     out={}
@@ -67,7 +69,14 @@ def _load(identity, filename):
 class MovieContractRegistry:
     __slots__=("registrations","schemas","compatibility","digest")
     def __init__(self):
-        regs=tuple(MovieRegistration(i,"1",f"vss.movie.{i}/1") for i in FILES)
+        regs=tuple(
+            MovieRegistration(
+                i,
+                i.rsplit("/", 1)[1],
+                f"vss.movie.{i}/1" if i.rsplit("/", 1)[1] == "1" else f"vss.movie.{i}",
+            )
+            for i in FILES
+        )
         schemas={i:_load(i,f) for i,f in FILES.items()}
         self.registrations=regs; self.schemas=freeze_json(schemas)
         self.compatibility=freeze_json(dict(COMPATIBILITY))
