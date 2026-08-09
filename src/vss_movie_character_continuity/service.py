@@ -211,9 +211,11 @@ def assemble_character_continuity_context(task: ValidatedMovieArtifact, sequence
     return validate_character_continuity_context(context)
 
 
-def character_continuity_context_report(context: CharacterContinuityContext) -> Any:
+def character_continuity_context_report(context: CharacterContinuityContext, *, revocation_result: str = "not_evaluated") -> Any:
+    if revocation_result not in {"not_evaluated", "eligible"}:
+        raise ValueError("character continuity report revocation outcome is invalid")
     c = validate_character_continuity_context(context).to_json_value(); p = c["payload"]
-    report = {"schema_version":"1", "report_family":"character_continuity_context_assembly_report", "report_version":"1", "request_id":c["request_id"], "correlation_id":c["correlation_id"], "context_id":c["context_id"], "context_family":"character_continuity_context", "context_version":"1", "project_id":c["project_id"], "purpose":c["purpose"], "classification":c["classification"], "scene_count":len(p["selected_scenes"]), "character_count":len(p["selected_characters"]), "observation_count":len(p["observations"]), "input_set_digest":c["input_set_digest"], "selection_digest":c["selection_digest"], "context_content_digest":c["context_content_digest"], "complete_context_digest":context.digest, "rule_catalogue_digest":p["rule_catalogue_digest"], "expires_at":c["expires_at"], "revocation_result":"eligible", "status":"success"}
+    report = {"schema_version":"1", "report_family":"character_continuity_context_assembly_report", "report_version":"1", "request_id":c["request_id"], "correlation_id":c["correlation_id"], "context_id":c["context_id"], "context_family":"character_continuity_context", "context_version":"1", "project_id":c["project_id"], "purpose":c["purpose"], "classification":c["classification"], "scene_count":len(p["selected_scenes"]), "character_count":len(p["selected_characters"]), "observation_count":len(p["observations"]), "input_set_digest":c["input_set_digest"], "selection_digest":c["selection_digest"], "context_content_digest":c["context_content_digest"], "complete_context_digest":context.digest, "rule_catalogue_digest":p["rule_catalogue_digest"], "expires_at":c["expires_at"], "revocation_result":revocation_result, "status":"success"}
     report["report_digest"] = canonical_digest(report)
     return freeze_json(report)
 

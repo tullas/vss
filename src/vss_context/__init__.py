@@ -1,5 +1,5 @@
-from .assembler import ContextAssembler, ContextPolicy
+from .assembler import CharacterContinuityAssemblyResult, ContextAssembler, ContextPolicy
 from .audit import ContextAuditFailure, DevelopmentContextAudit
 from .errors import *
 
-__all__ = ["ContextAssembler", "ContextPolicy", "ContextAuditFailure", "DevelopmentContextAudit"]
+__all__ = ["CharacterContinuityAssemblyResult", "ContextAssembler", "ContextPolicy", "ContextAuditFailure", "DevelopmentContextAudit"]

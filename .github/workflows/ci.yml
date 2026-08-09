@@ -134,6 +134,31 @@ jobs:
         run: |
           python -m unittest discover -s tests/character_continuity -p 'test_*.py'
           python -m unittest discover -s tests/character_continuity_contracts -p 'test_*.py'
+          PYTHONPATH=src:tests/character_continuity_contracts python - <<'PY'
+          from fixtures import identity, observation, reference, scene_breakdown, sequence, task
+          from vss_commands.runner import CommandRunner
+          from vss_context_contracts import validate_context
+          from vss_movie_contracts import (MovieContractRegistry, validate_character_identity,
+              validate_character_observation, validate_character_reference,
+              validate_continuity_sequence, validate_executable_character_continuity_task,
+              validate_scene_breakdown)
+          registry=MovieContractRegistry.built_in(); breakdown=validate_scene_breakdown(scene_breakdown(),registry)
+          seq=validate_continuity_sequence(sequence(breakdown),breakdown,registry); ref=validate_character_reference(reference(),registry)
+          ident=validate_character_identity(identity([ref.to_json_value()]),[ref],registry)
+          executable=validate_executable_character_continuity_task(task(seq.value,'2'),seq,[ident],registry)
+          obs=validate_character_observation(observation(seq.value,'possession',1),ident,seq,registry)
+          bundle={'task':executable.to_json_value(),'scene_breakdown':breakdown.to_json_value(),'continuity_sequence':seq.to_json_value(),'character_references':[ref.to_json_value()],'character_identities':[ident.to_json_value()],'character_observations':[obs.to_json_value()]}
+          runner=CommandRunner(); assembled,code=runner.run('movie.context-assemble-character-continuity','development',bundle,executable.value['correlation_id'])
+          assert code == 0; context=assembled['output']['context']; validate_context(context)
+          one,code=runner.run('movie.analyze-character-continuity','development',{**bundle,'context':context},executable.value['correlation_id']); assert code == 0
+          two,code=runner.run('movie.analyze-character-continuity','development',{**bundle,'context':context},executable.value['correlation_id']); assert code == 0
+          dry,code=runner.run('movie.analyze-character-continuity','development',{**bundle,'context':context},executable.value['correlation_id'],dry_run=True); assert code == 0
+          assert one['output']['semantic_result_digest'] == two['output']['semantic_result_digest']
+          assert dry['output']['readiness']['provider_call_count'] == 0 and dry['output']['readiness']['result_digest'] is None
+          assert not any(term in str(one['output']).lower() for term in ('does_not_possess',' lost','removed','transition_id','contradiction_id'))
+          validation_only={**bundle,'task':task(seq.value,'1')}; denied,code=runner.run('movie.analyze-character-continuity','development',{**validation_only,'context':context},executable.value['correlation_id'])
+          assert code != 0
+          PY
       - name: Test deterministic movie scene breakdown
         run: |
           PYTHONPATH=src python - <<'PY'

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -39,6 +40,13 @@ class ContextPolicy:
     @property
     def digest(self) -> str:
         return canonical_digest({"identity": self.identity, "version": self.version, "purpose": self.purpose, "package_purpose": self.package_purpose, "environment": self.environment, "project_id": self.project_id, "maximum_lifetime_seconds": self.maximum_lifetime_seconds})
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterContinuityAssemblyResult:
+    context: Any
+    report: Any
+    summary: Mapping[str, Any]
 
 
 class ContextAssembler:
@@ -269,13 +277,13 @@ class ContextAssembler:
             if any(snapshot.evaluate(kind, identity, digest, construction_time) != "eligible" for kind, identity, digest in targets):
                 raise ContextPolicyDenied("character continuity Context material is revoked")
             context = assemble_character_continuity_context(task, sequence, tuple(identities), tuple(observations), classification=classification, validation_time=validation_time)
-            report = character_continuity_context_report(context)
+            report = character_continuity_context_report(context, revocation_result="eligible")
             audit_attempted = True
             self._audit_sink.append({"event_type":"character_continuity_context_assembly_completed", "recorded_at":_iso(datetime.now(timezone.utc)), "assembly_execution_id":uuid.uuid4().hex, "request_id":request["request_id"], "correlation_id":correlation_id, "project_id":request["project_id"], "environment":environment, "purpose":request["purpose"], "context_identity":"character_continuity_context/1", "context_content_digest":context.value["context_content_digest"], "complete_context_digest":context.digest, "continuity_sequence_id":sequence.value["continuity_sequence_id"], "continuity_sequence_digest":sequence.value["content_digest"], "scene_count":len(sequence.value["selected_scenes"]), "character_count":len(identities), "observation_count":len(observations), "rule_catalogue_digest":catalogue.digest, "report_digest":report["report_digest"], "revocation_result":"eligible", "expiry":context.value["expires_at"], "status":"success", "duration_ms":max(0, int((time.monotonic()-started)*1000))})
-            return type("CharacterContinuityAssemblyResult", (), {"context":context, "report":report, "summary":MappingProxyType({"context_id":context.value["context_id"], "input_set_digest":context.value["input_set_digest"], "selection_digest":context.value["selection_digest"], "context_content_digest":context.value["context_content_digest"], "complete_context_digest":context.digest, "report_digest":report["report_digest"], "registry_digest":self._registry.digest})})()
-        except Exception:
+            return CharacterContinuityAssemblyResult(context=context, report=report, summary=MappingProxyType({"context_id":context.value["context_id"], "input_set_digest":context.value["input_set_digest"], "selection_digest":context.value["selection_digest"], "context_content_digest":context.value["context_content_digest"], "complete_context_digest":context.digest, "report_digest":report["report_digest"], "registry_digest":self._registry.digest}))
+        except Exception as exc:
             if audit_attempted:
-                raise
+                raise ContextAuditFailure("context audit failed") from exc
             try:
                 self._audit_sink.append({"event_type":"character_continuity_context_assembly_failed", "recorded_at":_iso(datetime.now(timezone.utc)), "assembly_execution_id":uuid.uuid4().hex, "request_id":request.get("request_id"), "correlation_id":correlation_id, "project_id":request.get("project_id"), "environment":environment, "purpose":request.get("purpose"), "context_identity":"character_continuity_context/1", "status":"failed", "duration_ms":max(0, int((time.monotonic()-started)*1000))})
             except Exception as audit_exc:

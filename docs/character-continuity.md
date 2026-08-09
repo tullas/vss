@@ -77,6 +77,26 @@ expiry, revocation, substitution, or any pre-provider failure produces zero
 provider calls. There is no fallback, retry, alternate provider, or weaker
 context-free mode.
 
+Expiry eligibility uses a Gateway-owned UTC policy clock. Both the initial and
+final pre-provider checks treat the exact expiry instant as expired. Wall time
+is excluded from provider-visible material and semantic results. Context
+construction uses normalized local-policy UTC time; caller-selected construction
+time remains limited to the exact committed deterministic fixture binding.
+
+The immutable `vss.movie.revocation.snapshot/1` abstraction is Movie-domain
+governance despite its current scene-breakdown package location. Scene
+Breakdown, Production Options, and Character Continuity reuse its exact typed
+identity/digest/effective-time records. Character Continuity evaluates only its
+sequence, identities, observations, Context, catalogue, and policy. Persistent
+revocation and any broader registry remain deferred; no universal revocation
+registry is introduced.
+
+Invocation binding includes observation identity-plus-content-digest pairs, in
+addition to task, Context, sequence, character, strategy, provider/API,
+catalogue, and provider-view bindings. Audit expiry and revocation outcomes are
+tracked independently from overall status: a later provider or result failure
+does not rewrite an already passed gate as unknown.
+
 Implementation is Python-only and bounded by 8 scenes, 8 characters, 128
 observations/comparisons, 64 KiB Context/result, one iteration, and one provider
 call. Iteration is grouped and canonically ordered by exact character,
