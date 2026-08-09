@@ -20,11 +20,14 @@ FILES = MappingProxyType({
     "character_observation/1":"character-observation-v1.schema.json",
     "analyze_character_continuity/1":"analyze-character-continuity-task-v1.schema.json",
     "analyze_character_continuity/2":"analyze-character-continuity-task-v2.schema.json",
+    "analyze_character_continuity/3":"analyze-character-continuity-task-v3.schema.json",
+    "character_continuity_transition_evidence/1":"character-continuity-transition-evidence-v1.schema.json",
     "character_continuity_observation_set/1":"character-continuity-observation-set-v1.schema.json",
 })
 COMPATIBILITY = MappingProxyType({
     "analyze_character_continuity/1": "character_continuity_observation_set/1",
     "analyze_character_continuity/2": "character_continuity_observation_set/1",
+    "analyze_character_continuity/3": "character_continuity_observation_set/1",
 })
 def _pairs(pairs):
     out={}

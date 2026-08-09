@@ -1,4 +1,20 @@
-# M5.1 Character Continuity Contracts
+# M5.1–M5.3 Character Continuity Contracts
+
+## M5.3 exact evolution
+
+M5.3 adds `analyze_character_continuity/3`, which expects exactly
+`character_continuity_context/2` and continues to produce
+`character_continuity_observation_set/1`. It does not alter task v1, task v2,
+Context v1, observation v1, or result v1.
+
+`character_continuity_transition_evidence/1` is an independently validated,
+non-authorizing explicit claim. It binds exact project, sequence, character,
+category, ordered endpoint observation identities and digests, explicit
+continuity positions, bounded evidence references, qualifications, and its own
+content digest. It is not a prior result and cannot be substituted by one.
+Context v2 binds these artifacts under catalogue 1.1.0. Current positive-only
+observation vocabulary defines no exact incompatibility pair, so M5.3 emits no
+discovered contradiction and adds no negative or absence state.
 
 M5.1 implements the validation-only contract slice of
 [ADR-0020](adr/ADR-0020-character-continuity-architecture.md). It establishes

@@ -10,7 +10,7 @@ class MovieContractTests(unittest.TestCase):
     def test_registry_is_exact_and_stable(self):
         a=MovieContractRegistry.built_in(); b=MovieContractRegistry.built_in()
         self.assertEqual(a.digest,b.digest)
-        self.assertEqual({r.identity for r in a.registrations},{'story_fragment/1','break_down_scenes/1','scene_breakdown/1','generate_scene_production_options/1','scene_production_option_set/1','character_reference/1','character_identity/1','continuity_sequence/1','character_observation/1','analyze_character_continuity/1','analyze_character_continuity/2','character_continuity_observation_set/1'})
+        self.assertEqual({r.identity for r in a.registrations},{'story_fragment/1','break_down_scenes/1','scene_breakdown/1','generate_scene_production_options/1','scene_production_option_set/1','character_reference/1','character_identity/1','continuity_sequence/1','character_observation/1','analyze_character_continuity/1','analyze_character_continuity/2','analyze_character_continuity/3','character_continuity_transition_evidence/1','character_continuity_observation_set/1'})
         with self.assertRaises(MovieContractError): a.resolve('movie_project','1')
         with self.assertRaises(MovieContractError): a.resolve('story_fragment', 'latest')
         with self.assertRaises(MovieContractError): a.resolve('story_fragment', '*')

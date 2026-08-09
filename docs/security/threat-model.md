@@ -351,3 +351,20 @@ Semantic-honesty enforcement examines only closed semantic prose fields. It
 does not scan Python object representations or evidence identifiers, avoiding
 identifier-controlled denial while the closed result schema and independent
 validator reject provider-native, action, Plan, approval, and execution fields.
+
+## M5.3 bounded continuity-analysis threats
+
+M5.3 prevents transition fabrication and rule substitution through independently
+validated transition evidence, exact endpoint IDs/digests and positions,
+Context-v2 binding, catalogue-1.1 digest binding, and independent result
+validation. Caller-selected rules/providers, prior-result substitution,
+chronology substitution, duplicate transition IDs, and forged endpoints fail
+before provider execution. Result provenance binds the transition-evidence
+identity and digest without carrying its governance object into the provider.
+
+The closed catalogue has no incompatible pair for the positive-only vocabulary,
+so differing values and non-mention cannot fabricate contradictions, absence,
+loss, recovery, or persistence. `review_suggested` remains inert semantic-review
+metadata, never severity, approval, scheduling, or execution authority. Future
+negative-state vocabularies or incompatibility rules require explicit contract
+and catalogue evolution.

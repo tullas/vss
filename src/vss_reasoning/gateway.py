@@ -606,8 +606,8 @@ class ReasoningGateway:
             except ReasoningAuditFailure: raise
             except Exception as exc: raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
 
-    def execute_character_continuity(self, task, context_data, *, continuity_sequence, character_identities, observations, environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
-        """Execute only the exact M5.2 semantic continuity path."""
+    def execute_character_continuity(self, task, context_data, *, continuity_sequence, character_identities, observations, transition_evidence=(), environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
+        """Execute exact M5.2 or M5.3 continuity semantics by task version."""
         started = self._clock(); execution_id = uuid.uuid4().hex
         context = None; view = None; result = None; invocation_digest = None
         request_id = None; calls = 0; status = "failed"; failure = "invalid_request"; revocation_result = "not_evaluated"; expiry_result = "not_evaluated"
@@ -622,9 +622,9 @@ class ReasoningGateway:
             if validated_task.digest != task.digest:
                 raise InvalidReasoningRequest("character continuity task substitution rejected")
             tv = task.value; request_id = tv["request_id"]
-            if tv["task_version"] != "2" or tv["correlation_id"] != correlation_id or tv["environment"] != environment:
+            if tv["task_version"] not in {"2", "3"} or tv["correlation_id"] != correlation_id or tv["environment"] != environment:
                 raise InvalidReasoningRequest("character continuity request binding is invalid")
-            from vss_movie_character_continuity import CharacterContinuityRuleCatalogue, character_continuity_provider_view, create_character_continuity_result, validate_character_continuity_context
+            from vss_movie_character_continuity import CharacterContinuityRuleCatalogue, CharacterContinuityAnalysisRuleCatalogue, character_continuity_provider_view, create_character_continuity_result, create_character_continuity_analysis_result, validate_character_continuity_context
             try:
                 context = validate_character_continuity_context(context_data)
             except Exception as exc:
@@ -642,17 +642,20 @@ class ReasoningGateway:
             supplied_observations = {item.value["observation_id"]:item.value["observation_content_digest"] for item in observations if isinstance(item, ValidatedMovieArtifact) and item.value.get("contract_identity") == "character_observation"}
             if supplied_observations != {item["observation_id"]:item["observation_content_digest"] for item in p["observations"]}:
                 failure = "observation_binding_mismatch"; raise InvalidReasoningRequest("character continuity observation binding is invalid")
+            supplied_transitions = {item.value["transition_evidence_id"]:item.value["content_digest"] for item in transition_evidence if isinstance(item, ValidatedMovieArtifact) and item.value.get("contract_identity") == "character_continuity_transition_evidence"}
+            if supplied_transitions != {item["transition_evidence_id"]:item["transition_evidence_digest"] for item in p.get("transition_evidence", ())}:
+                failure = "transition_binding_mismatch"; raise InvalidReasoningRequest("character continuity transition evidence binding is invalid")
             now = self._policy_now()
             if now >= datetime.strptime(c["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc):
                 failure = "context_expired"; expiry_result = "expired"; raise InvalidReasoningRequest("character continuity Context is expired")
             expiry_result = "eligible"
-            catalogue = CharacterContinuityRuleCatalogue.built_in()
+            catalogue = CharacterContinuityRuleCatalogue.built_in() if tv["task_version"] == "2" else CharacterContinuityAnalysisRuleCatalogue.built_in()
             if (p["rule_catalogue_identity"], p["rule_catalogue_version"], p["rule_catalogue_digest"]) != (catalogue.identity, catalogue.version, catalogue.digest):
                 failure = "catalogue_mismatch"; raise InvalidReasoningRequest("character continuity rule catalogue mismatch")
             from .registry import CharacterContinuityImplementationRegistry
-            strategy, provider = CharacterContinuityImplementationRegistry.built_in().resolve()
+            strategy, provider = CharacterContinuityImplementationRegistry.built_in().resolve(tv["task_version"])
             view = character_continuity_provider_view(context)
-            binding = freeze_json({"request_id":request_id, "request_digest":task.digest, "correlation_id":correlation_id, "task":["analyze_character_continuity","2"], "result":["character_continuity_observation_set","1"], "context_id":c["context_id"], "context_content_digest":c["context_content_digest"], "complete_context_digest":context.digest, "project_id":c["project_id"], "environment":environment, "purpose":c["purpose"], "classification":c["classification"], "continuity_sequence":[p["continuity_sequence_id"],p["continuity_sequence_digest"]], "characters":list(view.character_ids), "observations":[[x["observation_id"],x["observation_content_digest"]] for x in map(lambda value: dict(value), view.observations)], "strategy":[strategy.identity,strategy.version], "provider":[provider.identity,provider.version,provider.api_version], "rule_catalogue":[catalogue.identity,catalogue.version,catalogue.digest], "provider_visible_digest":view.provider_visible_digest})
+            binding = freeze_json({"request_id":request_id, "request_digest":task.digest, "correlation_id":correlation_id, "task":["analyze_character_continuity",tv["task_version"]], "result":["character_continuity_observation_set","1"], "context_id":c["context_id"], "context_content_digest":c["context_content_digest"], "complete_context_digest":context.digest, "project_id":c["project_id"], "environment":environment, "purpose":c["purpose"], "classification":c["classification"], "continuity_sequence":[p["continuity_sequence_id"],p["continuity_sequence_digest"]], "characters":list(view.character_ids), "observations":[[x["observation_id"],x["observation_content_digest"]] for x in map(lambda value: dict(value), view.observations)], **({"transition_evidence":[[x["transition_evidence_id"],x["transition_evidence_digest"]] for x in map(lambda value: dict(value), view.transition_evidence)]} if tv["task_version"] == "3" else {}), "strategy":[strategy.identity,strategy.version], "provider":[provider.identity,provider.version,provider.api_version], "rule_catalogue":[catalogue.identity,catalogue.version,catalogue.digest], "provider_visible_digest":view.provider_visible_digest})
             invocation_digest = canonical_digest(binding)
             # Expiry and revocation are the final gates before the one provider call.
             final_now = self._policy_now()
@@ -664,23 +667,24 @@ class ReasoningGateway:
             targets = [("continuity_sequence", p["continuity_sequence_id"], p["continuity_sequence_digest"]), ("context", c["context_id"], context.digest), ("rule_catalogue", catalogue.identity, catalogue.digest), ("policy", c["policy_identity"], None)]
             targets += [("character_identity", x["character_id"], x["identity_digest"]) for x in p["selected_characters"]]
             targets += [("character_observation", x["observation_id"], x["observation_content_digest"]) for x in p["observations"]]
+            targets += [("character_continuity_transition_evidence", x["transition_evidence_id"], x["transition_evidence_digest"]) for x in p.get("transition_evidence", ())]
             final_now_text = final_now.strftime("%Y-%m-%dT%H:%M:%SZ")
             if any(snapshot.evaluate(kind, identity, digest, final_now_text) != "eligible" for kind, identity, digest in targets):
                 failure = "context_revoked"; revocation_result = "revoked"; raise InvalidReasoningRequest("character continuity material is revoked")
             revocation_result = "eligible"
             if dry_run:
                 status = "success"; failure = "none"
-                return {"readiness":{"authorized":True, "provider_invoked":False, "provider_call_count":0, "task_identity":"analyze_character_continuity", "task_version":"2", "result_family":"character_continuity_observation_set", "result_version":"1", "context_content_digest":c["context_content_digest"], "complete_context_digest":context.digest, "provider_visible_digest":view.provider_visible_digest, "invocation_binding_digest":invocation_digest, "rule_catalogue_digest":catalogue.digest, "strategy_identity":strategy.identity, "provider_identity":provider.identity, "revocation_result":revocation_result, "result_digest":None}}
+                return {"readiness":{"authorized":True, "provider_invoked":False, "provider_call_count":0, "task_identity":"analyze_character_continuity", "task_version":tv["task_version"], "result_family":"character_continuity_observation_set", "result_version":"1", "context_content_digest":c["context_content_digest"], "complete_context_digest":context.digest, "provider_visible_digest":view.provider_visible_digest, "invocation_binding_digest":invocation_digest, "rule_catalogue_digest":catalogue.digest, "strategy_identity":strategy.identity, "provider_identity":provider.identity, "revocation_result":revocation_result, "result_digest":None}}
             calls = 1
             try:
-                comparison_notes, reported_calls, iterations = strategy.execute(view, provider)
-                candidate = create_character_continuity_result(view, binding, comparison_notes)
+                analysis, reported_calls, iterations = strategy.execute(view, provider)
+                candidate = create_character_continuity_result(view, binding, analysis) if tv["task_version"] == "2" else create_character_continuity_analysis_result(view, binding, analysis)
             except Exception as exc:
                 failure = "candidate_generation_failure"; raise CandidateGenerationFailure("character continuity generation failed") from exc
             if reported_calls != 1 or iterations != 1:
                 failure = "provider_budget_exceeded"; raise ReasoningBudgetExceeded("character continuity provider budget exceeded")
             try:
-                validated = validate_character_continuity_observation_set(candidate, tuple(observations), continuity_sequence, task)
+                validated = validate_character_continuity_observation_set(candidate, tuple(observations), continuity_sequence, task, transition_evidence=tuple(transition_evidence))
             except Exception as exc:
                 failure = "invalid_result"; raise InvalidReasoningResult("character continuity result validation failed") from exc
             result = validated.to_json_value()
@@ -695,6 +699,8 @@ class ReasoningGateway:
         finally:
             payload = context.value["payload"] if context else {}
             record = {"event_type":"character_continuity_readiness_completed" if dry_run and status == "success" else "character_continuity_completed" if status == "success" else "character_continuity_failed", "execution_id":execution_id, "request_id":request_id, "correlation_id":correlation_id, "task_identity":"analyze_character_continuity", "task_version":task.value.get("task_version") if hasattr(task, "value") else None, "result_family":"character_continuity_observation_set", "result_version":"1", "context_id":context.value["context_id"] if context else None, "context_content_digest":context.value["context_content_digest"] if context else None, "complete_context_digest":context.digest if context else None, "provider_visible_digest":view.provider_visible_digest if view else None, "invocation_binding_digest":invocation_digest, "continuity_sequence_id":payload.get("continuity_sequence_id"), "continuity_sequence_digest":payload.get("continuity_sequence_digest"), "scene_count":len(payload.get("selected_scenes",())), "character_count":len(payload.get("selected_characters",())), "observation_count":len(payload.get("observations",())), "rule_catalogue":"vss.character-continuity.rules.deterministic/1.0.0", "strategy":"vss.analyze-character-continuity.deterministic/1.0.0", "provider":"vss.reasoning.character-continuity.deterministic/1.0.0", "provider_api_version":"1", "provider_call_count":calls, "revocation_result":revocation_result, "expiry_result":expiry_result, "dry_run":dry_run, "semantic_result_digest":result["payload"]["semantic_result_digest"] if result else None, "complete_result_digest":result["integrity"]["complete_result_sha256"] if result else None, "status":status, "failure_classification":failure, "duration_ms":max(0,int((self._clock()-started)*1000))}
+            if record["task_version"] == "3":
+                record = {**record, "rule_catalogue":"vss.character-continuity.rules.deterministic/1.1.0", "strategy":"vss.analyze-character-continuity.deterministic/1.1.0", "provider":"vss.reasoning.character-continuity.deterministic/1.1.0", "transition_count":len(result["payload"]["explicit_transitions"]) if result else len(payload.get("transition_evidence", ())), "contradiction_count":len(result["payload"]["contradictions"]) if result else 0, "unknown_count":len(result["payload"]["unknowns"]) if result else 0, "review_suggested":result["payload"]["review_suggested"] if result else False}
             try:
                 self._audit.append(record)
             except ReasoningAuditFailure:

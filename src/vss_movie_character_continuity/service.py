@@ -19,6 +19,7 @@ POLICY_IDENTITY = "character_continuity_context_local"
 POLICY_VERSION = "1"
 CATALOGUE_IDENTITY = "vss.character-continuity.rules.deterministic"
 CATALOGUE_VERSION = "1.0.0"
+ANALYSIS_CATALOGUE_VERSION = "1.1.0"
 STRATEGY_IDENTITY = "vss.analyze-character-continuity.deterministic"
 STRATEGY_VERSION = "1.0.0"
 PROVIDER_IDENTITY = "vss.reasoning.character-continuity.deterministic"
@@ -58,6 +59,32 @@ class CharacterContinuityRuleCatalogue:
         return cls()
 
 
+@dataclass(frozen=True, slots=True)
+class CharacterContinuityAnalysisRuleCatalogue:
+    identity: str = CATALOGUE_IDENTITY
+    version: str = ANALYSIS_CATALOGUE_VERSION
+    rule_classes: tuple[str, ...] = ("exact_repeat", "explicit_transition", "incomparable", "insufficient_evidence", "contradiction_eligibility")
+    admitted_categories: tuple[str, ...] = ("presence", "possession", "physical_state")
+    transition_categories: tuple[str, ...] = ("possession", "physical_state")
+    exact_incompatibilities: tuple[str, ...] = ()
+    chronology_requirement: str = "explicit_linear_positions_only"
+    persistence: str = "off"
+    maximum_scenes: int = 8
+    maximum_characters: int = 8
+    maximum_observations: int = 128
+    maximum_comparisons: int = 128
+    maximum_transitions: int = 32
+    maximum_contradictions: int = 32
+
+    @property
+    def digest(self) -> str:
+        return canonical_digest({f.name: list(getattr(self, f.name)) if isinstance(getattr(self, f.name), tuple) else getattr(self, f.name) for f in fields(self)})
+
+    @classmethod
+    def built_in(cls) -> "CharacterContinuityAnalysisRuleCatalogue":
+        return cls()
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class CharacterContinuityContext:
     value: Any
@@ -84,6 +111,7 @@ class CharacterContinuityProviderView:
     character_ids: tuple[str, ...]
     categories: tuple[str, ...]
     observations: tuple[Any, ...]
+    transition_evidence: tuple[Any, ...]
     unknowns: tuple[str, ...]
     limitations: tuple[str, ...]
     rule_catalogue_identity: str
@@ -104,15 +132,18 @@ def validate_character_continuity_context(value: Any, *, registry: ContextContra
         raise ValueError("character continuity Context is unsafe") from exc
     if not isinstance(value, dict):
         raise ValueError("character continuity Context must be an object")
-    errors = list(Draft202012Validator(thaw_json(registry.schema("vss.character_continuity_context/1").schema)).iter_errors(value))
+    version = value.get("context_family_version")
+    if version not in {"1", "2"}:
+        raise ValueError("unknown character continuity Context version")
+    errors = list(Draft202012Validator(thaw_json(registry.schema(f"vss.character_continuity_context/{version}").schema)).iter_errors(value))
     if errors:
         raise ValueError("character continuity Context does not match its contract")
     payload = value["payload"]
-    catalogue = CharacterContinuityRuleCatalogue.built_in()
+    catalogue = CharacterContinuityRuleCatalogue.built_in() if version == "1" else CharacterContinuityAnalysisRuleCatalogue.built_in()
     if (payload["rule_catalogue_identity"], payload["rule_catalogue_version"], payload["rule_catalogue_digest"]) != (catalogue.identity, catalogue.version, catalogue.digest):
         raise ValueError("character continuity rule catalogue substitution rejected")
-    if value["semantic_task_version"] != "2":
-        raise ValueError("validation-only task v1 cannot enter executable Context")
+    if (version, value["semantic_task_version"]) not in {("1", "2"), ("2", "3")}:
+        raise ValueError("character continuity task and Context versions are incompatible")
     positions = [scene["continuity_position"] for scene in payload["selected_scenes"]]
     if positions != list(range(1, len(positions) + 1)):
         raise ValueError("Context chronology must be explicit, ordered, and contiguous")
@@ -137,6 +168,17 @@ def validate_character_continuity_context(value: Any, *, registry: ContextContra
         scene = scene_map.get(obs["scene_id"])
         if obs["character_id"] not in character_ids or obs["category"] not in categories or scene is None or (obs["scene_content_digest"], obs["sequence_position"]) != (scene["scene_content_digest"], scene["continuity_position"]):
             raise ValueError("Context observation binding is invalid")
+    if version == "2":
+        observations = {item["observation_id"]: item for item in payload["observations"]}
+        transition_ids = [item["transition_evidence_id"] for item in payload["transition_evidence"]]
+        if transition_ids != sorted(transition_ids) or len(transition_ids) != len(set(transition_ids)):
+            raise ValueError("Context transition evidence order or identity is invalid")
+        for item in payload["transition_evidence"]:
+            first = observations.get(item["from_observation_id"]); second = observations.get(item["to_observation_id"])
+            if first is None or second is None or first is second or (item["from_observation_digest"], item["to_observation_digest"]) != (first["observation_content_digest"], second["observation_content_digest"]):
+                raise ValueError("Context transition evidence observation binding is invalid")
+            if any(obs["character_id"] != item["character_id"] or obs["category"] != item["category"] for obs in (first, second)) or (item["from_sequence_position"], item["to_sequence_position"]) != (first["sequence_position"], second["sequence_position"]) or item["from_sequence_position"] >= item["to_sequence_position"]:
+                raise ValueError("Context transition evidence semantic binding is invalid")
     if canonical_digest(payload) != value["context_content_digest"]:
         raise ValueError("character continuity Context content digest mismatch")
     if _ts(value["constructed_at"]) >= _ts(value["expires_at"]):
@@ -155,7 +197,7 @@ def _require_artifact(value: Any, identity: str) -> ValidatedMovieArtifact:
     return value
 
 
-def assemble_character_continuity_context(task: ValidatedMovieArtifact, sequence: ValidatedMovieArtifact, identities: tuple[ValidatedMovieArtifact, ...], observations: tuple[ValidatedMovieArtifact, ...], *, classification: str = "public", validation_time: str | None = None) -> CharacterContinuityContext:
+def assemble_character_continuity_context(task: ValidatedMovieArtifact, sequence: ValidatedMovieArtifact, identities: tuple[ValidatedMovieArtifact, ...], observations: tuple[ValidatedMovieArtifact, ...], *, transition_evidence: tuple[ValidatedMovieArtifact, ...] = (), classification: str = "public", validation_time: str | None = None) -> CharacterContinuityContext:
     sequence = _require_artifact(sequence, "continuity_sequence")
     identities = tuple(_require_artifact(x, "character_identity") for x in identities)
     observations = tuple(_require_artifact(x, "character_observation") for x in observations)
@@ -167,7 +209,10 @@ def assemble_character_continuity_context(task: ValidatedMovieArtifact, sequence
     tv = task.value; sv = sequence.value
     if validation_time is not None and not (
         tv["project_id"] == "continuity-local"
-        and task.digest == "f49dd8fb2045ace76cc5af3c3350d07905c4f79581bc58c9ee054cda21de93c0"  # pragma: allowlist secret
+        and task.digest in {
+            "f49dd8fb2045ace76cc5af3c3350d07905c4f79581bc58c9ee054cda21de93c0",  # pragma: allowlist secret
+            "c77708778d66616f49379c829519350527a5d5cd908a41b13f9986bb10a506e0",  # pragma: allowlist secret
+        }
         and validation_time == "2026-08-08T00:00:00Z"
     ):
         raise ValueError("caller-selected character continuity clock is not admitted")
@@ -190,7 +235,9 @@ def assemble_character_continuity_context(task: ValidatedMovieArtifact, sequence
             raise ValueError("Context per-identity observation bound exceeded")
     if len({ref for artifact in observations for ref in artifact.value["evidence_references"]}) > 64:
         raise ValueError("Context aggregate evidence-reference bound exceeded")
-    catalogue = CharacterContinuityRuleCatalogue.built_in()
+    if tv["task_version"] not in {"2", "3"}:
+        raise ValueError("unsupported executable character continuity task")
+    catalogue = CharacterContinuityRuleCatalogue.built_in() if tv["task_version"] == "2" else CharacterContinuityAnalysisRuleCatalogue.built_in()
     scenes = [thaw_json(x) for x in sv["selected_scenes"]]
     characters = sorted(({"character_id": x.value["character_id"], "identity_digest": x.value["content_digest"]} for x in identities), key=lambda x: x["character_id"])
     category_order = {name: i for i, name in enumerate(catalogue.admitted_categories)}
@@ -200,13 +247,29 @@ def assemble_character_continuity_context(task: ValidatedMovieArtifact, sequence
         selected_observations.append({key: value[key] for key in ("observation_id", "observation_content_digest", "character_id", "scene_id", "scene_content_digest", "sequence_position", "category", "payload", "provenance_category", "evidence_references", "confidence", "assumptions", "unknowns", "limitations")})
     selected_observations.sort(key=lambda x: (x["sequence_position"], x["character_id"], category_order[x["category"]], x["observation_id"]))
     unknowns = ["No state is inferred for scenes without an explicit observation.", "Identity and chronology are exact supplied bindings, not inferred claims."]
-    limitations = ["Persistence is off; every observation is scene-local.", "M5.2 does not discover transitions or contradictions.", "This Context and its evidence are inert and non-authorizing."]
-    payload = {"task_digest": task.digest, "continuity_sequence_id": sv["continuity_sequence_id"], "continuity_sequence_digest": sv["content_digest"], "scene_breakdown_digest": sv["scene_breakdown_digest"], "selected_scenes": scenes, "selected_characters": characters, "selected_categories": list(tv["selected_observation_categories"]), "observations": selected_observations, "rule_catalogue_identity": catalogue.identity, "rule_catalogue_version": catalogue.version, "rule_catalogue_digest": catalogue.digest, "unknowns": unknowns, "limitations": limitations, "budget_summary": {"maximum_context_bytes": MAX_CONTEXT_BYTES, "maximum_scenes": 8, "maximum_characters": 8, "maximum_observations": 128, "maximum_comparisons": 128}}
-    input_set_digest = canonical_digest({"task": task.digest, "sequence": sequence.digest, "identities": sorted(x.digest for x in identities), "observations": sorted(x.digest for x in observations)})
-    selection_digest = canonical_digest({"project": tv["project_id"], "sequence": sv["content_digest"], "characters": list(tv["selected_character_ids"]), "categories": list(tv["selected_observation_categories"]), "scenes": scenes, "observations": [x["observation_content_digest"] for x in selected_observations]})
+    limitations = ["Persistence is off; every observation is scene-local.", "M5.2 does not discover transitions or contradictions." if tv["task_version"] == "2" else "M5.3 qualifies explicit transitions and only catalogue-defined contradictions.", "This Context and its evidence are inert and non-authorizing."]
+    transition_values = []
+    if tv["task_version"] == "2" and transition_evidence:
+        raise ValueError("Context v1 does not admit transition evidence")
+    if tv["task_version"] == "3":
+        from vss_movie_contracts import validate_character_continuity_transition_evidence
+        for artifact in transition_evidence:
+            if not isinstance(artifact, ValidatedMovieArtifact) or artifact.value.get("contract_identity") != "character_continuity_transition_evidence":
+                raise ValueError("Context v2 requires independently validated transition evidence")
+            validated = validate_character_continuity_transition_evidence(artifact.to_json_value(), observations, sequence)
+            if validated.digest != artifact.digest:
+                raise ValueError("transition evidence substitution rejected")
+            value = artifact.to_json_value()
+            transition_values.append({"transition_evidence_id":value["transition_evidence_id"], "transition_evidence_digest":value["content_digest"], **{key:value[key] for key in ("character_id","category","from_observation_id","from_observation_digest","to_observation_id","to_observation_digest","from_sequence_position","to_sequence_position","transition_basis","evidence_references","confidence","assumptions","unknowns","limitations")}})
+        transition_values.sort(key=lambda item: item["transition_evidence_id"])
+        if len({item["transition_evidence_id"] for item in transition_values}) != len(transition_values):
+            raise ValueError("transition evidence identity is duplicated")
+    payload = {"task_digest": task.digest, "continuity_sequence_id": sv["continuity_sequence_id"], "continuity_sequence_digest": sv["content_digest"], "scene_breakdown_digest": sv["scene_breakdown_digest"], "selected_scenes": scenes, "selected_characters": characters, "selected_categories": list(tv["selected_observation_categories"]), "observations": selected_observations, **({"transition_evidence":transition_values} if tv["task_version"] == "3" else {}), "rule_catalogue_identity": catalogue.identity, "rule_catalogue_version": catalogue.version, "rule_catalogue_digest": catalogue.digest, "unknowns": unknowns, "limitations": limitations, "budget_summary": {"maximum_context_bytes": MAX_CONTEXT_BYTES, "maximum_scenes": 8, "maximum_characters": 8, "maximum_observations": 128, "maximum_comparisons": 128, **({"maximum_transitions":32,"maximum_contradictions":32} if tv["task_version"] == "3" else {})}}
+    input_set_digest = canonical_digest({"task": task.digest, "sequence": sequence.digest, "identities": sorted(x.digest for x in identities), "observations": sorted(x.digest for x in observations), **({"transition_evidence":sorted(x.digest for x in transition_evidence)} if tv["task_version"] == "3" else {})})
+    selection_digest = canonical_digest({"project": tv["project_id"], "sequence": sv["content_digest"], "characters": list(tv["selected_character_ids"]), "categories": list(tv["selected_observation_categories"]), "scenes": scenes, "observations": [x["observation_content_digest"] for x in selected_observations], **({"transition_evidence":[x["transition_evidence_digest"] for x in transition_values]} if tv["task_version"] == "3" else {})})
     now = _ts(validation_time) if validation_time else datetime.now(timezone.utc).replace(microsecond=0)
     content = canonical_digest(payload)
-    context = {"schema_version":"1", "context_id":"continuity-context-"+content[:32], "context_family":"character_continuity_context", "context_family_version":"1", "request_id":tv["request_id"], "correlation_id":tv["correlation_id"], "semantic_task":"analyze_character_continuity", "semantic_task_version":"2", "result_family":"character_continuity_observation_set", "result_version":"1", "purpose":tv["purpose"], "environment":tv["environment"], "project_id":tv["project_id"], "classification":classification, "policy_identity":POLICY_IDENTITY, "policy_version":POLICY_VERSION, "constructed_at":_iso(now), "expires_at":_iso(now+timedelta(seconds=300)), "lifecycle":"validated", "input_set_digest":input_set_digest, "selection_digest":selection_digest, "context_content_digest":content, "integrity":{"complete_context_sha256":"0"*64}, "payload":payload}
+    context = {"schema_version":"1", "context_id":"continuity-context-"+content[:32], "context_family":"character_continuity_context", "context_family_version":"1" if tv["task_version"] == "2" else "2", "request_id":tv["request_id"], "correlation_id":tv["correlation_id"], "semantic_task":"analyze_character_continuity", "semantic_task_version":tv["task_version"], "result_family":"character_continuity_observation_set", "result_version":"1", "purpose":tv["purpose"], "environment":tv["environment"], "project_id":tv["project_id"], "classification":classification, "policy_identity":POLICY_IDENTITY, "policy_version":POLICY_VERSION, "constructed_at":_iso(now), "expires_at":_iso(now+timedelta(seconds=300)), "lifecycle":"validated", "input_set_digest":input_set_digest, "selection_digest":selection_digest, "context_content_digest":content, "integrity":{"complete_context_sha256":"0"*64}, "payload":payload}
     context["integrity"]["complete_context_sha256"] = canonical_digest({**context, "integrity":{}})
     return validate_character_continuity_context(context)
 
@@ -215,15 +278,17 @@ def character_continuity_context_report(context: CharacterContinuityContext, *, 
     if revocation_result not in {"not_evaluated", "eligible"}:
         raise ValueError("character continuity report revocation outcome is invalid")
     c = validate_character_continuity_context(context).to_json_value(); p = c["payload"]
-    report = {"schema_version":"1", "report_family":"character_continuity_context_assembly_report", "report_version":"1", "request_id":c["request_id"], "correlation_id":c["correlation_id"], "context_id":c["context_id"], "context_family":"character_continuity_context", "context_version":"1", "project_id":c["project_id"], "purpose":c["purpose"], "classification":c["classification"], "scene_count":len(p["selected_scenes"]), "character_count":len(p["selected_characters"]), "observation_count":len(p["observations"]), "input_set_digest":c["input_set_digest"], "selection_digest":c["selection_digest"], "context_content_digest":c["context_content_digest"], "complete_context_digest":context.digest, "rule_catalogue_digest":p["rule_catalogue_digest"], "expires_at":c["expires_at"], "revocation_result":revocation_result, "status":"success"}
+    report = {"schema_version":"1", "report_family":"character_continuity_context_assembly_report", "report_version":"1", "request_id":c["request_id"], "correlation_id":c["correlation_id"], "context_id":c["context_id"], "context_family":"character_continuity_context", "context_version":c["context_family_version"], "project_id":c["project_id"], "purpose":c["purpose"], "classification":c["classification"], "scene_count":len(p["selected_scenes"]), "character_count":len(p["selected_characters"]), "observation_count":len(p["observations"]), **({"transition_count":len(p["transition_evidence"])} if c["context_family_version"] == "2" else {}), "input_set_digest":c["input_set_digest"], "selection_digest":c["selection_digest"], "context_content_digest":c["context_content_digest"], "complete_context_digest":context.digest, "rule_catalogue_digest":p["rule_catalogue_digest"], "expires_at":c["expires_at"], "revocation_result":revocation_result, "status":"success"}
     report["report_digest"] = canonical_digest(report)
     return freeze_json(report)
 
 
 def character_continuity_provider_view(context: Any) -> CharacterContinuityProviderView:
     c = validate_character_continuity_context(context).to_json_value(); p = c["payload"]
-    material = {"project_id":c["project_id"], "continuity_sequence_id":p["continuity_sequence_id"], "continuity_sequence_digest":p["continuity_sequence_digest"], "scenes":p["selected_scenes"], "character_ids":[x["character_id"] for x in p["selected_characters"]], "categories":p["selected_categories"], "observations":p["observations"], "unknowns":p["unknowns"], "limitations":p["limitations"], "rule_catalogue_identity":p["rule_catalogue_identity"], "rule_catalogue_version":p["rule_catalogue_version"], "rule_catalogue_digest":p["rule_catalogue_digest"]}
-    return CharacterContinuityProviderView(material["project_id"], material["continuity_sequence_id"], material["continuity_sequence_digest"], tuple(freeze_json(x) for x in material["scenes"]), tuple(material["character_ids"]), tuple(material["categories"]), tuple(freeze_json(x) for x in material["observations"]), tuple(material["unknowns"]), tuple(material["limitations"]), material["rule_catalogue_identity"], material["rule_catalogue_version"], material["rule_catalogue_digest"], canonical_digest(material))
+    transition_keys = ("transition_evidence_id", "transition_evidence_digest", "character_id", "category", "from_observation_id", "from_observation_digest", "to_observation_id", "to_observation_digest", "from_sequence_position", "to_sequence_position", "transition_basis", "evidence_references")
+    minimal_transitions = [{key:item[key] for key in transition_keys} for item in p.get("transition_evidence", ())]
+    material = {"project_id":c["project_id"], "continuity_sequence_id":p["continuity_sequence_id"], "continuity_sequence_digest":p["continuity_sequence_digest"], "scenes":p["selected_scenes"], "character_ids":[x["character_id"] for x in p["selected_characters"]], "categories":p["selected_categories"], "observations":p["observations"], **({"transition_evidence":minimal_transitions} if c["context_family_version"] == "2" else {}), "unknowns":p["unknowns"], "limitations":p["limitations"], "rule_catalogue_identity":p["rule_catalogue_identity"], "rule_catalogue_version":p["rule_catalogue_version"], "rule_catalogue_digest":p["rule_catalogue_digest"]}
+    return CharacterContinuityProviderView(material["project_id"], material["continuity_sequence_id"], material["continuity_sequence_digest"], tuple(freeze_json(x) for x in material["scenes"]), tuple(material["character_ids"]), tuple(material["categories"]), tuple(freeze_json(x) for x in material["observations"]), tuple(freeze_json(x) for x in material.get("transition_evidence", ())), tuple(material["unknowns"]), tuple(material["limitations"]), material["rule_catalogue_identity"], material["rule_catalogue_version"], material["rule_catalogue_digest"], canonical_digest(material))
 
 
 def analyze_explicit_observations(view: CharacterContinuityProviderView) -> tuple[str, ...]:
@@ -255,6 +320,48 @@ def analyze_explicit_observations(view: CharacterContinuityProviderView) -> tupl
     return tuple(notes)
 
 
+def analyze_bounded_continuity(view: CharacterContinuityProviderView) -> dict[str, Any]:
+    if type(view) is not CharacterContinuityProviderView or view.rule_catalogue_version != ANALYSIS_CATALOGUE_VERSION:
+        raise TypeError("M5.3 provider requires exact catalogue-1.1 provider view")
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for frozen in view.observations:
+        observation = thaw_json(frozen)
+        groups.setdefault((observation["character_id"], observation["category"]), []).append(observation)
+    notes: list[str] = []
+    comparisons = 0
+    for character_id, category in sorted(groups):
+        group = sorted(groups[(character_id, category)], key=lambda item: (item["sequence_position"], item["observation_id"]))
+        for left, right in zip(group, group[1:]):
+            comparisons += 1
+            if comparisons > 128:
+                raise ValueError("continuity comparison bound exceeded")
+            if left["payload"] == right["payload"]:
+                notes.append(f"Exact repeated explicit {category} evidence for {character_id} is compatible under rule exact_repeat; it does not prove persistence.")
+            else:
+                notes.append(f"Explicit {category} values for {character_id} are incomparable without a closed incompatibility rule; no transition or contradiction is inferred.")
+    if not notes:
+        notes.append("Insufficient explicit comparable evidence; missing evidence remains unknown.")
+    transitions = []
+    for frozen in view.transition_evidence:
+        evidence = thaw_json(frozen)
+        material = {
+            "transition_id": evidence["transition_evidence_id"].replace("continuity-transition-evidence-", "continuity-transition-", 1),
+            "character_id": evidence["character_id"], "category": evidence["category"],
+            "from_observation_id": evidence["from_observation_id"], "from_observation_digest": evidence["from_observation_digest"],
+            "to_observation_id": evidence["to_observation_id"], "to_observation_digest": evidence["to_observation_digest"],
+            "transition_basis": "explicit_source_transition", "evidence_references": sorted(set(evidence["evidence_references"]) | {evidence["transition_evidence_id"], "sha256:" + evidence["transition_evidence_digest"]}),
+            "qualification": "Independently validated explicit transition evidence; rule explicit_transition/1.1.0 does not infer persistence or causality.",
+            "confidence": {"level":"low", "basis":"Exact independently validated transition-evidence binding.", "qualifications":["Qualification establishes neither truth, persistence, causality, severity, nor authority."]},
+            "limitations": ["Only the explicit endpoints are qualified; intervening state and causality remain unknown."],
+        }
+        material["transition_content_digest"] = canonical_digest(material)
+        transitions.append(material)
+    transitions.sort(key=lambda item: item["transition_id"])
+    if len(transitions) > 32:
+        raise ValueError("continuity transition bound exceeded")
+    return {"notes": tuple(notes), "transitions": tuple(freeze_json(item) for item in transitions), "contradictions": (), "comparisons": comparisons, "review_suggested": False}
+
+
 def create_character_continuity_result(view: CharacterContinuityProviderView, binding: Any, comparison_notes: tuple[str, ...]) -> dict[str, Any]:
     if type(view) is not CharacterContinuityProviderView or type(comparison_notes) is not tuple:
         raise TypeError("continuity result inputs are invalid")
@@ -263,6 +370,21 @@ def create_character_continuity_result(view: CharacterContinuityProviderView, bi
     unknowns = list(dict.fromkeys(list(view.unknowns) + list(comparison_notes)))
     limitations = list(dict.fromkeys(list(view.limitations) + ["Deterministic comparison uses explicit structured observations only; it grants no authority."]))
     payload = {"observations":observations, "explicit_transitions":[], "contradictions":[], "unknowns":unknowns, "evidence_references":evidence, "confidence":{"level":"low", "basis":"Bounded deterministic comparison of explicit structured evidence.", "qualifications":["Confidence is qualified, does not establish truth, and grants no authority."]}, "limitations":limitations, "review_suggested":False, "semantic_result_digest":None}
+    payload["semantic_result_digest"] = canonical_digest(payload)
+    result = {"schema_version":"1", "result_family":"character_continuity_observation_set", "result_version":"1", "request_id":binding["request_id"], "correlation_id":binding["correlation_id"], "project_id":view.project_id, "continuity_sequence_id":view.continuity_sequence_id, "continuity_sequence_digest":view.continuity_sequence_digest, "selected_character_ids":list(view.character_ids), "selected_observation_categories":list(view.categories), "payload":payload, "integrity":{"payload_sha256":canonical_digest(payload), "complete_result_sha256":"0"*64}}
+    result["integrity"]["complete_result_sha256"] = canonical_digest({**result, "integrity":{"payload_sha256":result["integrity"]["payload_sha256"]}})
+    return result
+
+
+def create_character_continuity_analysis_result(view: CharacterContinuityProviderView, binding: Any, analysis: dict[str, Any]) -> dict[str, Any]:
+    if type(view) is not CharacterContinuityProviderView or not isinstance(analysis, dict):
+        raise TypeError("continuity analysis result inputs are invalid")
+    observations = [{key: obs[key] for key in ("observation_id", "observation_content_digest", "character_id", "scene_id", "scene_content_digest", "sequence_position", "category")} for obs in map(thaw_json, view.observations)]
+    transitions = [thaw_json(item) for item in analysis["transitions"]]
+    evidence = sorted({ref for obs in map(thaw_json, view.observations) for ref in obs["evidence_references"]} | {ref for item in transitions for ref in item["evidence_references"]})
+    unknowns = list(dict.fromkeys(list(view.unknowns) + list(analysis["notes"])))
+    limitations = list(dict.fromkeys(list(view.limitations) + ["Catalogue 1.1.0 contains no exact incompatibility pairs for the current positive-only observation vocabulary."]))
+    payload = {"observations":observations, "explicit_transitions":transitions, "contradictions":[], "unknowns":unknowns, "evidence_references":evidence, "confidence":{"level":"low", "basis":"Bounded deterministic qualification of explicit structured evidence.", "qualifications":["Confidence does not establish truth, persistence, causality, severity, or authority."]}, "limitations":limitations, "review_suggested":bool(analysis["review_suggested"]), "semantic_result_digest":None}
     payload["semantic_result_digest"] = canonical_digest(payload)
     result = {"schema_version":"1", "result_family":"character_continuity_observation_set", "result_version":"1", "request_id":binding["request_id"], "correlation_id":binding["correlation_id"], "project_id":view.project_id, "continuity_sequence_id":view.continuity_sequence_id, "continuity_sequence_digest":view.continuity_sequence_digest, "selected_character_ids":list(view.character_ids), "selected_observation_categories":list(view.categories), "payload":payload, "integrity":{"payload_sha256":canonical_digest(payload), "complete_result_sha256":"0"*64}}
     result["integrity"]["complete_result_sha256"] = canonical_digest({**result, "integrity":{"payload_sha256":result["integrity"]["payload_sha256"]}})

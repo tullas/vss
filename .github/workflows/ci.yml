@@ -130,18 +130,18 @@ jobs:
           assert run() == expected
           print('M5.1 deterministic fixture digests:', *expected)
           PY
-      - name: Test governed M5.2 character continuity reasoning
+      - name: Test governed M5.2 and M5.3 character continuity reasoning
         run: |
           python -m unittest discover -s tests/character_continuity -p 'test_*.py'
           python -m unittest discover -s tests/character_continuity_contracts -p 'test_*.py'
           PYTHONPATH=src:tests/character_continuity_contracts python - <<'PY'
-          from fixtures import identity, observation, reference, scene_breakdown, sequence, task
+          from fixtures import identity, observation, reference, scene_breakdown, sequence, task, transition_evidence
           from vss_commands.runner import CommandRunner
           from vss_context_contracts import ContextContractRegistry, validate_context
           from vss_movie_contracts import (MovieContractRegistry, validate_character_identity,
               validate_character_observation, validate_character_reference,
               validate_continuity_sequence, validate_executable_character_continuity_task,
-              validate_scene_breakdown)
+              validate_scene_breakdown, validate_character_continuity_transition_evidence)
           registry=MovieContractRegistry.built_in(); breakdown=validate_scene_breakdown(scene_breakdown(),registry)
           seq=validate_continuity_sequence(sequence(breakdown),breakdown,registry); ref=validate_character_reference(reference(),registry)
           ident=validate_character_identity(identity([ref.to_json_value()]),[ref],registry)
@@ -158,6 +158,15 @@ jobs:
           assert not any(term in str(one['output']).lower() for term in ('does_not_possess',' lost','removed','transition_id','contradiction_id'))
           validation_only={**bundle,'task':task(seq.value,'1')}; denied,code=runner.run('movie.analyze-character-continuity','development',{**validation_only,'context':context},executable.value['correlation_id'])
           assert code != 0
+          task3=validate_executable_character_continuity_task(task(seq.value,'3'),seq,[ident],registry)
+          raw3=observation(seq.value,'possession',3); obs3=validate_character_observation(raw3,ident,seq,registry)
+          transition=validate_character_continuity_transition_evidence(transition_evidence(seq.value,obs.to_json_value(),raw3),(obs,obs3),seq,registry)
+          bundle3={**bundle,'task':task3.to_json_value(),'character_observations':[obs.to_json_value(),obs3.to_json_value()],'transition_evidence':[transition.to_json_value()]}
+          assembled3,code=runner.run('movie.context-assemble-character-continuity','development',bundle3,task3.value['correlation_id']); assert code == 0
+          context3=assembled3['output']['context']; validate_context(context3,ContextContractRegistry.built_in())
+          result3,code=runner.run('movie.analyze-character-continuity','development',{**bundle3,'context':context3},task3.value['correlation_id']); assert code == 0
+          assert len(result3['output']['character_continuity_observation_set']['payload']['explicit_transitions']) == 1
+          assert result3['output']['character_continuity_observation_set']['payload']['contradictions'] == []
           PY
       - name: Test deterministic movie scene breakdown
         run: |

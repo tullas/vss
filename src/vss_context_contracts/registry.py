@@ -26,6 +26,7 @@ _FILES = MappingProxyType({
     "vss.scene_breakdown_context/1": "scene-breakdown-context-v1.schema.json",
     "vss.scene_production_options_context/1": "scene-production-options-context-v1.schema.json",
     "vss.character_continuity_context/1": "character-continuity-context-v1.schema.json",
+    "vss.character_continuity_context/2": "character-continuity-context-v2.schema.json",
     "vss.context_assembly_report/1": "context-assembly-report-v1.schema.json",
 })
 
@@ -105,6 +106,7 @@ class ContextContractRegistry:
             ContextRegistration("scene_breakdown_context", "1", "vss.scene_breakdown_context/1"),
             ContextRegistration("scene_production_options_context", "1", "vss.scene_production_options_context/1"),
             ContextRegistration("character_continuity_context", "1", "vss.character_continuity_context/1"),
+            ContextRegistration("character_continuity_context", "2", "vss.character_continuity_context/2"),
             ContextRegistration("context_assembly_report", "1", "vss.context_assembly_report/1"),
         )
         registrations = self.registrations or expected
@@ -170,4 +172,10 @@ class ContextContractRegistry:
             "continuity_strategy": "vss.analyze-character-continuity.deterministic/1.0.0",
             "continuity_provider": "vss.reasoning.character-continuity.deterministic/1.0.0",
             "continuity_provider_api": "1",
+            "continuity_analysis_context": "character_continuity_context/2",
+            "continuity_analysis_task": "analyze_character_continuity/3",
+            "continuity_transition_evidence": "character_continuity_transition_evidence/1",
+            "continuity_analysis_catalogue": "vss.character-continuity.rules.deterministic/1.1.0",
+            "continuity_analysis_strategy": "vss.analyze-character-continuity.deterministic/1.1.0",
+            "continuity_analysis_provider": "vss.reasoning.character-continuity.deterministic/1.1.0",
         })

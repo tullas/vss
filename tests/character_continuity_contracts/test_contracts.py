@@ -33,11 +33,12 @@ class CharacterContinuityContractTests(unittest.TestCase):
         with self.assertRaises(MovieContractError): validator(value, *args)
 
     def test_registry_exact_registration_compatibility_and_immutability(self):
-        expected={"character_reference/1","character_identity/1","continuity_sequence/1","character_observation/1","analyze_character_continuity/1","analyze_character_continuity/2","character_continuity_observation_set/1"}
+        expected={"character_reference/1","character_identity/1","continuity_sequence/1","character_observation/1","analyze_character_continuity/1","analyze_character_continuity/2","analyze_character_continuity/3","character_continuity_transition_evidence/1","character_continuity_observation_set/1"}
         actual={item.identity for item in self.registry.registrations}
         self.assertTrue(expected <= actual)
         self.assertEqual(self.registry.resolve_result("analyze_character_continuity/1","character_continuity_observation_set/1"),"character_continuity_observation_set/1")
         self.assertEqual(self.registry.resolve_result("analyze_character_continuity/2","character_continuity_observation_set/1"),"character_continuity_observation_set/1")
+        self.assertEqual(self.registry.resolve_result("analyze_character_continuity/3","character_continuity_observation_set/1"),"character_continuity_observation_set/1")
         registrations={item.identity:item for item in self.registry.registrations}
         self.assertEqual((registrations["analyze_character_continuity/1"].version, registrations["analyze_character_continuity/1"].schema_identity), ("1", "vss.movie.analyze_character_continuity/1/1"))
         self.assertEqual((registrations["analyze_character_continuity/2"].version, registrations["analyze_character_continuity/2"].schema_identity), ("2", "vss.movie.analyze_character_continuity/2"))
@@ -55,7 +56,7 @@ class CharacterContinuityContractTests(unittest.TestCase):
         self.assertEqual((new.value["lifecycle"], new.value["implementation_availability"]), ("active", "required"))
         with self.assertRaises(MovieContractError):
             validate_executable_character_continuity_task(v1, self.sequence, [self.identity], self.registry)
-        for version in ("3", "latest"):
+        for version in ("4", "latest"):
             bad=copied(v2); bad["task_version"]=version
             bad["task_content_digest"]=canonical_digest({k:v for k,v in bad.items() if k!="task_content_digest"})
             with self.assertRaises(MovieContractError):
