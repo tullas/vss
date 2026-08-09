@@ -96,7 +96,7 @@ def task(sequence_value, version="1"):
         "schema_version":"1","task_identity":"analyze_character_continuity","task_version":version,
         "request_id":"continuity-request-001","correlation_id":"continuity-correlation-001","project_id":"continuity-local",
         "environment":"development","purpose":"character_continuity_local_validation",
-        "expected_context_family":"character_continuity_context","expected_context_version":"1",
+        "expected_context_family":"character_continuity_context","expected_context_version":"2" if version == "3" else "1",
         "expected_result_family":"character_continuity_observation_set","expected_result_version":"1",
         "continuity_sequence_id":sequence_value["continuity_sequence_id"],"continuity_sequence_digest":sequence_value["content_digest"],
         "selected_character_ids":["character-arin"],"selected_observation_categories":["presence","possession","physical_state"],
@@ -104,6 +104,21 @@ def task(sequence_value, version="1"):
         "lifecycle":"defined_validation_only" if version == "1" else "active",
         "implementation_availability":"not_implemented" if version == "1" else "required","task_content_digest":""
     }, "task_content_digest")
+
+
+def transition_evidence(sequence_value, first, second):
+    return seal({
+        "schema_version":"1", "contract_identity":"character_continuity_transition_evidence", "contract_version":"1",
+        "transition_evidence_id":"continuity-transition-evidence-explicit-001", "project_id":"continuity-local",
+        "continuity_sequence_id":sequence_value["continuity_sequence_id"], "continuity_sequence_digest":sequence_value["content_digest"],
+        "character_id":first["character_id"], "category":first["category"],
+        "from_observation_id":first["observation_id"], "from_observation_digest":first["observation_content_digest"],
+        "to_observation_id":second["observation_id"], "to_observation_digest":second["observation_content_digest"],
+        "from_sequence_position":first["sequence_position"], "to_sequence_position":second["sequence_position"],
+        "transition_basis":"explicit_source_transition", "evidence_references":["continuity-fragment-001:explicit-transition"],
+        "confidence":{"level":"high", "basis":"Explicit structured fictional transition claim.", "qualifications":["The claim grants no authority and does not establish causality."]},
+        "assumptions":[], "unknowns":[], "limitations":["No state persistence outside the exact endpoints is inferred."], "content_digest":""
+    }, "content_digest")
 
 
 def result(sequence_value, observations):

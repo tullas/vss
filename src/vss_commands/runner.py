@@ -105,9 +105,10 @@ class CommandRunner:
                 if command in {MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
                     required = {"task","scene_breakdown","continuity_sequence","character_references","character_identities","character_observations"}
                     if command == MOVIE_CONTINUITY_COMMAND: required.add("context")
-                    if set(payload) != required or not all(isinstance(payload[name], list) for name in ("character_references","character_identities","character_observations")):
+                    allowed = required | {"transition_evidence"}
+                    if not required.issubset(payload) or not set(payload).issubset(allowed) or not all(isinstance(payload.get(name, []), list) for name in ("character_references","character_identities","character_observations","transition_evidence")):
                         return finish("error", ExitCode.INVALID_INPUT, {}, ["character continuity input is invalid"])
-                    from vss_movie_contracts import (validate_scene_breakdown, validate_character_reference, validate_character_identity, validate_continuity_sequence, validate_character_observation, validate_executable_character_continuity_task)
+                    from vss_movie_contracts import (validate_scene_breakdown, validate_character_reference, validate_character_identity, validate_continuity_sequence, validate_character_observation, validate_executable_character_continuity_task, validate_character_continuity_transition_evidence)
                     breakdown = validate_scene_breakdown(payload["scene_breakdown"])
                     references = tuple(validate_character_reference(x) for x in payload["character_references"])
                     identities = tuple(validate_character_identity(raw, tuple(x for x in references if x.value["reference_id"] in raw["bound_reference_ids"])) for raw in payload["character_identities"])
@@ -115,16 +116,17 @@ class CommandRunner:
                     identity_map = {x.value["character_id"]:x for x in identities}
                     observations = tuple(validate_character_observation(raw, identity_map.get(raw.get("character_id")), sequence) for raw in payload["character_observations"])
                     task = validate_executable_character_continuity_task(payload["task"], sequence, identities)
+                    transitions = tuple(validate_character_continuity_transition_evidence(raw, observations, sequence) for raw in payload.get("transition_evidence", ()))
                     if command == MOVIE_CONTINUITY_CONTEXT_COMMAND:
                         from vss_context import ContextAssembler
-                        outcome = ContextAssembler().assemble_character_continuity(task, sequence, identities, observations, correlation_id=correlation, environment=environment)
+                        outcome = ContextAssembler().assemble_character_continuity(task, sequence, identities, observations, transition_evidence=transitions, correlation_id=correlation, environment=environment)
                         from vss_reasoning_contracts.canonicalization import thaw_json
                         return finish("success", ExitCode.SUCCESS, {"context":outcome.context.to_json_value(), "assembly_report":thaw_json(outcome.report), "summary":dict(outcome.summary)}, [])
                     gateway = self._reasoning_gateway
                     if gateway is None:
                         from vss_reasoning.gateway import ReasoningGateway
                         gateway = ReasoningGateway.built_in()
-                    result = gateway.execute_character_continuity(task, payload["context"], continuity_sequence=sequence, character_identities=identities, observations=observations, environment=environment, correlation_id=correlation, dry_run=dry_run)
+                    result = gateway.execute_character_continuity(task, payload["context"], continuity_sequence=sequence, character_identities=identities, observations=observations, transition_evidence=transitions, environment=environment, correlation_id=correlation, dry_run=dry_run)
                     return finish("success", ExitCode.SUCCESS, result, [])
                 if command == MOVIE_CONTEXT_COMMAND:
                     if frozenset(payload) != {"request", "story"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie context input is invalid"])

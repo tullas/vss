@@ -10,8 +10,8 @@ from .errors import ReasoningUnavailable
 from .models import ImplementationIdentity
 from vss_reasoning_providers import DeterministicSceneProductionOptionsProvider
 from vss_reasoning_strategies import DeterministicSceneProductionOptionsStrategy
-from vss_reasoning_providers import DeterministicCharacterContinuityProvider
-from vss_reasoning_strategies import DeterministicCharacterContinuityStrategy
+from vss_reasoning_providers import DeterministicCharacterContinuityProvider, DeterministicCharacterContinuityAnalysisProvider
+from vss_reasoning_strategies import DeterministicCharacterContinuityStrategy, DeterministicCharacterContinuityAnalysisStrategy
 
 STRATEGY_IDENTITY = ImplementationIdentity(
     "vss.generate-options.deterministic", "1.0.0", "1", "active", "trusted_builtin"
@@ -90,13 +90,21 @@ class SceneProductionOptionsImplementationRegistry:
 class CharacterContinuityImplementationRegistry:
     strategy: DeterministicCharacterContinuityStrategy
     provider: DeterministicCharacterContinuityProvider
+    analysis_strategy: DeterministicCharacterContinuityAnalysisStrategy
+    analysis_provider: DeterministicCharacterContinuityAnalysisProvider
 
     @classmethod
     def built_in(cls):
-        return cls(DeterministicCharacterContinuityStrategy(), DeterministicCharacterContinuityProvider())
+        return cls(DeterministicCharacterContinuityStrategy(), DeterministicCharacterContinuityProvider(), DeterministicCharacterContinuityAnalysisStrategy(), DeterministicCharacterContinuityAnalysisProvider())
 
-    def resolve(self):
-        if type(self.strategy) is not DeterministicCharacterContinuityStrategy or type(self.provider) is not DeterministicCharacterContinuityProvider:
+    def resolve(self, task_version="2"):
+        if task_version == "3":
+            actual = (self.analysis_strategy.identity, self.analysis_strategy.version, self.analysis_provider.identity, self.analysis_provider.version, self.analysis_provider.api_version)
+            expected = ("vss.analyze-character-continuity.deterministic", "1.1.0", "vss.reasoning.character-continuity.deterministic", "1.1.0", "1")
+            if type(self.analysis_strategy) is not DeterministicCharacterContinuityAnalysisStrategy or type(self.analysis_provider) is not DeterministicCharacterContinuityAnalysisProvider or actual != expected:
+                raise ReasoningUnavailable("character continuity analysis implementation substitution rejected")
+            return self.analysis_strategy, self.analysis_provider
+        if task_version != "2" or type(self.strategy) is not DeterministicCharacterContinuityStrategy or type(self.provider) is not DeterministicCharacterContinuityProvider:
             raise ReasoningUnavailable("character continuity implementation substitution rejected")
         expected = ("vss.analyze-character-continuity.deterministic", "1.0.0", "vss.reasoning.character-continuity.deterministic", "1.0.0", "1")
         actual = (self.strategy.identity, self.strategy.version, self.provider.identity, self.provider.version, self.provider.api_version)
@@ -106,4 +114,4 @@ class CharacterContinuityImplementationRegistry:
 
     @property
     def digest(self):
-        return canonical_digest({"strategy":[self.strategy.identity,self.strategy.version], "provider":[self.provider.identity,self.provider.version,self.provider.api_version], "calls":1, "iterations":1, "retry":False, "fallback":False, "persistence":False})
+        return canonical_digest({"m5.2":{"strategy":[self.strategy.identity,self.strategy.version], "provider":[self.provider.identity,self.provider.version,self.provider.api_version]}, "m5.3":{"strategy":[self.analysis_strategy.identity,self.analysis_strategy.version], "provider":[self.analysis_provider.identity,self.analysis_provider.version,self.analysis_provider.api_version]}, "calls":1, "iterations":1, "retry":False, "fallback":False, "persistence":False})

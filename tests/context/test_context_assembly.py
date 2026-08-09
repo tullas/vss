@@ -28,6 +28,7 @@ class ContextAssemblyTests(unittest.TestCase):
             ("scene_breakdown_context", "1"),
             ("scene_production_options_context", "1"),
             ("character_continuity_context", "1"),
+            ("character_continuity_context", "2"),
         })
         with self.assertRaises(ContextContractError):
             first.resolve("context_object", "2")

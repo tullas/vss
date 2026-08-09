@@ -260,32 +260,36 @@ class ContextAssembler:
                 raise ContextAuditFailure("context audit failed") from audit_exc
             raise
 
-    def assemble_character_continuity(self, task, sequence, identities, observations, *, correlation_id: str, environment: str, classification: str = "public", validation_time: str | None = None, revocations=None) -> Any:
+    def assemble_character_continuity(self, task, sequence, identities, observations, *, transition_evidence=(), correlation_id: str, environment: str, classification: str = "public", validation_time: str | None = None, revocations=None) -> Any:
         """Assemble one bounded continuity Context with one terminal audit attempt."""
         started = time.monotonic(); context = None; report = None; audit_attempted = False
         request = task.to_json_value() if hasattr(task, "to_json_value") else {}
         try:
-            if request.get("task_version") != "2" or request.get("correlation_id") != correlation_id or request.get("environment") != environment:
+            if request.get("task_version") not in {"2", "3"} or request.get("correlation_id") != correlation_id or request.get("environment") != environment:
                 raise ContextPolicyDenied("character continuity executable-task binding is invalid")
-            from vss_movie_character_continuity import CharacterContinuityRuleCatalogue, assemble_character_continuity_context, character_continuity_context_report
+            from vss_movie_character_continuity import CharacterContinuityRuleCatalogue, CharacterContinuityAnalysisRuleCatalogue, assemble_character_continuity_context, character_continuity_context_report
             from vss_movie_scene_breakdown import MovieRevocationSnapshot
             construction_time = validation_time or _iso(datetime.now(timezone.utc).replace(microsecond=0))
-            catalogue = CharacterContinuityRuleCatalogue.built_in(); snapshot = revocations or MovieRevocationSnapshot.built_in()
+            catalogue = CharacterContinuityRuleCatalogue.built_in() if request["task_version"] == "2" else CharacterContinuityAnalysisRuleCatalogue.built_in(); snapshot = revocations or MovieRevocationSnapshot.built_in()
             targets = [("continuity_sequence", sequence.value["continuity_sequence_id"], sequence.value["content_digest"]), ("rule_catalogue", catalogue.identity, catalogue.digest), ("policy", "character_continuity_context_local", None)]
             targets += [("character_identity", item.value["character_id"], item.value["content_digest"]) for item in identities]
             targets += [("character_observation", item.value["observation_id"], item.value["observation_content_digest"]) for item in observations]
+            targets += [("character_continuity_transition_evidence", item.value["transition_evidence_id"], item.value["content_digest"]) for item in transition_evidence]
             if any(snapshot.evaluate(kind, identity, digest, construction_time) != "eligible" for kind, identity, digest in targets):
                 raise ContextPolicyDenied("character continuity Context material is revoked")
-            context = assemble_character_continuity_context(task, sequence, tuple(identities), tuple(observations), classification=classification, validation_time=validation_time)
+            context = assemble_character_continuity_context(task, sequence, tuple(identities), tuple(observations), transition_evidence=tuple(transition_evidence), classification=classification, validation_time=validation_time)
             report = character_continuity_context_report(context, revocation_result="eligible")
             audit_attempted = True
-            self._audit_sink.append({"event_type":"character_continuity_context_assembly_completed", "recorded_at":_iso(datetime.now(timezone.utc)), "assembly_execution_id":uuid.uuid4().hex, "request_id":request["request_id"], "correlation_id":correlation_id, "project_id":request["project_id"], "environment":environment, "purpose":request["purpose"], "context_identity":"character_continuity_context/1", "context_content_digest":context.value["context_content_digest"], "complete_context_digest":context.digest, "continuity_sequence_id":sequence.value["continuity_sequence_id"], "continuity_sequence_digest":sequence.value["content_digest"], "scene_count":len(sequence.value["selected_scenes"]), "character_count":len(identities), "observation_count":len(observations), "rule_catalogue_digest":catalogue.digest, "report_digest":report["report_digest"], "revocation_result":"eligible", "expiry":context.value["expires_at"], "status":"success", "duration_ms":max(0, int((time.monotonic()-started)*1000))})
+            audit_record = {"event_type":"character_continuity_context_assembly_completed", "recorded_at":_iso(datetime.now(timezone.utc)), "assembly_execution_id":uuid.uuid4().hex, "request_id":request["request_id"], "correlation_id":correlation_id, "project_id":request["project_id"], "environment":environment, "purpose":request["purpose"], "context_identity":f"character_continuity_context/{request['expected_context_version']}", "context_content_digest":context.value["context_content_digest"], "complete_context_digest":context.digest, "continuity_sequence_id":sequence.value["continuity_sequence_id"], "continuity_sequence_digest":sequence.value["content_digest"], "scene_count":len(sequence.value["selected_scenes"]), "character_count":len(identities), "observation_count":len(observations), "rule_catalogue_digest":catalogue.digest, "report_digest":report["report_digest"], "revocation_result":"eligible", "expiry":context.value["expires_at"], "status":"success", "duration_ms":max(0, int((time.monotonic()-started)*1000))}
+            if request["task_version"] == "3":
+                audit_record = {**audit_record, "transition_count":len(transition_evidence)}
+            self._audit_sink.append(audit_record)
             return CharacterContinuityAssemblyResult(context=context, report=report, summary=MappingProxyType({"context_id":context.value["context_id"], "input_set_digest":context.value["input_set_digest"], "selection_digest":context.value["selection_digest"], "context_content_digest":context.value["context_content_digest"], "complete_context_digest":context.digest, "report_digest":report["report_digest"], "registry_digest":self._registry.digest}))
         except Exception as exc:
             if audit_attempted:
                 raise ContextAuditFailure("context audit failed") from exc
             try:
-                self._audit_sink.append({"event_type":"character_continuity_context_assembly_failed", "recorded_at":_iso(datetime.now(timezone.utc)), "assembly_execution_id":uuid.uuid4().hex, "request_id":request.get("request_id"), "correlation_id":correlation_id, "project_id":request.get("project_id"), "environment":environment, "purpose":request.get("purpose"), "context_identity":"character_continuity_context/1", "status":"failed", "duration_ms":max(0, int((time.monotonic()-started)*1000))})
+                self._audit_sink.append({"event_type":"character_continuity_context_assembly_failed", "recorded_at":_iso(datetime.now(timezone.utc)), "assembly_execution_id":uuid.uuid4().hex, "request_id":request.get("request_id"), "correlation_id":correlation_id, "project_id":request.get("project_id"), "environment":environment, "purpose":request.get("purpose"), "context_identity":f"character_continuity_context/{request.get('expected_context_version', 'unknown')}", "status":"failed", "duration_ms":max(0, int((time.monotonic()-started)*1000))})
             except Exception as audit_exc:
                 raise ContextAuditFailure("context audit failed") from audit_exc
             raise

@@ -1,4 +1,33 @@
-# M5.2 Character Continuity Reasoning
+# M5.2–M5.3 Character Continuity Reasoning
+
+## M5.3 bounded analysis
+
+M5.3 preserves every historical M5.1/M5.2 contract and adds exact
+`analyze_character_continuity/3`, `character_continuity_context/2`,
+`character_continuity_transition_evidence/1`, and deterministic catalogue
+`1.1.0`. Task v2 still requires Context v1 and catalogue 1.0.0; task v3 requires
+Context v2 and catalogue 1.1.0. No latest-version resolution exists.
+
+Transition evidence is independently validated inert data binding the exact
+project, sequence, character, category, ordered observation IDs/digests,
+continuity positions, bounded provenance, and its own digest. Context v2 carries
+only these bindings, never a prior result. The provider qualifies an explicit
+claim into the existing result-v1 transition shape and never discovers a
+transition from differing values or non-mention.
+
+Catalogue 1.1.0 owns `exact_repeat`, `explicit_transition`, `incomparable`,
+`insufficient_evidence`, and `contradiction_eligibility`. The current
+positive-only vocabulary has no closed incompatible pair: presence has only
+`present`, possession only `possesses`, and physical states may coexist. M5.3
+therefore discovers zero contradictions. Different values are incomparable;
+exact repeats do not prove persistence; unknown is a successful result.
+
+`review_suggested` stays false for resolved explicit transitions, repeats,
+non-mention, and unsupported comparisons. It is neither severity nor approval.
+Bounds remain eight scenes, eight characters, 128 observations, 128 adjacent
+comparisons, one call, and one iteration, plus at most 32 transitions and 32
+contradictions. The path remains local Python with no service, state, AI,
+Asset/Data, Compute/Execution, worker, queue, scheduler, or Plan semantics.
 
 M5.2 implements the first bounded cross-scene semantic path governed by
 [ADR-0020](adr/ADR-0020-character-continuity-architecture.md). It remains a
@@ -104,7 +133,9 @@ category, and explicit position. No network, filesystem provider access,
 database, service, daemon, AI, model, prompt, retrieval, search, embedding,
 asset plane, compute worker, or persistent state exists.
 
-M5.3 remains responsible for stronger bounded contradiction or transition
-analysis. Production artifact snapshots and dynamic compute admission remain
-deferred under ADR-0022. The implementation follows ADR-0021’s Semantic Plane
-boundary and ADR-0023’s minimal-component strategy.
+M5.3 adds bounded explicit-transition qualification and the closed
+contradiction-eligibility framework. New negative-state vocabulary and any
+non-empty incompatibility catalogue remain future contract decisions.
+Production artifact snapshots and dynamic compute admission remain deferred
+under ADR-0022. The implementation follows ADR-0021’s Semantic Plane boundary
+and ADR-0023’s minimal-component strategy.

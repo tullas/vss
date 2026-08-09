@@ -201,7 +201,7 @@ def validate_character_observation(value, character_identity=None, continuity_se
 def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     version = value.get("task_version") if isinstance(value, dict) else None
-    if version not in {"1", "2"}:
+    if version not in {"1", "2", "3"}:
         raise MovieContractError("unknown character continuity task version")
     task_contract = f"analyze_character_continuity/{version}"
     result = _validate(value, task_contract, registry, MAX_STORY_BYTES)
@@ -225,11 +225,39 @@ def validate_character_continuity_task(value, continuity_sequence=None, characte
 
 def validate_executable_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     result = validate_character_continuity_task(value, continuity_sequence, character_identities, registry)
-    if result.value["task_version"] != "2" or result.value["lifecycle"] != "active" or result.value["implementation_availability"] != "required":
+    if result.value["task_version"] not in {"2", "3"} or result.value["lifecycle"] != "active" or result.value["implementation_availability"] != "required":
         raise MovieContractError("character continuity task is not executable")
     return result
 
-def validate_character_continuity_observation_set(value, observations=(), continuity_sequence=None, task=None, registry=None):
+def validate_character_continuity_transition_evidence(value, observations=(), continuity_sequence=None, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "character_continuity_transition_evidence/1", registry, MAX_STORY_BYTES)
+    _require_digest(result.value, "content_digest", "character continuity transition evidence")
+    data = result.value
+    if not isinstance(continuity_sequence, ValidatedMovieArtifact) or continuity_sequence.value.get("contract_identity") != "continuity_sequence":
+        raise MovieContractError("transition evidence requires an independently validated continuity sequence")
+    sequence = continuity_sequence.value
+    if (data["project_id"], data["continuity_sequence_id"], data["continuity_sequence_digest"]) != (sequence["project_id"], sequence["continuity_sequence_id"], sequence["content_digest"]):
+        raise MovieContractError("transition evidence sequence binding mismatch")
+    supplied = {}
+    for artifact in observations:
+        if not isinstance(artifact, ValidatedMovieArtifact) or artifact.value.get("contract_identity") != "character_observation":
+            raise MovieContractError("transition evidence requires independently validated observations")
+        if artifact.value["observation_id"] in supplied:
+            raise MovieContractError("transition evidence observation identity is duplicated")
+        supplied[artifact.value["observation_id"]] = artifact.value
+    first = supplied.get(data["from_observation_id"]); second = supplied.get(data["to_observation_id"])
+    if first is None or second is None or first is second:
+        raise MovieContractError("transition evidence observation is unresolved")
+    if (data["from_observation_digest"], data["to_observation_digest"]) != (first["observation_content_digest"], second["observation_content_digest"]):
+        raise MovieContractError("transition evidence observation digest mismatch")
+    if any(item["character_id"] != data["character_id"] or item["category"] != data["category"] for item in (first, second)):
+        raise MovieContractError("transition evidence character or category binding mismatch")
+    if (data["from_sequence_position"], data["to_sequence_position"]) != (first["sequence_position"], second["sequence_position"]) or data["from_sequence_position"] >= data["to_sequence_position"]:
+        raise MovieContractError("transition evidence chronology binding mismatch")
+    return result
+
+def validate_character_continuity_observation_set(value, observations=(), continuity_sequence=None, task=None, registry=None, transition_evidence=()):
     registry = registry or MovieContractRegistry.built_in()
     result = _validate(value, "character_continuity_observation_set/1", registry, MAX_RESULT_BYTES)
     data = result.value
@@ -299,6 +327,29 @@ def validate_character_continuity_observation_set(value, observations=(), contin
         first = by_id.get(transition["from_observation_id"]); second = by_id.get(transition["to_observation_id"])
         if first is None or second is None or first is second or transition["from_observation_digest"] != first.value["observation_content_digest"] or transition["to_observation_digest"] != second.value["observation_content_digest"] or first.value["character_id"] != transition["character_id"] or second.value["character_id"] != transition["character_id"] or first.value["category"] != transition["category"] or second.value["category"] != transition["category"] or first.value["sequence_position"] >= second.value["sequence_position"]:
             raise MovieContractError("continuity transition binding is invalid")
+    if admitted_task.value["task_version"] == "3":
+        transition_ids = [item["transition_id"] for item in payload["explicit_transitions"]]
+        contradiction_ids = [item["contradiction_id"] for item in payload["contradictions"]]
+        if len(transition_ids) != len(set(transition_ids)) or len(contradiction_ids) != len(set(contradiction_ids)):
+            raise MovieContractError("continuity analysis structural identity is duplicated")
+        evidence = {}
+        for artifact in transition_evidence:
+            validated = validate_character_continuity_transition_evidence(artifact.to_json_value() if isinstance(artifact, ValidatedMovieArtifact) else artifact, observations, continuity_sequence, registry)
+            if validated.value["transition_evidence_id"] in evidence:
+                raise MovieContractError("transition evidence identity is duplicated")
+            evidence[validated.value["transition_evidence_id"]] = validated.value
+        if len(evidence) != len(payload["explicit_transitions"]):
+            raise MovieContractError("continuity result transition evidence set is not exact")
+        for transition in payload["explicit_transitions"]:
+            source_id = transition["transition_id"].removeprefix("continuity-transition-")
+            source = evidence.get("continuity-transition-evidence-" + source_id)
+            if source is None or any(transition[field] != source[source_field] for field, source_field in (("character_id","character_id"),("category","category"),("from_observation_id","from_observation_id"),("from_observation_digest","from_observation_digest"),("to_observation_id","to_observation_id"),("to_observation_digest","to_observation_digest"))):
+                raise MovieContractError("continuity result transition evidence binding is invalid")
+            required_provenance = {source["transition_evidence_id"], "sha256:" + source["content_digest"]}
+            if not required_provenance.issubset(transition["evidence_references"]):
+                raise MovieContractError("continuity result transition provenance binding is incomplete")
+            if transition["qualification"] != "Independently validated explicit transition evidence; rule explicit_transition/1.1.0 does not infer persistence or causality." or thaw_json(transition["confidence"]) != {"level":"low", "basis":"Exact independently validated transition-evidence binding.", "qualifications":["Qualification establishes neither truth, persistence, causality, severity, nor authority."]} or thaw_json(transition["limitations"]) != ["Only the explicit endpoints are qualified; intervening state and causality remain unknown."]:
+                raise MovieContractError("continuity result transition qualification is invalid")
     for contradiction in payload["contradictions"]:
         material = dict(contradiction); digest = material.pop("contradiction_content_digest")
         if digest != canonical_digest(material): raise MovieContractError("continuity contradiction digest mismatch")
@@ -311,4 +362,8 @@ def validate_character_continuity_observation_set(value, observations=(), contin
                 raise MovieContractError("continuity contradiction binding is invalid")
     if bool(payload["contradictions"]) and not payload["review_suggested"]:
         raise MovieContractError("unresolved contradictions require semantic review suggestion")
+    if admitted_task.value["task_version"] == "3" and payload["contradictions"]:
+        raise MovieContractError("catalogue 1.1.0 admits no contradiction output")
+    if admitted_task.value["task_version"] == "3" and payload["review_suggested"]:
+        raise MovieContractError("catalogue 1.1.0 has no review-suggested condition")
     return result
