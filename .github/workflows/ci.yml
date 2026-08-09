@@ -137,7 +137,7 @@ jobs:
           PYTHONPATH=src:tests/character_continuity_contracts python - <<'PY'
           from fixtures import identity, observation, reference, scene_breakdown, sequence, task
           from vss_commands.runner import CommandRunner
-          from vss_context_contracts import validate_context
+          from vss_context_contracts import ContextContractRegistry, validate_context
           from vss_movie_contracts import (MovieContractRegistry, validate_character_identity,
               validate_character_observation, validate_character_reference,
               validate_continuity_sequence, validate_executable_character_continuity_task,
@@ -149,7 +149,7 @@ jobs:
           obs=validate_character_observation(observation(seq.value,'possession',1),ident,seq,registry)
           bundle={'task':executable.to_json_value(),'scene_breakdown':breakdown.to_json_value(),'continuity_sequence':seq.to_json_value(),'character_references':[ref.to_json_value()],'character_identities':[ident.to_json_value()],'character_observations':[obs.to_json_value()]}
           runner=CommandRunner(); assembled,code=runner.run('movie.context-assemble-character-continuity','development',bundle,executable.value['correlation_id'])
-          assert code == 0; context=assembled['output']['context']; validate_context(context)
+          assert code == 0; context=assembled['output']['context']; validate_context(context,ContextContractRegistry.built_in())
           one,code=runner.run('movie.analyze-character-continuity','development',{**bundle,'context':context},executable.value['correlation_id']); assert code == 0
           two,code=runner.run('movie.analyze-character-continuity','development',{**bundle,'context':context},executable.value['correlation_id']); assert code == 0
           dry,code=runner.run('movie.analyze-character-continuity','development',{**bundle,'context':context},executable.value['correlation_id'],dry_run=True); assert code == 0
