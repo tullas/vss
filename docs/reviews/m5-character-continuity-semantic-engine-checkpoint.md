@@ -89,6 +89,14 @@ inconsistent or a fourth materially different semantic family requiring
 another large branch; the likely response would be small typed adapters around
 one lifecycle, not a universal engine object.
 
+The independent acceptance classification is
+`HEALTHY_WITH_SIZE_PRESSURE`, approaching a `SMALL_REFACTOR_TRIGGER` rather
+than requiring remediation now. Extraction becomes warranted when another
+domain materially duplicates the lifecycle, adapter code outweighs the generic
+lifecycle, task/version branches cease to be a small closed set, a domain rule
+enters Gateway, or a provider class requires genuinely different lifecycle
+machinery. Line count alone is not a trigger.
+
 CommandRunner remains presentation and routing: strict bounded file loading,
 correlation, public API selection, envelope construction, and exit mapping. No
 Character Continuity or future film-learning policy resides there.
@@ -227,6 +235,27 @@ However, those primitives do not yet define:
 These gaps do not require redesign of M3–M5, but probabilistic implementation
 must not precede their architectural treatment.
 
+The Cinematic Observation ADR must answer the confidence gate explicitly:
+
+1. which observation domain a confidence value qualifies;
+2. what calibration evidence and population support it;
+3. how unknown and abstain differ from low confidence;
+4. whether values are comparable across models, versions, or observation
+   families;
+5. that no threshold grants truth, authorization, approval, or execution;
+6. whether and under what qualification low-confidence output may enter a
+   task-specific Context; and
+7. how deterministic and probabilistic observations coexist or disagree
+   without one silently overwriting the other.
+
+Model confidence is not automatically system confidence. A future model-backed
+observation must remain attributable, where material, to exact model identity
+and version, weights digest and licensing/provenance qualification,
+implementation/runtime version, preprocessing pipeline/version, inference
+policy/configuration version, input evidence identity, output observation
+identity, calibration metadata, and known limitations. This is a conceptual
+provenance obligation, not a frozen model schema.
+
 ## Source rights, withdrawal, and reference influence
 
 Knowledge provenance, source identity, purpose, classification, retention,
@@ -248,6 +277,16 @@ license. Suitable conceptual source tiers are VSS-owned/generated, explicitly
 licensed, public domain, compatible Creative Commons, then other material only
 after explicit review. This checkpoint makes no legal determination.
 
+The next ADR must define withdrawal propagation separately for raw media,
+derived observations, aggregated patterns, lessons, cached Contexts, future
+option/recommendation inputs, and historical audit. It must not assume every
+derivative is necessarily deleted: retention, quarantine, continued historical
+evidence, and prohibition on future use are rights/policy decisions. Exact
+lineage must at least make every affected derivative identifiable. Source
+accessibility never establishes source eligibility, and eligibility must bind
+purpose, classification, permitted retention, derivative-metadata treatment,
+redistribution restrictions, revocation, and provenance.
+
 ## Film Learning readiness and initial slice
 
 The proposed flow—eligible source → observations → patterns → lessons →
@@ -256,6 +295,15 @@ preserves exact provenance, qualification, withdrawal behavior, and bounded
 compatibility. It should not be one universal cinematic observation object.
 Cinematography, editing, performance, emotion, humor, sound, lighting/color,
 and blocking have different evidence and confidence semantics.
+
+Observation, pattern, and lesson should have independently reviewable contract
+meanings and lifecycles: an observation records what was detected or
+interpreted from exact evidence; a pattern qualifies repetition or association
+across observations; a lesson is a bounded qualified generalization eligible
+for a particular future task. Pattern frequency is not artistic truth, and a
+lesson is not a recommendation, approval, or authority. The next ADR should
+start with a narrow federation rather than either a Movie/Cinematic God Object
+or one registry per individual property.
 
 Start with **narrow Shot/Cinematography Observation**: shot boundaries and
 duration, framing/shot-scale category, subject count, approximate camera-angle
@@ -381,6 +429,10 @@ small implementation PR.
 | Reference influence and withdrawal propagation | `NEEDS_NEXT_ADR` | Film Learning architecture |
 | Human review semantics | `FUTURE_DOMAIN` | Before review state becomes workflow/authority |
 | Learning feedback and quality measurement | `FUTURE_DOMAIN` | Project/studio learning ADR |
+| Source/raw-media retention | `NEEDS_NEXT_ADR` | Cinematic Observation source-eligibility policy |
+| Media sanitization and parser isolation | `NEEDS_NEXT_ADR` | Before any non-fixture media decoding |
+| Malicious-media handling | `NEEDS_NEXT_ADR` | Cinematic Observation threat boundary; implementation follows admitted workload |
+| Model update/replacement policy | `NEEDS_NEXT_ADR` | Before model-backed observations; exact versions and no implicit migration |
 | Production media lineage and output admission | `PRODUCTION_ONLY` | Asset/Output Admission architecture |
 | Worker isolation, durable recovery, scheduling | `PRODUCTION_ONLY` | Worker/Durable Execution ADR |
 
@@ -406,6 +458,16 @@ Runtime, Gateway, Knowledge, or audit.
 
 ADR-0021/0022/0023 remain coherent under these stresses. The gaps are explicit
 future gates, not contradictions in the current platform.
+
+The next ADR's security projection must cover malformed media and decoder
+vulnerabilities, decompression bombs, hidden streams and metadata, adversarial
+frames/audio, source spoofing, rights-metadata tampering, model poisoning and
+replacement, transcript/metadata prompt injection if an AI boundary exists,
+privacy and biometric processing, real-person inference, and sensitive-trait
+claims. The ADR must assign trust, validation, isolation, size/compute bounds,
+and fail-closed eligibility boundaries; it need not prematurely implement all
+production mitigations. Manual/original structured fixtures avoid—not solve—
+these media risks during the first semantic slice.
 
 ## Recommended roadmap
 
