@@ -25,6 +25,7 @@ _FILES = MappingProxyType({
     "vss.generate_options_context/1": "generate-options-context-v1.schema.json",
     "vss.scene_breakdown_context/1": "scene-breakdown-context-v1.schema.json",
     "vss.scene_production_options_context/1": "scene-production-options-context-v1.schema.json",
+    "vss.character_continuity_context/1": "character-continuity-context-v1.schema.json",
     "vss.context_assembly_report/1": "context-assembly-report-v1.schema.json",
 })
 
@@ -103,6 +104,7 @@ class ContextContractRegistry:
             ContextRegistration("generate_options_context", "1", "vss.generate_options_context/1"),
             ContextRegistration("scene_breakdown_context", "1", "vss.scene_breakdown_context/1"),
             ContextRegistration("scene_production_options_context", "1", "vss.scene_production_options_context/1"),
+            ContextRegistration("character_continuity_context", "1", "vss.character_continuity_context/1"),
             ContextRegistration("context_assembly_report", "1", "vss.context_assembly_report/1"),
         )
         registrations = self.registrations or expected
@@ -158,4 +160,14 @@ class ContextContractRegistry:
             "production_strategy": "vss.generate-scene-production-options.deterministic/1.0.0",
             "production_provider": "vss.reasoning.deterministic-scene-production-options/1.0.0",
             "production_provider_api": "1",
+            "continuity_context": "character_continuity_context/1",
+            "continuity_task": "analyze_character_continuity/2",
+            "continuity_result": "character_continuity_observation_set/1",
+            "continuity_purpose": "character_continuity_local_validation",
+            "continuity_environment": "development",
+            "continuity_policy": "character_continuity_context_local/1",
+            "continuity_catalogue": "vss.character-continuity.rules.deterministic/1.0.0",
+            "continuity_strategy": "vss.analyze-character-continuity.deterministic/1.0.0",
+            "continuity_provider": "vss.reasoning.character-continuity.deterministic/1.0.0",
+            "continuity_provider_api": "1",
         })

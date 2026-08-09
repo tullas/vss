@@ -200,8 +200,12 @@ def validate_character_observation(value, character_identity=None, continuity_se
 
 def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
-    result = _validate(value, "analyze_character_continuity/1", registry, MAX_STORY_BYTES)
-    registry.resolve_result("analyze_character_continuity/1", "character_continuity_observation_set/1")
+    version = value.get("task_version") if isinstance(value, dict) else None
+    if version not in {"1", "2"}:
+        raise MovieContractError("unknown character continuity task version")
+    task_contract = f"analyze_character_continuity/{version}"
+    result = _validate(value, task_contract, registry, MAX_STORY_BYTES)
+    registry.resolve_result(task_contract, "character_continuity_observation_set/1")
     _require_digest(result.value, "task_content_digest", "character continuity task")
     order = {name: index for index, name in enumerate(("presence", "possession", "physical_state"))}
     if list(result.value["selected_character_ids"]) != sorted(result.value["selected_character_ids"]) or list(result.value["selected_observation_categories"]) != sorted(result.value["selected_observation_categories"], key=order.__getitem__):
@@ -219,10 +223,15 @@ def validate_character_continuity_task(value, continuity_sequence=None, characte
         raise MovieContractError("character continuity task character binding mismatch")
     return result
 
+def validate_executable_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
+    result = validate_character_continuity_task(value, continuity_sequence, character_identities, registry)
+    if result.value["task_version"] != "2" or result.value["lifecycle"] != "active" or result.value["implementation_availability"] != "required":
+        raise MovieContractError("character continuity task is not executable")
+    return result
+
 def validate_character_continuity_observation_set(value, observations=(), continuity_sequence=None, task=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     result = _validate(value, "character_continuity_observation_set/1", registry, MAX_RESULT_BYTES)
-    registry.resolve_result("analyze_character_continuity/1", "character_continuity_observation_set/1")
     data = result.value
     payload = data["payload"]
     order = {name: index for index, name in enumerate(("presence", "possession", "physical_state"))}
@@ -274,6 +283,7 @@ def validate_character_continuity_observation_set(value, observations=(), contin
         raise MovieContractError("continuity result requires an independently validated continuity sequence")
     if not isinstance(task, ValidatedMovieArtifact) or task.value.get("task_identity") != "analyze_character_continuity":
         raise MovieContractError("continuity result requires an independently validated task")
+    registry.resolve_result(f"analyze_character_continuity/{task.value.get('task_version')}", "character_continuity_observation_set/1")
     sequence = continuity_sequence; admitted_task = task
     if data["continuity_sequence_id"] != sequence.value["continuity_sequence_id"] or data["continuity_sequence_digest"] != sequence.value["content_digest"] or data["project_id"] != sequence.value["project_id"]:
         raise MovieContractError("continuity result sequence binding mismatch")

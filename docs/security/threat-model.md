@@ -309,3 +309,32 @@ and artifacts of the wrong validated family cannot be promoted into a returned
 validated identity, sequence, observation, task, or result. Public validation
 errors use stable Movie-domain messages and do not concatenate jsonschema
 messages that could echo source-controlled values or schema details.
+
+## M5.2 governed character continuity reasoning threats
+
+M5.2 admits only exact executable task v2; historical validation-only task v1
+fails before provider invocation. Independently validated sequence, identity,
+and observation artifacts plus project, scene, position, category, and digest
+bindings mitigate character, sequence, chronology, observation, Context,
+provider-view, result, and digest substitution. Context expiry and immutable
+semantic revocation are checked at assembly and immediately before the sole
+provider call. Invalid, expired, revoked, mismatched, or downgraded input has
+zero calls and no fallback.
+
+The minimal immutable provider view excludes Runtime, CommandRunner, registry,
+audit, report, policy objects, filesystem/network handles, capabilities,
+workflows, assets, and execution objects. Closed categories and positive-only
+payloads prevent actor/performance injection, arbitrary provider fields, and
+silence becoming negative state. Exact IDs prevent display-name, alias,
+Unicode, transliteration, or similarity-based identity inference. Explicit
+positions prevent scene ordinal or input order from becoming chronology.
+Persistence remains off, and M5.2 discovers neither transitions nor
+contradictions; supplied structural claims remain qualified and inert.
+
+Canonical ordering, bounded scenes/characters/observations/comparisons/bytes,
+per-request immutable state, and independently bound audit records mitigate
+denial through excessive observations and concurrent request mix-up. Safe
+audits contain counts and digests rather than observations, labels, or evidence
+content; one terminal attempt is made and audit failure is fatal. M5.3
+contradiction discovery, persistent revocation/audit, external AI, process
+isolation, and all Asset/Compute production controls remain deferred.

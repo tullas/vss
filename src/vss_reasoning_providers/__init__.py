@@ -2,5 +2,6 @@ from .contracts import DeterministicOptionsProvider
 from .deterministic_options import BuiltinDeterministicOptionsProvider
 from .deterministic_scene_breakdown import DeterministicSceneBreakdownProvider
 from .deterministic_scene_production_options import DeterministicSceneProductionOptionsProvider
+from .deterministic_character_continuity import DeterministicCharacterContinuityProvider
 
-__all__ = ["BuiltinDeterministicOptionsProvider", "DeterministicOptionsProvider", "DeterministicSceneBreakdownProvider", "DeterministicSceneProductionOptionsProvider"]
+__all__ = ["BuiltinDeterministicOptionsProvider", "DeterministicOptionsProvider", "DeterministicSceneBreakdownProvider", "DeterministicSceneProductionOptionsProvider", "DeterministicCharacterContinuityProvider"]

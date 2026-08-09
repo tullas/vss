@@ -58,6 +58,17 @@ future `character_continuity_context/1`, and the exact
 `not_implemented`. It contains no source body, Context, provider, strategy,
 model, prompt, correction, ranking, action, or execution request.
 
+M5.2 advances the task contract intentionally rather than changing this
+historical meaning. `analyze_character_continuity/2` is the executable local
+deterministic semantic task: its lifecycle is `active`, implementation
+availability is `required`, and it binds exactly to
+`character_continuity_context/1` and
+`character_continuity_observation_set/1`. Both task versions remain registered
+and each has an explicit exact mapping to result v1. There is no latest,
+wildcard, range, automatic upgrade, downgrade, or nearest-version selection.
+Context Assembly and ReasoningGateway accept task v2 only; task v1 remains a
+valid supported validation-only artifact.
+
 `character_continuity_observation_set/1` is an inert semantic result. It binds
 independently validated observation IDs/content digests to the exact project,
 sequence, scenes, characters, categories, and positions. Its nested transition

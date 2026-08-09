@@ -91,9 +91,9 @@ def observation(sequence_value, category="presence", ordinal=1):
     }, "observation_content_digest")
 
 
-def task(sequence_value):
+def task(sequence_value, version="1"):
     return seal({
-        "schema_version":"1","task_identity":"analyze_character_continuity","task_version":"1",
+        "schema_version":"1","task_identity":"analyze_character_continuity","task_version":version,
         "request_id":"continuity-request-001","correlation_id":"continuity-correlation-001","project_id":"continuity-local",
         "environment":"development","purpose":"character_continuity_local_validation",
         "expected_context_family":"character_continuity_context","expected_context_version":"1",
@@ -101,7 +101,8 @@ def task(sequence_value):
         "continuity_sequence_id":sequence_value["continuity_sequence_id"],"continuity_sequence_digest":sequence_value["content_digest"],
         "selected_character_ids":["character-arin"],"selected_observation_categories":["presence","possession","physical_state"],
         "bounds":{"maximum_scenes":8,"maximum_characters":8,"maximum_observations":128,"maximum_result_bytes":65536},
-        "lifecycle":"defined_validation_only","implementation_availability":"not_implemented","task_content_digest":""
+        "lifecycle":"defined_validation_only" if version == "1" else "active",
+        "implementation_availability":"not_implemented" if version == "1" else "required","task_content_digest":""
     }, "task_content_digest")
 
 
