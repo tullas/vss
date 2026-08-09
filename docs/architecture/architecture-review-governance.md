@@ -83,3 +83,26 @@ Unrecognized ownership is not acceptable.
 Reviews must not create fake tests for absent systems. The
 [ADR evidence matrix](adr-evidence-matrix.md) records present evidence and the
 gate at which deferred obligations become testable.
+
+## Component Admission
+
+Every proposal for a new persistent component or infrastructure service must
+include the Component Admission evidence required by ADR-0023. The review
+compares the measured need with an existing component, in-process library,
+on-demand tool, and other simpler applicable alternatives. It accounts for
+idle/peak resources, operations, availability, recovery, observability,
+security, credentials, licensing/supply chain, data migration, local-first
+impact, lock-in, removal, and the measured threshold at which the component is
+worth its total platform tax.
+
+Review depth is proportional to impact. A small library needs focused
+dependency, licensing, security, maintenance, and removal evidence; a
+persistent or distributed service requires the full operational review. A
+hard security, reliability, isolation, or recovery requirement may justify a
+more complex component and always overrides component-count minimalism.
+
+Constitutional Boards additionally stress component count, idle resource cost,
+startup/warm-up cost, network hops, storage copies, operational dependencies,
+failure surfaces, migration/rollback, and operator or autonomous-agent
+cognitive burden. They allow forecast evidence to begin migration planning
+before a measured limit is actually breached.
