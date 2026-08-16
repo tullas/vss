@@ -12,6 +12,8 @@ from vss_reasoning_providers import DeterministicSceneProductionOptionsProvider
 from vss_reasoning_strategies import DeterministicSceneProductionOptionsStrategy
 from vss_reasoning_providers import DeterministicCharacterContinuityProvider, DeterministicCharacterContinuityAnalysisProvider
 from vss_reasoning_strategies import DeterministicCharacterContinuityStrategy, DeterministicCharacterContinuityAnalysisStrategy
+from vss_reasoning_providers import DeterministicShotCinematographyPatternProvider
+from vss_reasoning_strategies import DeterministicShotCinematographyPatternStrategy
 
 STRATEGY_IDENTITY = ImplementationIdentity(
     "vss.generate-options.deterministic", "1.0.0", "1", "active", "trusted_builtin"
@@ -115,3 +117,27 @@ class CharacterContinuityImplementationRegistry:
     @property
     def digest(self):
         return canonical_digest({"m5.2":{"strategy":[self.strategy.identity,self.strategy.version], "provider":[self.provider.identity,self.provider.version,self.provider.api_version]}, "m5.3":{"strategy":[self.analysis_strategy.identity,self.analysis_strategy.version], "provider":[self.analysis_provider.identity,self.analysis_provider.version,self.analysis_provider.api_version]}, "calls":1, "iterations":1, "retry":False, "fallback":False, "persistence":False})
+
+
+@dataclass(frozen=True, slots=True)
+class ShotCinematographyPatternImplementationRegistry:
+    strategy: DeterministicShotCinematographyPatternStrategy
+    provider: DeterministicShotCinematographyPatternProvider
+
+    @classmethod
+    def built_in(cls):
+        return cls(DeterministicShotCinematographyPatternStrategy(), DeterministicShotCinematographyPatternProvider())
+
+    def resolve(self):
+        expected = ("vss.analyze-shot-cinematography-patterns.deterministic", "1.0.0",
+                    "vss.reasoning.shot-cinematography-patterns.deterministic", "1.0.0", "1")
+        actual = (self.strategy.identity, self.strategy.version, self.provider.identity, self.provider.version, self.provider.api_version)
+        if type(self.strategy) is not DeterministicShotCinematographyPatternStrategy or type(self.provider) is not DeterministicShotCinematographyPatternProvider or actual != expected:
+            raise ReasoningUnavailable("shot cinematography pattern implementation substitution rejected")
+        return self.strategy, self.provider
+
+    @property
+    def digest(self):
+        return canonical_digest({"strategy":[self.strategy.identity,self.strategy.version],
+                                 "provider":[self.provider.identity,self.provider.version,self.provider.api_version],
+                                 "calls":1,"iterations":1,"retry":False,"fallback":False,"pairwise":False,"combinations":False})

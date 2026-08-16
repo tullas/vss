@@ -25,11 +25,14 @@ FILES = MappingProxyType({
     "character_continuity_observation_set/1":"character-continuity-observation-set-v1.schema.json",
     "shot_cinematography_observation/1":"shot-cinematography-observation-v1.schema.json",
     "shot_cinematography_observation_set/1":"shot-cinematography-observation-set-v1.schema.json",
+    "analyze_shot_cinematography_patterns/1":"analyze-shot-cinematography-patterns-task-v1.schema.json",
+    "shot_cinematography_pattern_set/1":"shot-cinematography-pattern-set-v1.schema.json",
 })
 COMPATIBILITY = MappingProxyType({
     "analyze_character_continuity/1": "character_continuity_observation_set/1",
     "analyze_character_continuity/2": "character_continuity_observation_set/1",
     "analyze_character_continuity/3": "character_continuity_observation_set/1",
+    "analyze_shot_cinematography_patterns/1": "shot_cinematography_pattern_set/1",
 })
 def _pairs(pairs):
     out={}

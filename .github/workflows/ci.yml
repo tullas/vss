@@ -80,6 +80,7 @@ jobs:
           python -m unittest discover -s tests/character_continuity_contracts -p 'test_*.py'
           python -m unittest discover -s tests/shot_observation_contracts -p 'test_*.py'
           python -m unittest discover -s tests/shot_observation_context -p 'test_*.py'
+          python -m unittest discover -s tests/shot_cinematography_patterns -p 'test_*.py'
       - name: Validate deterministic movie contract fixtures
         run: |
           PYTHONPATH=src python - <<'PY'
@@ -107,7 +108,7 @@ jobs:
               validate_character_continuity_observation_set, validate_character_continuity_task,
               validate_continuity_sequence, validate_scene_breakdown)
           expected = (
-              '0801126ddaf911dfa78ef3e15d95e41031276cc7d1e533255bb8f95a1737c44a',
+              '5f0e862b75af60d4e238ef8ee490db5f002d99c239485399eaf07410ed6683b7',
               'f58e461dfa72934457109b301c00faac53df3efe7f5e4c99c6e2356fa95a301b',
               '23f6062d723c948e2f1f5c64717d0e0d7f7afa019e5ef60f3052099aefe1f6d9',
               '0b182656c967875794fce9489b9e0f29095f219c39f5d1f79d642eba66745a6f',
