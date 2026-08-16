@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
@@ -74,10 +75,15 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - docker.io/library/ubuntu@sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
-          - docker.io/versity/versitygw@sha256:ef1c6bf0180abd9583da8a0466b3cba1cfc1ed368afebdf7280c0774081d2c82
+          - docker.io/library/ubuntu@sha256:7b202b0e2e0028c6250f5fcf41d04df492d145a1654c6995a6553f0c1f6f1960
+          - ghcr.io/tullas/vss/versitygw@sha256:0cb1fe893f0b67608c623a0cb36e5a5c7085f2118824f72b6833f3831cc35f53
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Authenticate for the admitted VSS-maintained image
+        if: startsWith(matrix.image, 'ghcr.io/')
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
       - name: Install checksum-verified Trivy
         run: scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"
       - name: Run Trivy image scan

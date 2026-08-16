@@ -123,10 +123,10 @@ class SupplyChainPolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             value = json.loads((ROOT / "security/exceptions.yml").read_text(encoding="utf-8"))
-            value["exceptions"][0]["expiry_date"] = "2026-08-11"
+            value["exceptions"][0]["expiry_date"] = "2026-08-30"
             write_json(root / "security/exceptions.yml", value)
             with self.assertRaisesRegex(SC.PolicyFailure, "differs from human approval"):
-                SC.validate_exceptions(root, today=dt.date(2026, 7, 27))
+                SC.validate_exceptions(root, today=dt.date(2026, 8, 15))
 
     def test_unpinned_action_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

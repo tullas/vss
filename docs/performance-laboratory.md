@@ -68,10 +68,13 @@ task, family, strategy, provider, status, event type, execution identity, and
 digest semantics. A bounded pre-run anchor plus device and inode identity makes
 replacement, truncation, and rotation fail closed; partial trailing records are
 rejected. It never truncates developer audit state and does not place raw lines
-in a report. The existing writer serializes complete bounded records with an
-in-process lock and verifies every append byte. Local JSONL remains a development
-facility; cross-process ordering, crash durability, tamper resistance, rotation,
-and production backpressure remain unresolved.
+in a report. The existing writer publishes complete bounded records under a
+shared process-local lock and verifies every append byte; harness snapshots and
+reads use the same lock, so supported concurrent readers cannot observe an
+in-progress append. Stable partial tails outside that publication boundary
+still fail closed. Local JSONL remains a development facility; cross-process
+ordering, crash durability, tamper resistance, rotation, and production
+backpressure remain unresolved.
 
 ## Reports and resource observations
 

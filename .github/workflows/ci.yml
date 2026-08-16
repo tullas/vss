@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   secret-scan:
@@ -241,6 +242,10 @@ jobs:
             fi
             tofu -chdir="$environment" validate
           done < <(find infrastructure/environments -type f -name '*.tf' -printf '%h\n' | sort -u)
+      - name: Authenticate for the admitted VSS-maintained acceptance image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
       - name: Test hardened object-storage lifecycle and S3 contract
         run: scripts/acceptance-object-storage.sh
 
@@ -250,6 +255,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Run Bash test suite
         id: bash-tests
         shell: bash
