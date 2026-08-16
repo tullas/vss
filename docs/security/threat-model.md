@@ -395,3 +395,23 @@ identity, manual/synthetic provenance, and limitations. It contains no media,
 path, callback, Runtime capability, registry, provider, execution resource, or
 promotion artifact. Assembly performs no filesystem, network, subprocess,
 model, reasoning, recommendation, Pattern, Lesson, or Knowledge operation.
+
+## M6.3 deterministic shot-pattern threats
+
+M6.3 revalidates the exact Context and task before its sole provider call and
+binds the Context, catalogue, provider view, implementation identities, and
+observation IDs/content digests into the invocation digest. Independent result
+validation recomputes the closed rules from the admitted Context; fabricated
+recurrence, omitted or duplicated evidence, resealed Context projections,
+provider-result substitution, incomplete bindings, catalogue substitution, and
+pattern amplification from duplicated observations fail closed.
+
+Only `observed` values participate. Exact exclusion records retain uncertain
+and unavailable qualifications, preventing qualification erasure or absence
+inference. Occurrence counts are never represented as probability, confidence,
+truth, authority, recommendation, Lesson, or Knowledge. The 2–8 Context bound,
+eight fixed attributes, two pattern types, threshold two, and 40-pattern result
+cap bound work and output. There are no combinations, pairwise scans, retries,
+fallbacks, files, network, subprocesses, dynamic imports, raw media, models, or
+Runtime capabilities. Dry-run performs all admission and binding work but calls
+no provider and fabricates no result.

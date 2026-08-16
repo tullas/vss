@@ -80,6 +80,7 @@ jobs:
           python -m unittest discover -s tests/character_continuity_contracts -p 'test_*.py'
           python -m unittest discover -s tests/shot_observation_contracts -p 'test_*.py'
           python -m unittest discover -s tests/shot_observation_context -p 'test_*.py'
+          python -m unittest discover -s tests/shot_cinematography_patterns -p 'test_*.py'
       - name: Validate deterministic movie contract fixtures
         run: |
           PYTHONPATH=src python - <<'PY'
