@@ -14,6 +14,7 @@ from typing import Any
 
 from vss_reasoning.gateway import ReasoningGateway
 from vss_reasoning_contracts import canonical_bytes, canonical_digest, load_json_document
+from vss_runtime.audit import synchronized_audit_access
 
 from .environment import collect_environment, collect_resources
 from .errors import PerformanceCorrectnessFailure, PerformanceTimeout
@@ -113,6 +114,10 @@ class PerformanceHarness:
         return value
 
     def _audit_snapshot(self) -> _AuditSnapshot:
+        with synchronized_audit_access():
+            return self._audit_snapshot_synchronized()
+
+    def _audit_snapshot_synchronized(self) -> _AuditSnapshot:
         path = self._repository_root / _AUDIT_RELATIVE
         try:
             metadata = path.lstat()
@@ -144,6 +149,10 @@ class PerformanceHarness:
         )
 
     def _audit_records(self, snapshot: _AuditSnapshot) -> list[dict[str, Any]]:
+        with synchronized_audit_access():
+            return self._audit_records_synchronized(snapshot)
+
+    def _audit_records_synchronized(self, snapshot: _AuditSnapshot) -> list[dict[str, Any]]:
         path = self._repository_root / _AUDIT_RELATIVE
         descriptor = -1
         try:
