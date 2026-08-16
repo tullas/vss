@@ -23,7 +23,7 @@ from vss_performance.reports import report_digest, validate_report, write_report
 from vss_commands.cli import main as cli_main
 from vss_reasoning.gateway import ReasoningGateway
 from vss_reasoning.registry import ReasoningImplementationRegistry
-from vss_runtime.audit import AuditLogger
+from vss_runtime.audit import AuditLogger, synchronized_audit_access
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests/fixtures/reasoning/generate-options-runtime-valid.json"
@@ -32,14 +32,10 @@ FIXTURE = ROOT / "tests/fixtures/reasoning/generate-options-runtime-valid.json"
 class JsonlAudit:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._logger = AuditLogger(path.parent)
 
     def append(self, record: dict) -> None:
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        descriptor = os.open(self.path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
-        try:
-            os.write(descriptor, (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode())
-        finally:
-            os.close(descriptor)
+        self._logger.append(record)
 
 
 class PerformanceLaboratoryTests(unittest.TestCase):
@@ -162,9 +158,52 @@ class PerformanceLaboratoryTests(unittest.TestCase):
         self.assertEqual(first["semantic_validation"]["observed_content_digests"], second["semantic_validation"]["observed_content_digests"])
 
     def test_concurrent_harness_runs_do_not_mix_requests(self):
+        for _ in range(10):
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                reports = list(executor.map(
+                    lambda _: self.harness.run("ci_safe", environment="development")[1],
+                    range(4),
+                ))
+            self.assertTrue(all(report["status"] == "success" for report in reports))
+            self.assertTrue(all(report["audit_validation"]["records"] == 10 for report in reports))
+            self.assertEqual(
+                {tuple(report["semantic_validation"]["observed_content_digests"]) for report in reports},
+                {(get_profile("ci_safe").expected_content_digest,)},
+            )
+        records = [
+            json.loads(line)
+            for line in (self.root / ".local/runtime/audit/executions.jsonl").read_bytes().splitlines()
+        ]
+        self.assertEqual(len(records), 400)
+        self.assertEqual(len({record["request_id"] for record in records}), 400)
+        self.assertEqual(len({record["correlation_id"] for record in records}), 400)
+
+    def test_audit_reader_waits_for_complete_record_publication(self):
+        path = self.root / ".local/runtime/audit/executions.jsonl"
+        path.parent.mkdir(parents=True)
+        snapshot = self.harness._audit_snapshot()
+        partial_published = threading.Event()
+        complete_publication = threading.Event()
+
+        def publish_record() -> None:
+            with synchronized_audit_access():
+                descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+                try:
+                    os.write(descriptor, b'{"correlation_id":"concurrent"')
+                    partial_published.set()
+                    self.assertTrue(complete_publication.wait(timeout=2))
+                    os.write(descriptor, b'}\n')
+                finally:
+                    os.close(descriptor)
+
         with ThreadPoolExecutor(max_workers=2) as executor:
-            reports = list(executor.map(lambda _: self.harness.run("ci_safe", environment="development")[1], range(2)))
-        self.assertTrue(all(report["status"] == "success" for report in reports))
+            writer = executor.submit(publish_record)
+            self.assertTrue(partial_published.wait(timeout=2))
+            reader = executor.submit(self.harness._audit_records, snapshot)
+            self.assertFalse(reader.done())
+            complete_publication.set()
+            writer.result(timeout=2)
+            self.assertEqual(reader.result(timeout=2), [{"correlation_id": "concurrent"}])
 
     def test_prior_unrelated_audit_records_are_ignored(self):
         path = self.root / ".local/runtime/audit/executions.jsonl"
@@ -193,6 +232,13 @@ class PerformanceLaboratoryTests(unittest.TestCase):
         with path.open("ab") as stream:
             stream.write(b'{"correlation_id":"partial"}')
         with self.assertRaisesRegex(PerformanceCorrectnessFailure, "partial"):
+            self.harness._audit_records(snapshot)
+
+        path.write_text('{"correlation_id":"prior"}\n')
+        snapshot = self.harness._audit_snapshot()
+        with path.open("ab") as stream:
+            stream.write(b'{"correlation_id":not-json}\n')
+        with self.assertRaisesRegex(PerformanceCorrectnessFailure, "malformed"):
             self.harness._audit_records(snapshot)
 
     def test_audit_association_rejects_duplicate_and_wrong_status(self):

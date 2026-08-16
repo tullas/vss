@@ -3,12 +3,20 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .errors import RuntimeInternalFailure
 
 _APPEND_LOCK = threading.Lock()
+
+
+@contextmanager
+def synchronized_audit_access() -> Iterator[None]:
+    """Serialize publication and inspection of development JSONL records."""
+    with _APPEND_LOCK:
+        yield
 
 
 class AuditLogger:
@@ -26,7 +34,7 @@ class AuditLogger:
             path = self.audit_root / "executions.jsonl"
             flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
             payload = (json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("utf-8")
-            with _APPEND_LOCK:
+            with synchronized_audit_access():
                 descriptor = os.open(path, flags, 0o600)
                 try:
                     os.chmod(path, 0o600)
