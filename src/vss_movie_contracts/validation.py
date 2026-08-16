@@ -198,6 +198,11 @@ def validate_character_observation(value, character_identity=None, continuity_se
         raise MovieContractError("character observation scene binding mismatch")
     return result
 
+def validate_shot_cinematography_observation(value, registry=None):
+    result = _validate(value, "shot_cinematography_observation/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
+    _require_digest(result.value, "observation_content_digest", "shot cinematography observation")
+    return result
+
 def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     version = value.get("task_version") if isinstance(value, dict) else None

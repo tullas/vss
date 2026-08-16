@@ -368,3 +368,14 @@ loss, recovery, or persistence. `review_suggested` remains inert semantic-review
 metadata, never severity, approval, scheduling, or execution authority. Future
 negative-state vocabularies or incompatibility rules require explicit contract
 and catalogue evolution.
+
+## M6.1 manual/synthetic shot observation threats
+
+M6.1 treats every Shot Cinematography Observation as untrusted inert data.
+Exact contract dispatch, bounded JSON validation, closed attribute values,
+explicit unavailable states, fixed manual/synthetic provenance pairings, and
+content digests mitigate field injection, version fallback, provenance
+substitution, fabricated precision, and silent inference. Evidence references
+are identities only and grant no file, network, media, rights, truth, promotion,
+recommendation, Runtime, or execution authority. No decoder, model, provider,
+Gateway route, storage, retrieval, Pattern, Lesson, or Knowledge path exists.
