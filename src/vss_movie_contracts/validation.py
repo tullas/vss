@@ -203,6 +203,45 @@ def validate_shot_cinematography_observation(value, registry=None):
     _require_digest(result.value, "observation_content_digest", "shot cinematography observation")
     return result
 
+
+def validate_shot_cinematography_observation_set(value, observations=(), registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "shot_cinematography_observation_set/1", registry, MAX_RESULT_BYTES)
+    _require_digest(result.value, "content_digest", "shot cinematography observation set")
+    data = result.value
+    admitted = {}
+    for raw in observations:
+        artifact = validate_shot_cinematography_observation(raw, registry)
+        observation_id = artifact.value["observation_id"]
+        if observation_id in admitted:
+            raise MovieContractError("shot observation identity is duplicated")
+        admitted[observation_id] = artifact
+    bindings = data["observations"]
+    if [item["observation_id"] for item in bindings] != sorted(item["observation_id"] for item in bindings):
+        raise MovieContractError("shot observation set order is not canonical")
+    if len(admitted) != len(bindings) or set(admitted) != {item["observation_id"] for item in bindings}:
+        raise MovieContractError("shot observation set is not exact")
+    if len({item["shot_id"] for item in bindings}) != len(bindings):
+        raise MovieContractError("shot observation identity is duplicated")
+    for binding in bindings:
+        observation = admitted[binding["observation_id"]].value
+        expected = (
+            observation["contract_identity"], observation["contract_version"],
+            observation["observation_content_digest"], observation["shot_id"],
+        )
+        actual = (
+            binding["observation_identity"], binding["observation_version"],
+            binding["observation_content_digest"], binding["shot_id"],
+        )
+        if actual != expected:
+            raise MovieContractError("shot observation binding mismatch")
+        if (observation["project_id"], observation["scene_id"], observation["classification"]) != (
+            data["project_id"], data["scene_id"], data["classification"]
+        ):
+            raise MovieContractError("shot observation set scope mismatch")
+    return result
+
+
 def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     version = value.get("task_version") if isinstance(value, dict) else None

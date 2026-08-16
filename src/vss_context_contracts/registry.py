@@ -27,6 +27,7 @@ _FILES = MappingProxyType({
     "vss.scene_production_options_context/1": "scene-production-options-context-v1.schema.json",
     "vss.character_continuity_context/1": "character-continuity-context-v1.schema.json",
     "vss.character_continuity_context/2": "character-continuity-context-v2.schema.json",
+    "vss.shot_cinematography_context/1": "shot-cinematography-context-v1.schema.json",
     "vss.context_assembly_report/1": "context-assembly-report-v1.schema.json",
 })
 
@@ -107,6 +108,7 @@ class ContextContractRegistry:
             ContextRegistration("scene_production_options_context", "1", "vss.scene_production_options_context/1"),
             ContextRegistration("character_continuity_context", "1", "vss.character_continuity_context/1"),
             ContextRegistration("character_continuity_context", "2", "vss.character_continuity_context/2"),
+            ContextRegistration("shot_cinematography_context", "1", "vss.shot_cinematography_context/1"),
             ContextRegistration("context_assembly_report", "1", "vss.context_assembly_report/1"),
         )
         registrations = self.registrations or expected
@@ -178,4 +180,8 @@ class ContextContractRegistry:
             "continuity_analysis_catalogue": "vss.character-continuity.rules.deterministic/1.1.0",
             "continuity_analysis_strategy": "vss.analyze-character-continuity.deterministic/1.1.0",
             "continuity_analysis_provider": "vss.reasoning.character-continuity.deterministic/1.1.0",
+            "shot_cinematography_context": "shot_cinematography_context/1",
+            "shot_cinematography_observation_set": "shot_cinematography_observation_set/1",
+            "shot_cinematography_purpose": "shot_cinematography_local_analysis",
+            "shot_cinematography_policy": "shot_cinematography_context_local/1",
         })
