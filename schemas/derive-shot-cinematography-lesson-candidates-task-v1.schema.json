@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"vss.movie.derive_shot_cinematography_lesson_candidates/1","type":"object","additionalProperties":false,
+  "required":["schema_version","task_identity","task_version","request_id","correlation_id","project_id","scene_id","environment","purpose","classification","expected_input_family","expected_input_version","expected_result_family","expected_result_version","pattern_set_digest","pattern_set_complete_digest","context_id","context_content_digest","complete_context_digest","rule_catalogue_identity","rule_catalogue_version","rule_catalogue_digest","bounds","lifecycle","implementation_availability","task_content_digest"],
+  "properties":{
+    "schema_version":{"const":"1"},"task_identity":{"const":"derive_shot_cinematography_lesson_candidates"},"task_version":{"const":"1"},
+    "request_id":{"$ref":"#/$defs/id"},"correlation_id":{"$ref":"#/$defs/id"},"project_id":{"$ref":"#/$defs/id"},"scene_id":{"type":"string","pattern":"^scene-[a-z0-9][a-z0-9._-]{0,47}$"},
+    "environment":{"const":"development"},"purpose":{"const":"shot_cinematography_local_lesson_candidate_derivation"},"classification":{"enum":["public","internal"]},
+    "expected_input_family":{"const":"shot_cinematography_pattern_set"},"expected_input_version":{"const":"1"},"expected_result_family":{"const":"shot_cinematography_lesson_candidate_set"},"expected_result_version":{"const":"1"},
+    "pattern_set_digest":{"$ref":"#/$defs/digest"},"pattern_set_complete_digest":{"$ref":"#/$defs/digest"},"context_id":{"type":"string","pattern":"^shot-context-[0-9a-f]{32}$"},"context_content_digest":{"$ref":"#/$defs/digest"},"complete_context_digest":{"$ref":"#/$defs/digest"},
+    "rule_catalogue_identity":{"const":"vss.shot-cinematography.lessons.deterministic"},"rule_catalogue_version":{"const":"1.0.0"},"rule_catalogue_digest":{"$ref":"#/$defs/digest"},
+    "bounds":{"type":"object","additionalProperties":false,"required":["maximum_source_patterns","maximum_candidates","maximum_result_bytes"],"properties":{"maximum_source_patterns":{"const":40},"maximum_candidates":{"const":40},"maximum_result_bytes":{"const":65536}}},
+    "lifecycle":{"const":"active"},"implementation_availability":{"const":"required"},"task_content_digest":{"$ref":"#/$defs/digest"}
+  },"$defs":{"id":{"type":"string","pattern":"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},"digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}}
+}

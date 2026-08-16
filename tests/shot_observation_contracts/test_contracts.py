@@ -125,7 +125,7 @@ class ShotObservationContractTests(unittest.TestCase):
         first = MovieContractRegistry.built_in()
         second = MovieContractRegistry.built_in()
         self.assertEqual(first.digest, second.digest)
-        self.assertEqual(first.digest, "13eeb62ea65cb8b6ec53ec36f64d4ab9653e5c6000bfa3511260f71e7c773f74")  # pragma: allowlist secret
+        self.assertEqual(first.digest, "87da8599d520f2c78dce373268ff96e5897876ca2ba87465b8e68dbd1334b4aa")  # pragma: allowlist secret
         self.assertEqual(sum(r.identity == "shot_cinematography_observation/1" for r in first.registrations), 1)
 
 if __name__ == "__main__":
