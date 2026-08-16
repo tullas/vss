@@ -14,10 +14,14 @@ A `variation` requires at least two distinct `observed` values. `uncertain`,
 `unknown`, `not_observed`, and `not_applicable` remain exact evidence-bound
 exclusions and never supply a value to either rule. Every summary identifies
 the eligible population, every pattern binds its supporting observation IDs
-and content digests, and all excluded observations retain their qualification.
+through a canonical digest of their exact ID/content-digest/shot bindings, and
+all excluded observations retain their qualification.
 
 The catalogue scans attributes independently in bounded
 O(observations × attributes) work over the M6.2 limit of eight observations.
+Numeric attributes use exact JSON-number equality: no tolerance, bucketing,
+range inference, or rounding is applied; integer-valued decimal spellings have
+one canonical integer representation.
 It performs no combinations, pairwise comparisons, chronology inference,
 causal or emotional interpretation, quality judgment, prediction, or advice.
 The local strategy invokes one deterministic provider; dry-run invokes none.

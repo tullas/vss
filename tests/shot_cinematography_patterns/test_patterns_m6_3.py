@@ -50,6 +50,22 @@ class ShotCinematographyPatternTests(unittest.TestCase):
         self.assertEqual({item["pattern_type"] for item in angle}, {"repeated_value", "variation"})
         repeat = next(item for item in angle if item["pattern_type"] == "repeated_value")
         self.assertEqual((repeat["values"], repeat["occurrence_count"], repeat["eligible_observation_count"]), (["level"], 2, 3))
+        bindings = {item["observation_id"]: item for item in payload["observation_bindings"]}
+        self.assertEqual(repeat["supporting_evidence_digest"], canonical_digest([bindings[item] for item in repeat["supporting_observation_ids"]]))
+
+    def test_numeric_attributes_use_exact_equality_without_tolerance_or_bucketing(self):
+        raw = [observation(1), observation(2), observation(3)]
+        for item, count, focal in zip(raw, (2, 2, 3), (35, 35.0, 50.5)):
+            item["attributes"]["subject_count"] = {"status":"observed", "value":count}
+            item["attributes"]["focal_length_mm"] = {"status":"observed", "value":focal}
+            seal(item, "observation_content_digest")
+        patterns = self.execute(raw)["shot_cinematography_pattern_set"]["payload"]["patterns"]
+        subject = next(item for item in patterns if item["attribute"] == "subject_count" and item["pattern_type"] == "repeated_value")
+        focal_repeat = next(item for item in patterns if item["attribute"] == "focal_length_mm" and item["pattern_type"] == "repeated_value")
+        focal_variation = next(item for item in patterns if item["attribute"] == "focal_length_mm" and item["pattern_type"] == "variation")
+        self.assertEqual((subject["values"], subject["occurrence_count"]), ([2], 2))
+        self.assertEqual((focal_repeat["values"], focal_repeat["occurrence_count"]), ([35], 2))
+        self.assertEqual(set(focal_variation["values"]), {35, 50.5})
 
     def test_qualification_is_preserved_and_only_observed_participates(self):
         raw = [observation(index) for index in range(5)]
@@ -121,12 +137,46 @@ class ShotCinematographyPatternTests(unittest.TestCase):
         with self.assertRaises(Exception):
             validate_shot_cinematography_pattern_set(forged, task=task, context=context, invocation_binding_digest=output["invocation_binding_digest"])
 
+        def reseal(candidate):
+            candidate["payload"]["semantic_result_digest"] = canonical_digest({**candidate["payload"], "semantic_result_digest": None})
+            candidate["integrity"]["payload_sha256"] = canonical_digest(candidate["payload"])
+            candidate["integrity"]["complete_result_sha256"] = canonical_digest({**candidate, "integrity":{"payload_sha256":candidate["integrity"]["payload_sha256"]}})
+            return candidate
+        mutations = []
+        reordered = copy.deepcopy(value); reordered["payload"]["patterns"] = list(reversed(reordered["payload"]["patterns"])); mutations.append(reordered)
+        duplicated = copy.deepcopy(value); duplicated["payload"]["patterns"].append(copy.deepcopy(duplicated["payload"]["patterns"][0])); mutations.append(duplicated)
+        wrong_count = copy.deepcopy(value); wrong_count["payload"]["patterns"][0]["occurrence_count"] += 1; mutations.append(wrong_count)
+        wrong_support = copy.deepcopy(value); wrong_support["payload"]["patterns"][0]["supporting_observation_ids"] = [item["observation_id"] for item in value["payload"]["observation_bindings"]][::-1]; mutations.append(wrong_support)
+        for candidate in mutations:
+            with self.subTest(), self.assertRaises(Exception):
+                validate_shot_cinematography_pattern_set(reseal(candidate), task=task, context=context, invocation_binding_digest=output["invocation_binding_digest"])
+
     def test_forged_provider_analysis_is_rejected(self):
         raw = [observation(1), observation(2)]
         context = context_for(raw); task = create_pattern_task(context, request_id="request-m6-3", correlation_id="correlation-m6-3")
         with patch("vss_reasoning_providers.deterministic_shot_cinematography_patterns.DeterministicShotCinematographyPatternProvider.analyze", return_value={"attribute_summaries": [], "patterns": []}):
             with self.assertRaises(CandidateGenerationFailure):
                 gateway().execute_shot_cinematography_patterns(task, context, environment="development", correlation_id="correlation-m6-3")
+
+    def test_catalogue_substitution_fails_before_provider(self):
+        context = context_for([observation(1), observation(2)])
+        raw = create_pattern_task(context, request_id="request-m6-3", correlation_id="correlation-m6-3").to_json_value()
+        raw["rule_catalogue_digest"] = "0" * 64; seal(raw, "task_content_digest")
+        task = validate_shot_cinematography_pattern_task(raw, context)
+        with patch("vss_reasoning_providers.deterministic_shot_cinematography_patterns.DeterministicShotCinematographyPatternProvider.analyze", autospec=True) as analyze:
+            with self.assertRaises(InvalidReasoningRequest):
+                gateway().execute_shot_cinematography_patterns(task, context, environment="development", correlation_id="correlation-m6-3")
+            analyze.assert_not_called()
+
+    def test_audit_is_one_terminal_record_and_truthful_for_dry_run(self):
+        context = context_for([observation(1), observation(2)])
+        task = create_pattern_task(context, request_id="request-m6-3", correlation_id="correlation-m6-3")
+        sink = Audit(); shared = gateway(sink)
+        shared.execute_shot_cinematography_patterns(task, context, environment="development", correlation_id="correlation-m6-3", dry_run=True)
+        shared.execute_shot_cinematography_patterns(task, context, environment="development", correlation_id="correlation-m6-3")
+        self.assertEqual(len(sink.records), 2)
+        self.assertEqual((sink.records[0]["dry_run"], sink.records[0]["provider_call_count"], sink.records[0]["pattern_count"]), (True, 0, 0))
+        self.assertEqual((sink.records[1]["dry_run"], sink.records[1]["provider_call_count"]), (False, 1))
 
     def test_resealed_context_projection_is_rejected_before_provider(self):
         context = context_for([observation(1), observation(2)])
@@ -165,6 +215,20 @@ print(gateway().execute_shot_cinematography_patterns(t,c,environment='developmen
         with ThreadPoolExecutor(max_workers=4) as pool:
             digests = list(pool.map(lambda _: shared.execute_shot_cinematography_patterns(task, context, environment="development", correlation_id="correlation-m6-3")["semantic_result_digest"], range(8)))
         self.assertEqual(len(set(digests)), 1)
+
+    def test_concurrent_distinct_contexts_do_not_mix_results_or_audit(self):
+        first_raw = [observation(1), observation(2)]
+        second_raw = [observation(1), observation(2)]
+        for item in second_raw:
+            item["attributes"]["shot_scale"] = {"status":"observed", "value":"wide"}; seal(item, "observation_content_digest")
+        contexts = [context_for(first_raw), context_for(second_raw)]
+        tasks = [create_pattern_task(context, request_id=f"request-m6-3-{index}", correlation_id=f"correlation-m6-3-{index}") for index, context in enumerate(contexts)]
+        sink = Audit(); shared = gateway(sink)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outputs = list(pool.map(lambda index: shared.execute_shot_cinematography_patterns(tasks[index], contexts[index], environment="development", correlation_id=f"correlation-m6-3-{index}"), range(2)))
+        self.assertNotEqual(outputs[0]["semantic_result_digest"], outputs[1]["semantic_result_digest"])
+        self.assertEqual({record["request_id"] for record in sink.records}, {"request-m6-3-0", "request-m6-3-1"})
+        self.assertEqual({record["context_content_digest"] for record in sink.records}, {context.value["context_content_digest"] for context in contexts})
 
     def test_registry_catalogue_and_schema_are_exact(self):
         registry = MovieContractRegistry.built_in()

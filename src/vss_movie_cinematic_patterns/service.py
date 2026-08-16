@@ -114,10 +114,21 @@ def _binding(item: dict[str, Any]) -> dict[str, Any]:
     return {key: item[key] for key in ("observation_id", "observation_content_digest", "shot_id")}
 
 
+def _pattern_value(value: Any) -> Any:
+    # JSON numbers compare by exact numeric value; this only removes an
+    # integer-valued decimal representation and applies no tolerance or rounding.
+    if type(value) is float and value.is_integer():
+        return int(value)
+    return value
+
+
 def analyze_patterns(view: ShotCinematographyPatternProviderView) -> dict[str, Any]:
     if type(view) is not ShotCinematographyPatternProviderView:
         raise TypeError("pattern analysis requires exact provider view")
     observations = [thaw_json(item) for item in view.observations]
+    evidence = {item["observation_id"]: _binding(item) for item in observations}
+    def evidence_digest(observation_ids: list[str]) -> str:
+        return canonical_digest([evidence[observation_id] for observation_id in sorted(observation_ids)])
     summaries: list[dict[str, Any]] = []
     patterns: list[dict[str, Any]] = []
     for attribute in ATTRIBUTES:
@@ -128,7 +139,7 @@ def analyze_patterns(view: ShotCinematographyPatternProviderView) -> dict[str, A
             if qualified["status"] != "observed":
                 excluded.append({"observation_id": item["observation_id"], "observation_content_digest": item["observation_content_digest"], "qualification": qualified["status"]})
                 continue
-            value = qualified["value"]
+            value = _pattern_value(qualified["value"])
             key = canonical_digest(value)
             groups.setdefault(key, (value, []))[1].append(_binding(item))
         value_counts = [
@@ -140,7 +151,9 @@ def analyze_patterns(view: ShotCinematographyPatternProviderView) -> dict[str, A
             if item["count"] >= 2:
                 material = {"pattern_type": "repeated_value", "attribute": attribute, "values": [item["value"]],
                             "occurrence_count": item["count"], "eligible_observation_count": eligible,
-                            "supporting_observation_ids": item["supporting_observation_ids"], "excluded_observations": excluded,
+                            "supporting_observation_ids": item["supporting_observation_ids"],
+                            "supporting_evidence_digest": evidence_digest(item["supporting_observation_ids"]),
+                            "excluded_observations": excluded,
                             "qualification": "observed_recurrence"}
                 digest = canonical_digest(material)
                 patterns.append({"pattern_id": "shot-pattern-" + digest[:32], "pattern_digest": digest, **material})
@@ -148,7 +161,8 @@ def analyze_patterns(view: ShotCinematographyPatternProviderView) -> dict[str, A
             support = sorted(observation_id for item in value_counts for observation_id in item["supporting_observation_ids"])
             material = {"pattern_type": "variation", "attribute": attribute, "values": [item["value"] for item in value_counts],
                         "occurrence_count": eligible, "eligible_observation_count": eligible,
-                        "supporting_observation_ids": support, "excluded_observations": excluded,
+                        "supporting_observation_ids": support, "supporting_evidence_digest": evidence_digest(support),
+                        "excluded_observations": excluded,
                         "qualification": "observed_variation"}
             digest = canonical_digest(material)
             patterns.append({"pattern_id": "shot-pattern-" + digest[:32], "pattern_digest": digest, **material})
