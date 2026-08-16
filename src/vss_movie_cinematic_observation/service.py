@@ -106,6 +106,24 @@ def validate_shot_cinematography_context(
         raise ValueError("shot cinematography Context order is not canonical")
     if len({item["observation_id"] for item in expected}) != len(expected) or len({item["shot_id"] for item in expected}) != len(expected):
         raise ValueError("shot cinematography Context identity is duplicated")
+    for projection in expected:
+        reconstructed = {
+            "schema_version": "1",
+            "contract_identity": projection["observation_identity"],
+            "contract_version": projection["observation_version"],
+            "observation_id": projection["observation_id"],
+            "project_id": value["project_id"],
+            "scene_id": value["scene_id"],
+            "shot_id": projection["shot_id"],
+            "evidence_reference": projection["evidence_reference"],
+            "purpose": "cinematic_observation_local_validation",
+            "classification": value["classification"],
+            "attributes": projection["attributes"],
+            "provenance": projection["provenance"],
+            "limitations": projection["limitations"],
+            "observation_content_digest": projection["observation_content_digest"],
+        }
+        validate_shot_cinematography_observation(reconstructed)
     if value["context_content_digest"] != canonical_digest(payload):
         raise ValueError("shot cinematography Context content digest mismatch")
     selection = canonical_digest([

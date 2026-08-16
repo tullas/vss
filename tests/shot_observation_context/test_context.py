@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from vss_context_contracts import ContextContractRegistry
-from vss_context_contracts.errors import ContextRegistryError
+from vss_context_contracts.errors import ContextRegistryError, InvalidContextInput
+from vss_context_contracts.validation import validate_context
 from vss_movie_cinematic_observation import (
     MAX_OBSERVATIONS,
     assemble_shot_cinematography_context,
@@ -101,7 +102,7 @@ class ShotObservationContextTests(unittest.TestCase):
         mutated[0]["attributes"]["shot_scale"]["value"] = "wide"
         with self.assertRaises(MovieContractError):
             assemble_shot_cinematography_context(observation_set, mutated)
-        for replacement in ("2", "latest", "*"):
+        for replacement in ("2", "latest", "*", ">=1"):
             wrong = copy.deepcopy(raw)
             wrong[0]["contract_version"] = replacement
             with self.subTest(version=replacement), self.assertRaises(MovieContractError):
@@ -147,6 +148,8 @@ class ShotObservationContextTests(unittest.TestCase):
         context_material(context)
         with self.assertRaises(ValueError):
             validate_shot_cinematography_context(context, observation_set=observation_set, observations=raw)
+        with self.assertRaises(InvalidContextInput):
+            validate_context(context, ContextContractRegistry.built_in())
         malformed = assemble_shot_cinematography_context(observation_set, raw).context.to_json_value()
         del malformed["payload"]["observations"][0]["provenance"]
         context_material(malformed)
@@ -176,7 +179,7 @@ class ShotObservationContextTests(unittest.TestCase):
         registry = ContextContractRegistry.built_in()
         self.assertEqual(registry.resolve("shot_cinematography_context", "1").schema_identity, "vss.shot_cinematography_context/1")
         self.assertEqual(registry.digest, "bcf063ad0ec60984ccfe422bb0d7da6f96fb5edb65d12c94520de9d6df6fc9f7")  # pragma: allowlist secret
-        for version in ("2", "latest", "*"):
+        for version in ("2", "latest", "*", ">=1"):
             with self.subTest(version=version), self.assertRaises(ContextRegistryError):
                 registry.resolve("shot_cinematography_context", version)
 
@@ -186,7 +189,7 @@ class ShotObservationContextTests(unittest.TestCase):
             registry.resolve("shot_cinematography_observation_set", "1").schema_identity,
             "vss.movie.shot_cinematography_observation_set/1/1",
         )
-        for version in ("2", "latest", "*"):
+        for version in ("2", "latest", "*", ">=1"):
             with self.subTest(version=version), self.assertRaises(MovieContractError):
                 registry.resolve("shot_cinematography_observation_set", version)
 
@@ -196,6 +199,22 @@ class ShotObservationContextTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             digests = list(pool.map(lambda _: assemble_shot_cinematography_context(observation_set, raw).context.digest, range(32)))
         self.assertEqual(len(set(digests)), 1)
+
+    def test_key_order_and_caller_aliases_do_not_change_sealed_artifacts(self):
+        raw = [observation(1), observation(2)]
+        reordered = [dict(reversed(list(item.items()))) for item in raw]
+        first_set = create_shot_cinematography_observation_set(raw)
+        second_set = create_shot_cinematography_observation_set(reordered)
+        first = assemble_shot_cinematography_context(first_set, raw)
+        second = assemble_shot_cinematography_context(second_set, reordered)
+        self.assertEqual(first_set.digest, second_set.digest)
+        self.assertEqual(first.context.digest, second.context.digest)
+        sealed_scale = dict(first.context.value["payload"]["observations"][0]["attributes"]["shot_scale"])
+        raw[0]["attributes"]["shot_scale"] = {"status": "observed", "value": "wide"}
+        self.assertEqual(
+            dict(first.context.value["payload"]["observations"][0]["attributes"]["shot_scale"]),
+            sealed_scale,
+        )
 
     def test_process_hash_seed_and_working_directory_do_not_change_digest(self):
         script = """
