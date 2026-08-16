@@ -201,13 +201,6 @@ def validate_character_observation(value, character_identity=None, continuity_se
 def validate_shot_cinematography_observation(value, registry=None):
     result = _validate(value, "shot_cinematography_observation/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
     _require_digest(result.value, "observation_content_digest", "shot cinematography observation")
-    data = result.value
-    expected_method = {
-        "manual_observation": "manual_declaration",
-        "synthetic_test_observation": "synthetic_fixture",
-    }[data["provenance"]["kind"]]
-    if data["provenance"]["method_identity"] != expected_method:
-        raise MovieContractError("shot observation provenance and method mismatch")
     return result
 
 def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
