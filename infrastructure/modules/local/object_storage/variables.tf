@@ -16,7 +16,7 @@ variable "volume_name" {
 variable "object_storage_image" {
   description = "Pinned VersityGW image reference."
   type        = string
-  default     = "docker.io/versity/versitygw@sha256:ef1c6bf0180abd9583da8a0466b3cba1cfc1ed368afebdf7280c0774081d2c82"
+  default     = "ghcr.io/tullas/vss/versitygw@sha256:921c70807aa1375de8b46f1708e4a036284d0545da5ff068904fde348edb363d"
 }
 
 variable "access_key" {

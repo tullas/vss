@@ -2,9 +2,6 @@ name: Build VersityGW security derivative
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - fix/ci-security-health-post-adr-0024
 
 permissions:
   contents: read
