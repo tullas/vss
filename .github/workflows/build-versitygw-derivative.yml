@@ -22,6 +22,11 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+      - name: Start the pinned attestation-capable builder
+        run: >-
+          docker buildx create --name vss-security-builder --use --bootstrap
+          --driver docker-container
+          --driver-opt image=moby/buildkit@sha256:040d34121c27906c4ff9ac152a30d52bf2c5d328d3bb748916bb3d2743c02528
       - name: Build and publish the exact reviewed derivative
         env:
           SOURCE_DATE_EPOCH: '1784082912'
@@ -38,3 +43,6 @@ jobs:
             --push \
             containers/versitygw
           docker buildx imagetools inspect "$image"
+      - name: Remove the ephemeral builder
+        if: always()
+        run: docker buildx rm vss-security-builder
