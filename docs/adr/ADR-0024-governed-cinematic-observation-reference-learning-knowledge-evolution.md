@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -171,11 +171,20 @@ translator and independent target validation under ADR-0018. For example,
 `shot_observation/1` may translate to `shot_observation/2` only when the owning
 domain declares the relevant meaning preserved.
 
-Knowledge evolution changes meaning, scope, evidence, conclusion, or
-limitations because understanding changed. It therefore creates a new exact
-semantic identity or version according to the owning domain. A superseding
-Lesson does not rewrite its predecessor to make the new conclusion appear
-historically known.
+Knowledge evolution changes meaning, scope, conclusion, or limitations because
+understanding changed. It therefore creates a new exact semantic identity or
+version according to the owning domain. A superseding Lesson does not rewrite
+its predecessor to make the new conclusion appear historically known.
+
+Additional or stronger evidence does not by itself require a new semantic
+version when the owning domain determines that the artifact's meaning, scope,
+conclusion, and limitations remain unchanged. The evidence or provenance state
+must still change explicitly and remain historically attributable; confidence
+or calibration changes are likewise recorded in their domain rather than
+silently changing the Lesson. A new semantic identity or version is required
+when changed evidence alters the claim's meaning, scope, conclusion,
+limitations, lifecycle interpretation, or governed use. Domain contracts must
+make these distinctions explicit without rewriting prior evidence state.
 
 Storage migration, source migration, model migration, representation
 migration, language migration, and knowledge evolution remain distinct. No
