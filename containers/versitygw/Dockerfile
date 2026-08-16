@@ -27,4 +27,5 @@ COPY --from=build /src/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --from=build /src/LICENSE /usr/share/licenses/versitygw/LICENSE
 RUN chmod 0755 /usr/local/bin/versitygw /usr/local/bin/docker-entrypoint.sh
 
+USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

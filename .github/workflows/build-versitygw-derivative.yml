@@ -2,6 +2,9 @@ name: Build VersityGW security derivative
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix/ci-security-health-post-adr-0024
 
 permissions:
   contents: read
@@ -29,7 +32,7 @@ jobs:
           SOURCE_DATE_EPOCH: '1784082912'
         run: |
           set -Eeuo pipefail
-          image='ghcr.io/tullas/vss/versitygw:v1.7.0-go1.25.13-r1'
+          image='ghcr.io/tullas/vss/versitygw:v1.7.0-go1.25.13-r2'
           docker buildx build \
             --file containers/versitygw/Dockerfile \
             --platform linux/amd64 \
