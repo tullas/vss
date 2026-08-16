@@ -289,6 +289,63 @@ def validate_shot_cinematography_pattern_set(value, *, task, context, invocation
     return result
 
 
+def validate_shot_cinematography_lesson_candidate_task(value, pattern_set=None, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "derive_shot_cinematography_lesson_candidates/1", registry, MAX_STORY_BYTES)
+    registry.resolve_result("derive_shot_cinematography_lesson_candidates/1", "shot_cinematography_lesson_candidate_set/1")
+    _require_digest(result.value, "task_content_digest", "shot cinematography lesson candidate task")
+    if not isinstance(pattern_set, ValidatedMovieArtifact) or pattern_set.value.get("result_family") != "shot_cinematography_pattern_set":
+        raise MovieContractError("lesson candidate task requires an independently validated Pattern Set")
+    data, source = result.value, pattern_set.value
+    expected = (
+        "shot_cinematography_pattern_set", "1", pattern_set.digest, source["integrity"]["complete_result_sha256"],
+        source["context_id"], source["context_content_digest"], source["complete_context_digest"],
+        source["project_id"], source["scene_id"], source["classification"],
+    )
+    actual = (
+        data["expected_input_family"], data["expected_input_version"], data["pattern_set_digest"],
+        data["pattern_set_complete_digest"], data["context_id"], data["context_content_digest"],
+        data["complete_context_digest"], data["project_id"], data["scene_id"], data["classification"],
+    )
+    if actual != expected:
+        raise MovieContractError("lesson candidate task Pattern Set binding mismatch")
+    return result
+
+
+def validate_shot_cinematography_lesson_candidate_set(value, *, task, pattern_set,
+                                                       invocation_binding_digest, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "shot_cinematography_lesson_candidate_set/1", registry, MAX_RESULT_BYTES)
+    if not isinstance(task, ValidatedMovieArtifact) or not isinstance(pattern_set, ValidatedMovieArtifact):
+        raise MovieContractError("lesson candidate result requires validated task and Pattern Set")
+    data, tv, source = result.value, task.value, pattern_set.value
+    expected = (
+        tv["request_id"], tv["correlation_id"], tv["project_id"], tv["scene_id"], tv["purpose"], tv["classification"],
+        pattern_set.digest, source["integrity"]["complete_result_sha256"], source["context_id"],
+        source["context_content_digest"], source["complete_context_digest"], tv["rule_catalogue_identity"],
+        tv["rule_catalogue_version"], tv["rule_catalogue_digest"], invocation_binding_digest,
+    )
+    actual = (
+        data["request_id"], data["correlation_id"], data["project_id"], data["scene_id"], data["purpose"],
+        data["classification"], data["pattern_set_digest"], data["pattern_set_complete_digest"], data["context_id"],
+        data["context_content_digest"], data["complete_context_digest"], data["rule_catalogue_identity"],
+        data["rule_catalogue_version"], data["rule_catalogue_digest"], data["invocation_binding_digest"],
+    )
+    if actual != expected:
+        raise MovieContractError("lesson candidate result binding mismatch")
+    payload = data["payload"]
+    if payload["semantic_result_digest"] != canonical_digest({**payload, "semantic_result_digest": None}):
+        raise MovieContractError("lesson candidate semantic result digest mismatch")
+    if data["integrity"]["payload_sha256"] != canonical_digest(payload):
+        raise MovieContractError("lesson candidate payload digest mismatch")
+    if data["integrity"]["complete_result_sha256"] != canonical_digest({**data, "integrity": {"payload_sha256": data["integrity"]["payload_sha256"]}}):
+        raise MovieContractError("lesson candidate complete result digest mismatch")
+    from vss_movie_cinematic_lessons import expected_lesson_candidate_payload
+    if thaw_json(payload) != expected_lesson_candidate_payload(pattern_set):
+        raise MovieContractError("lesson candidate evidence, scope, or proposition substitution rejected")
+    return result
+
+
 def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     version = value.get("task_version") if isinstance(value, dict) else None

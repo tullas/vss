@@ -415,3 +415,23 @@ cap bound work and output. There are no combinations, pairwise scans, retries,
 fallbacks, files, network, subprocesses, dynamic imports, raw media, models, or
 Runtime capabilities. Dry-run performs all admission and binding work but calls
 no provider and fabricates no result.
+
+## M6.4 deterministic cinematic Lesson Candidate threats
+
+M6.4 independently revalidates the M6.3 Pattern Set against its exact source
+task, Context, and invocation binding before the sole provider call. The M6.4
+task, provider view, invocation binding, candidate, and result bind the source
+Pattern Set and Context digests. Each candidate additionally binds the exact
+Pattern identity, Pattern digest, and supporting-evidence digest. Independent
+result recomputation rejects Pattern substitution, forged or omitted Lessons,
+evidence omission, duplicate amplification, scope expansion, qualification
+removal, outer-hash resealing, and catalogue or provider substitution.
+
+There is no caller-supplied prose: closed structured propositions prevent
+recommendation, causal, effectiveness, truth, and persuasive-language
+injection. Fixed limitations preserve exact Context scope, observed-only source
+semantics, non-generalization, and non-admission to Knowledge. One Pattern maps
+to at most one candidate, with no cross-Pattern synthesis. Bounds cap both
+source Patterns and candidates at 40. The provider has no files, network,
+subprocess, dynamic import, raw media, model, Knowledge store, Runtime
+capability, retry, or fallback. Dry-run calls no provider and creates no result.

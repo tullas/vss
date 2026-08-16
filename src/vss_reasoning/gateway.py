@@ -701,6 +701,129 @@ class ReasoningGateway:
             except Exception as exc:
                 raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
 
+    def execute_shot_cinematography_lesson_candidates(self, task, pattern_set, *, pattern_task,
+                                                       context_data, pattern_invocation_binding_digest: str,
+                                                       environment: str, correlation_id: str,
+                                                       dry_run: bool = False) -> dict[str, Any]:
+        """Run the one exact, bounded M6.4 semantic lesson-candidate implementation."""
+        started = self._clock(); execution_id = uuid.uuid4().hex
+        source = None; context = None; view = None; result = None; invocation_digest = None
+        request_id = None; calls = 0; status = "failed"; failure = "invalid_request"
+        try:
+            from vss_movie_contracts import (
+                ValidatedMovieArtifact, validate_shot_cinematography_lesson_candidate_set,
+                validate_shot_cinematography_lesson_candidate_task, validate_shot_cinematography_pattern_set,
+            )
+            from vss_movie_cinematic_observation import validate_shot_cinematography_context
+            from vss_movie_cinematic_lessons import (
+                ShotCinematographyLessonRuleCatalogue, create_lesson_candidate_result,
+                lesson_candidate_provider_view,
+            )
+            if not isinstance(task, ValidatedMovieArtifact) or not isinstance(pattern_set, ValidatedMovieArtifact) or not isinstance(pattern_task, ValidatedMovieArtifact):
+                raise InvalidReasoningRequest("lesson derivation requires independently validated task and Pattern artifacts")
+            try:
+                context = validate_shot_cinematography_context(context_data.to_json_value() if hasattr(context_data, "to_json_value") else context_data)
+                source = validate_shot_cinematography_pattern_set(
+                    pattern_set.to_json_value(), task=pattern_task, context=context,
+                    invocation_binding_digest=pattern_invocation_binding_digest,
+                )
+                validated_task = validate_shot_cinematography_lesson_candidate_task(task.to_json_value(), source)
+            except Exception as exc:
+                failure = "invalid_pattern_set_or_task"
+                raise InvalidReasoningRequest("lesson task or source Pattern Set is invalid") from exc
+            if source.digest != pattern_set.digest or validated_task.digest != task.digest:
+                raise InvalidReasoningRequest("lesson input substitution rejected")
+            tv, pv = task.value, source.value; request_id = tv["request_id"]
+            if tv["task_version"] != "1" or tv["correlation_id"] != correlation_id or tv["environment"] != environment:
+                raise InvalidReasoningRequest("lesson request binding is invalid")
+            catalogue = ShotCinematographyLessonRuleCatalogue.built_in()
+            if (tv["rule_catalogue_identity"], tv["rule_catalogue_version"], tv["rule_catalogue_digest"]) != (catalogue.identity, catalogue.version, catalogue.digest):
+                failure = "catalogue_mismatch"
+                raise InvalidReasoningRequest("lesson catalogue substitution rejected")
+            from .registry import ShotCinematographyLessonCandidateImplementationRegistry
+            strategy, provider = ShotCinematographyLessonCandidateImplementationRegistry.built_in().resolve()
+            view = lesson_candidate_provider_view(source)
+            binding = freeze_json({
+                "request_id": request_id, "request_digest": task.digest, "correlation_id": correlation_id,
+                "task": ["derive_shot_cinematography_lesson_candidates", "1"],
+                "input": ["shot_cinematography_pattern_set", "1", source.digest, pv["integrity"]["complete_result_sha256"]],
+                "result": ["shot_cinematography_lesson_candidate_set", "1"],
+                "context": [pv["context_id"], pv["context_content_digest"], pv["complete_context_digest"]],
+                "project_id": pv["project_id"], "scene_id": pv["scene_id"], "environment": environment,
+                "purpose": tv["purpose"], "classification": pv["classification"],
+                "patterns": [[item["pattern_id"], item["pattern_digest"], item["supporting_evidence_digest"]]
+                             for item in map(dict, view.patterns)],
+                "strategy": [strategy.identity, strategy.version],
+                "provider": [provider.identity, provider.version, provider.api_version],
+                "rule_catalogue": [catalogue.identity, catalogue.version, catalogue.digest],
+                "provider_visible_digest": view.provider_visible_digest,
+            })
+            invocation_digest = canonical_digest(binding)
+            if dry_run:
+                status = "success"; failure = "none"
+                return {"readiness": {"ready": True, "provider_invoked": False, "provider_call_count": 0,
+                    "task_identity": tv["task_identity"], "task_version": "1",
+                    "input_family": tv["expected_input_family"], "input_version": "1",
+                    "result_family": tv["expected_result_family"], "result_version": "1",
+                    "pattern_set_digest": source.digest, "complete_context_digest": pv["complete_context_digest"],
+                    "provider_visible_digest": view.provider_visible_digest,
+                    "invocation_binding_digest": invocation_digest, "rule_catalogue_digest": catalogue.digest,
+                    "strategy_identity": strategy.identity, "provider_identity": provider.identity, "result_digest": None}}
+            calls = 1
+            try:
+                candidates, reported_calls, iterations = strategy.execute(view, provider)
+                candidate = create_lesson_candidate_result(task, source, invocation_digest, candidates)
+            except Exception as exc:
+                failure = "candidate_generation_failure"
+                raise CandidateGenerationFailure("shot lesson candidate generation failed") from exc
+            if reported_calls != 1 or iterations != 1:
+                failure = "provider_budget_exceeded"
+                raise ReasoningBudgetExceeded("shot lesson provider budget exceeded")
+            try:
+                validated = validate_shot_cinematography_lesson_candidate_set(
+                    candidate, task=task, pattern_set=source, invocation_binding_digest=invocation_digest,
+                )
+            except Exception as exc:
+                failure = "invalid_result"
+                raise InvalidReasoningResult("shot lesson candidate result validation failed") from exc
+            result = validated.to_json_value()
+            if len(canonical_bytes(result)) > tv["bounds"]["maximum_result_bytes"]:
+                failure = "result_size_budget_exceeded"
+                raise ReasoningBudgetExceeded("shot lesson candidate result exceeds bound")
+            status = "success"; failure = "none"
+            return {"shot_cinematography_lesson_candidate_set": result, "result_digest": validated.digest,
+                    "semantic_result_digest": result["payload"]["semantic_result_digest"],
+                    "complete_result_digest": result["integrity"]["complete_result_sha256"],
+                    "provider_call_count": calls, "provider_visible_digest": view.provider_visible_digest,
+                    "invocation_binding_digest": invocation_digest, "rule_catalogue_digest": catalogue.digest}
+        finally:
+            record = {"event_type": "shot_cinematography_lesson_readiness_completed" if dry_run and status == "success" else "shot_cinematography_lesson_completed" if status == "success" else "shot_cinematography_lesson_failed",
+                "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id,
+                "task_identity": "derive_shot_cinematography_lesson_candidates", "task_version": "1",
+                "input_family": "shot_cinematography_pattern_set", "input_version": "1",
+                "result_family": "shot_cinematography_lesson_candidate_set", "result_version": "1",
+                "pattern_set_digest": source.digest if source else None,
+                "context_id": source.value["context_id"] if source else None,
+                "complete_context_digest": source.value["complete_context_digest"] if source else None,
+                "provider_visible_digest": view.provider_visible_digest if view else None,
+                "invocation_binding_digest": invocation_digest,
+                "pattern_count": len(source.value["payload"]["patterns"]) if source else 0,
+                "candidate_count": len(result["payload"]["candidates"]) if result else 0,
+                "rule_catalogue": "vss.shot-cinematography.lessons.deterministic/1.0.0",
+                "strategy": "vss.derive-shot-cinematography-lesson-candidates.deterministic/1.0.0",
+                "provider": "vss.reasoning.shot-cinematography-lessons.deterministic/1.0.0",
+                "provider_api_version": "1", "provider_call_count": calls, "dry_run": dry_run,
+                "semantic_result_digest": result["payload"]["semantic_result_digest"] if result else None,
+                "complete_result_digest": result["integrity"]["complete_result_sha256"] if result else None,
+                "status": status, "failure_classification": failure,
+                "duration_ms": max(0, int((self._clock() - started) * 1000))}
+            try:
+                self._audit.append(record)
+            except ReasoningAuditFailure:
+                raise
+            except Exception as exc:
+                raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
+
     def execute_character_continuity(self, task, context_data, *, continuity_sequence, character_identities, observations, transition_evidence=(), environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
         """Execute exact M5.2 or M5.3 continuity semantics by task version."""
         started = self._clock(); execution_id = uuid.uuid4().hex
