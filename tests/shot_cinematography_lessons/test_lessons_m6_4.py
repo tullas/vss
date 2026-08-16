@@ -74,8 +74,11 @@ class ShotCinematographyLessonCandidateTests(unittest.TestCase):
             pattern = patterns[candidate["source_pattern_id"]]
             self.assertEqual(candidate["source_pattern_digest"], pattern["pattern_digest"])
             self.assertEqual(candidate["supporting_evidence_digest"], pattern["supporting_evidence_digest"])
+            self.assertEqual(candidate["pattern_set_digest"], source[2].digest)
+            self.assertEqual(candidate["pattern_set_complete_digest"], source[2].value["integrity"]["complete_result_sha256"])
             self.assertEqual(candidate["scope"], "exact_source_context")
             self.assertEqual(candidate["context_id"], source[0].value["context_id"])
+            self.assertEqual(candidate["complete_context_digest"], source[0].digest)
             self.assertIn("not_admitted_knowledge", candidate["limitations"])
 
     def test_no_pattern_produces_no_candidate_and_no_cross_pattern_synthesis(self):
@@ -139,13 +142,34 @@ class ShotCinematographyLessonCandidateTests(unittest.TestCase):
             lambda value: value["payload"]["candidates"][0]["proposition"].update({"occurrence_count": 8}),
             lambda value: value["payload"]["candidates"].append(copy.deepcopy(value["payload"]["candidates"][0])),
             lambda value: value["payload"]["candidates"].pop(),
-            lambda value: value["payload"]["candidates"][0].update({"scope": "exact_source_context", "source_pattern_digest": "0" * 64}),
+            lambda value: value["payload"]["candidates"][0].update({"scope": "project_scope"}),
+            lambda value: value["payload"]["candidates"][0]["limitations"].pop(),
+            lambda value: value["payload"]["candidates"][0].update({"source_pattern_digest": "0" * 64}),
+            lambda value: value["payload"]["candidates"][0].update({"pattern_set_digest": "0" * 64}),
+            lambda value: value["payload"]["candidates"][0].update({"complete_context_digest": "0" * 64}),
+            lambda value: value["payload"]["candidates"][0].update({"recommendation": "use this angle"}),
         ):
             candidate = copy.deepcopy(base); mutate(candidate)
             candidate["payload"]["semantic_result_digest"] = canonical_digest({**candidate["payload"], "semantic_result_digest": None})
             candidate["integrity"]["payload_sha256"] = canonical_digest(candidate["payload"])
             candidate["integrity"]["complete_result_sha256"] = canonical_digest({**candidate, "integrity": {"payload_sha256": candidate["integrity"]["payload_sha256"]}})
             with self.subTest(), self.assertRaises(Exception):
+                validate_shot_cinematography_lesson_candidate_set(
+                    candidate, task=task, pattern_set=source[2],
+                    invocation_binding_digest=output["invocation_binding_digest"],
+                )
+
+    def test_arbitrary_recommendation_and_generalization_content_is_structurally_impossible(self):
+        source = self.mixed_source(); task = lesson_task(source); output = execute(source)
+        for field, content in (("statement", "Use this angle; it is better."),
+                               ("generalization", "Directors generally prefer this."),
+                               ("effect", "This causes emotion.")):
+            candidate = copy.deepcopy(output["shot_cinematography_lesson_candidate_set"])
+            candidate["payload"]["candidates"][0][field] = content
+            candidate["payload"]["semantic_result_digest"] = canonical_digest({**candidate["payload"], "semantic_result_digest": None})
+            candidate["integrity"]["payload_sha256"] = canonical_digest(candidate["payload"])
+            candidate["integrity"]["complete_result_sha256"] = canonical_digest({**candidate, "integrity": {"payload_sha256": candidate["integrity"]["payload_sha256"]}})
+            with self.subTest(field=field), self.assertRaises(Exception):
                 validate_shot_cinematography_lesson_candidate_set(
                     candidate, task=task, pattern_set=source[2],
                     invocation_binding_digest=output["invocation_binding_digest"],
