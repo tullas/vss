@@ -606,6 +606,101 @@ class ReasoningGateway:
             except ReasoningAuditFailure: raise
             except Exception as exc: raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
 
+    def execute_shot_cinematography_patterns(self, task, context_data, *, environment: str, correlation_id: str, dry_run: bool = False) -> dict[str, Any]:
+        """Run the one exact, bounded M6.3 semantic pattern implementation."""
+        started = self._clock(); execution_id = uuid.uuid4().hex
+        context = None; view = None; result = None; invocation_digest = None
+        request_id = None; calls = 0; status = "failed"; failure = "invalid_request"
+        try:
+            from vss_movie_contracts import ValidatedMovieArtifact, validate_shot_cinematography_pattern_task, validate_shot_cinematography_pattern_set
+            from vss_movie_cinematic_observation import validate_shot_cinematography_context
+            from vss_movie_cinematic_patterns import ShotCinematographyPatternRuleCatalogue, create_pattern_result, pattern_provider_view
+            if not isinstance(task, ValidatedMovieArtifact):
+                raise InvalidReasoningRequest("shot pattern analysis requires an independently validated task")
+            try:
+                context = validate_shot_cinematography_context(context_data.to_json_value() if hasattr(context_data, "to_json_value") else context_data)
+                validated_task = validate_shot_cinematography_pattern_task(task.to_json_value(), context)
+            except Exception as exc:
+                failure = "invalid_context_or_task"; raise InvalidReasoningRequest("shot pattern task or Context is invalid") from exc
+            if validated_task.digest != task.digest:
+                raise InvalidReasoningRequest("shot pattern task substitution rejected")
+            tv, cv = task.value, context.value; request_id = tv["request_id"]
+            if tv["task_version"] != "1" or tv["correlation_id"] != correlation_id or tv["environment"] != environment:
+                raise InvalidReasoningRequest("shot pattern request binding is invalid")
+            catalogue = ShotCinematographyPatternRuleCatalogue.built_in()
+            if (tv["rule_catalogue_identity"], tv["rule_catalogue_version"], tv["rule_catalogue_digest"]) != (catalogue.identity, catalogue.version, catalogue.digest):
+                failure = "catalogue_mismatch"; raise InvalidReasoningRequest("shot pattern catalogue substitution rejected")
+            from .registry import ShotCinematographyPatternImplementationRegistry
+            strategy, provider = ShotCinematographyPatternImplementationRegistry.built_in().resolve()
+            view = pattern_provider_view(context)
+            binding = freeze_json({
+                "request_id": request_id, "request_digest": task.digest, "correlation_id": correlation_id,
+                "task": ["analyze_shot_cinematography_patterns", "1"], "result": ["shot_cinematography_pattern_set", "1"],
+                "context_id": cv["context_id"], "context_content_digest": cv["context_content_digest"],
+                "complete_context_digest": context.digest, "project_id": cv["project_id"], "scene_id": cv["scene_id"],
+                "environment": environment, "purpose": cv["purpose"], "classification": cv["classification"],
+                "observations": [[item["observation_id"], item["observation_content_digest"]] for item in map(dict, view.observations)],
+                "strategy": [strategy.identity, strategy.version], "provider": [provider.identity, provider.version, provider.api_version],
+                "rule_catalogue": [catalogue.identity, catalogue.version, catalogue.digest],
+                "provider_visible_digest": view.provider_visible_digest,
+            })
+            invocation_digest = canonical_digest(binding)
+            if dry_run:
+                status = "success"; failure = "none"
+                return {"readiness": {"ready": True, "provider_invoked": False, "provider_call_count": 0,
+                    "task_identity": tv["task_identity"], "task_version": "1", "result_family": tv["expected_result_family"],
+                    "result_version": "1", "context_content_digest": cv["context_content_digest"],
+                    "complete_context_digest": context.digest, "provider_visible_digest": view.provider_visible_digest,
+                    "invocation_binding_digest": invocation_digest, "rule_catalogue_digest": catalogue.digest,
+                    "strategy_identity": strategy.identity, "provider_identity": provider.identity, "result_digest": None}}
+            calls = 1
+            try:
+                analysis, reported_calls, iterations = strategy.execute(view, provider)
+                candidate = create_pattern_result(task, context, invocation_digest, analysis)
+            except Exception as exc:
+                failure = "candidate_generation_failure"; raise CandidateGenerationFailure("shot pattern generation failed") from exc
+            if reported_calls != 1 or iterations != 1:
+                failure = "provider_budget_exceeded"; raise ReasoningBudgetExceeded("shot pattern provider budget exceeded")
+            try:
+                validated = validate_shot_cinematography_pattern_set(candidate, task=task, context=context, invocation_binding_digest=invocation_digest)
+            except Exception as exc:
+                failure = "invalid_result"; raise InvalidReasoningResult("shot pattern result validation failed") from exc
+            result = validated.to_json_value()
+            if len(canonical_bytes(result)) > tv["bounds"]["maximum_result_bytes"]:
+                failure = "result_size_budget_exceeded"; raise ReasoningBudgetExceeded("shot pattern result exceeds bound")
+            status = "success"; failure = "none"
+            return {"shot_cinematography_pattern_set": result, "result_digest": validated.digest,
+                    "semantic_result_digest": result["payload"]["semantic_result_digest"],
+                    "complete_result_digest": result["integrity"]["complete_result_sha256"],
+                    "provider_call_count": calls, "provider_visible_digest": view.provider_visible_digest,
+                    "invocation_binding_digest": invocation_digest, "rule_catalogue_digest": catalogue.digest}
+        finally:
+            record = {"event_type": "shot_cinematography_pattern_readiness_completed" if dry_run and status == "success" else "shot_cinematography_pattern_completed" if status == "success" else "shot_cinematography_pattern_failed",
+                "execution_id": execution_id, "request_id": request_id, "correlation_id": correlation_id,
+                "task_identity": "analyze_shot_cinematography_patterns", "task_version": "1",
+                "result_family": "shot_cinematography_pattern_set", "result_version": "1",
+                "context_id": context.value["context_id"] if context else None,
+                "context_content_digest": context.value["context_content_digest"] if context else None,
+                "complete_context_digest": context.digest if context else None,
+                "provider_visible_digest": view.provider_visible_digest if view else None,
+                "invocation_binding_digest": invocation_digest,
+                "observation_count": len(context.value["payload"]["observations"]) if context else 0,
+                "pattern_count": len(result["payload"]["patterns"]) if result else 0,
+                "rule_catalogue": "vss.shot-cinematography.patterns.deterministic/1.0.0",
+                "strategy": "vss.analyze-shot-cinematography-patterns.deterministic/1.0.0",
+                "provider": "vss.reasoning.shot-cinematography-patterns.deterministic/1.0.0", "provider_api_version": "1",
+                "provider_call_count": calls, "dry_run": dry_run,
+                "semantic_result_digest": result["payload"]["semantic_result_digest"] if result else None,
+                "complete_result_digest": result["integrity"]["complete_result_sha256"] if result else None,
+                "status": status, "failure_classification": failure,
+                "duration_ms": max(0, int((self._clock() - started) * 1000))}
+            try:
+                self._audit.append(record)
+            except ReasoningAuditFailure:
+                raise
+            except Exception as exc:
+                raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
+
     def execute_character_continuity(self, task, context_data, *, continuity_sequence, character_identities, observations, transition_evidence=(), environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
         """Execute exact M5.2 or M5.3 continuity semantics by task version."""
         started = self._clock(); execution_id = uuid.uuid4().hex

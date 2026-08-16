@@ -242,6 +242,53 @@ def validate_shot_cinematography_observation_set(value, observations=(), registr
     return result
 
 
+def validate_shot_cinematography_pattern_task(value, context=None, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "analyze_shot_cinematography_patterns/1", registry, MAX_STORY_BYTES)
+    registry.resolve_result("analyze_shot_cinematography_patterns/1", "shot_cinematography_pattern_set/1")
+    _require_digest(result.value, "task_content_digest", "shot cinematography pattern task")
+    data = result.value
+    if context is None or not hasattr(context, "value") or not hasattr(context, "digest"):
+        raise MovieContractError("pattern task requires an independently validated Context")
+    cv = context.value
+    expected = (cv["context_family"], cv["context_family_version"], cv["context_id"], cv["context_content_digest"], context.digest,
+                cv["project_id"], cv["scene_id"], cv["classification"])
+    actual = (data["expected_context_family"], data["expected_context_version"], data["context_id"], data["context_content_digest"],
+              data["complete_context_digest"], data["project_id"], data["scene_id"], data["classification"])
+    if actual != expected:
+        raise MovieContractError("pattern task Context binding mismatch")
+    return result
+
+
+def validate_shot_cinematography_pattern_set(value, *, task, context, invocation_binding_digest, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "shot_cinematography_pattern_set/1", registry, MAX_RESULT_BYTES)
+    data = result.value
+    if not isinstance(task, ValidatedMovieArtifact):
+        raise MovieContractError("pattern result requires a validated task")
+    tv, cv = task.value, context.value
+    expected = (tv["request_id"], tv["correlation_id"], tv["project_id"], tv["scene_id"], tv["classification"],
+                cv["context_id"], cv["context_content_digest"], context.digest,
+                tv["rule_catalogue_identity"], tv["rule_catalogue_version"], tv["rule_catalogue_digest"], invocation_binding_digest)
+    actual = (data["request_id"], data["correlation_id"], data["project_id"], data["scene_id"], data["classification"],
+              data["context_id"], data["context_content_digest"], data["complete_context_digest"],
+              data["rule_catalogue_identity"], data["rule_catalogue_version"], data["rule_catalogue_digest"], data["invocation_binding_digest"])
+    if actual != expected:
+        raise MovieContractError("pattern result binding mismatch")
+    payload = data["payload"]
+    if payload["semantic_result_digest"] != canonical_digest({**payload, "semantic_result_digest": None}):
+        raise MovieContractError("pattern semantic result digest mismatch")
+    if data["integrity"]["payload_sha256"] != canonical_digest(payload):
+        raise MovieContractError("pattern payload digest mismatch")
+    if data["integrity"]["complete_result_sha256"] != canonical_digest({**data, "integrity": {"payload_sha256": data["integrity"]["payload_sha256"]}}):
+        raise MovieContractError("pattern complete result digest mismatch")
+    from vss_movie_cinematic_patterns import expected_pattern_payload
+    expected_payload = expected_pattern_payload(context)
+    if thaw_json(payload) != expected_payload:
+        raise MovieContractError("pattern evidence or rule result substitution rejected")
+    return result
+
+
 def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     version = value.get("task_version") if isinstance(value, dict) else None
