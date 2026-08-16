@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vss.movie.shot_cinematography_observation/1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_identity", "contract_version", "observation_id", "project_id", "scene_id", "shot_id", "evidence_reference", "purpose", "classification", "attributes", "provenance", "limitations", "observation_content_digest"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "contract_identity": {"const": "shot_cinematography_observation"},
+    "contract_version": {"const": "1"},
+    "observation_id": {"type": "string", "pattern": "^shot-observation-[a-z0-9][a-z0-9._-]{0,47}$"},
+    "project_id": {"$ref": "#/$defs/id"},
+    "scene_id": {"type": "string", "pattern": "^scene-[a-z0-9][a-z0-9._-]{0,47}$"},
+    "shot_id": {"type": "string", "pattern": "^shot-[a-z0-9][a-z0-9._-]{0,47}$"},
+    "evidence_reference": {"type": "string", "pattern": "^evidence-[a-z0-9][a-z0-9._-]{0,47}$"},
+    "purpose": {"const": "cinematic_observation_local_validation"},
+    "classification": {"enum": ["public", "internal"]},
+    "attributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["shot_scale", "camera_angle", "camera_elevation", "camera_movement", "composition", "subject_count", "screen_direction", "focal_length_mm"],
+      "properties": {
+        "shot_scale": {"$ref": "#/$defs/shotScale"},
+        "camera_angle": {"$ref": "#/$defs/cameraAngle"},
+        "camera_elevation": {"$ref": "#/$defs/elevation"},
+        "camera_movement": {"$ref": "#/$defs/movement"},
+        "composition": {"$ref": "#/$defs/composition"},
+        "subject_count": {"$ref": "#/$defs/subjectCount"},
+        "screen_direction": {"$ref": "#/$defs/direction"},
+        "focal_length_mm": {"$ref": "#/$defs/focalLength"}
+      }
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "observer_id", "method_identity"],
+      "properties": {
+        "kind": {"enum": ["manual_observation", "synthetic_test_observation"]},
+        "observer_id": {"$ref": "#/$defs/id"},
+        "method_identity": {"enum": ["manual_declaration", "synthetic_fixture"]}
+      }
+    },
+    "limitations": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+    "observation_content_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9._:-]{0,127}$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"enum": ["observed", "uncertain"]},
+    "unavailable": {"type": "object", "additionalProperties": false, "required": ["status"], "properties": {"status": {"enum": ["unknown", "not_observed", "not_applicable"]}}},
+    "qualifiedString": {"type": "object", "additionalProperties": false, "required": ["status", "value"], "properties": {"status": {"$ref": "#/$defs/status"}, "value": {"type": "string"}}},
+    "shotScale": {"oneOf": [{"$ref": "#/$defs/unavailable"}, {"allOf": [{"$ref": "#/$defs/qualifiedString"}, {"properties": {"value": {"enum": ["extreme_close_up", "close_up", "medium_close_up", "medium", "medium_wide", "wide", "extreme_wide"]}}}]}]},
+    "cameraAngle": {"oneOf": [{"$ref": "#/$defs/unavailable"}, {"allOf": [{"$ref": "#/$defs/qualifiedString"}, {"properties": {"value": {"enum": ["level", "high_angle", "low_angle", "overhead", "dutch_angle"]}}}]}]},
+    "elevation": {"oneOf": [{"$ref": "#/$defs/unavailable"}, {"allOf": [{"$ref": "#/$defs/qualifiedString"}, {"properties": {"value": {"enum": ["ground", "low", "eye_level", "elevated", "overhead"]}}}]}]},
+    "movement": {"oneOf": [{"$ref": "#/$defs/unavailable"}, {"allOf": [{"$ref": "#/$defs/qualifiedString"}, {"properties": {"value": {"enum": ["static", "pan", "tilt", "dolly", "truck", "pedestal", "zoom", "handheld", "stabilized", "crane", "orbit"]}}}]}]},
+    "composition": {"oneOf": [{"$ref": "#/$defs/unavailable"}, {"allOf": [{"$ref": "#/$defs/qualifiedString"}, {"properties": {"value": {"enum": ["centered", "rule_of_thirds", "symmetrical", "balanced", "unbalanced", "frame_within_frame"]}}}]}]},
+    "direction": {"oneOf": [{"$ref": "#/$defs/unavailable"}, {"allOf": [{"$ref": "#/$defs/qualifiedString"}, {"properties": {"value": {"enum": ["left_facing", "right_facing", "toward_camera", "away_from_camera"]}}}]}]},
+    "subjectCount": {"oneOf": [{"$ref": "#/$defs/unavailable"}, {"type": "object", "additionalProperties": false, "required": ["status", "value"], "properties": {"status": {"$ref": "#/$defs/status"}, "value": {"type": "integer", "minimum": 0, "maximum": 128}}}]},
+    "focalLength": {"oneOf": [{"$ref": "#/$defs/unavailable"}, {"type": "object", "additionalProperties": false, "required": ["status", "value"], "properties": {"status": {"$ref": "#/$defs/status"}, "value": {"type": "number", "minimum": 1, "maximum": 2000}}}]}
+  }
+}
