@@ -379,3 +379,19 @@ substitution, fabricated precision, and silent inference. Evidence references
 are identities only and grant no file, network, media, rights, truth, promotion,
 recommendation, Runtime, or execution authority. No decoder, model, provider,
 Gateway route, storage, retrieval, Pattern, Lesson, or Knowledge path exists.
+
+## M6.2 bounded shot observation Context threats
+
+M6.2 independently revalidates every raw M6.1 observation at set admission and
+again at Context Assembly. Exact identity/version/digest/shot bindings,
+single-project/single-scene/single-classification scope, unique identities, and
+canonical unordered representation reject substitution, duplicates, caller
+resealing, purpose/version fallback, classification downgrade, and order-based
+chronology. The 2–8 bound limits Context nodes and caps any future pairwise work
+at 28 comparisons without performing comparisons now.
+
+The immutable Context projects only qualified attributes, bounded evidence
+identity, manual/synthetic provenance, and limitations. It contains no media,
+path, callback, Runtime capability, registry, provider, execution resource, or
+promotion artifact. Assembly performs no filesystem, network, subprocess,
+model, reasoning, recommendation, Pattern, Lesson, or Knowledge operation.

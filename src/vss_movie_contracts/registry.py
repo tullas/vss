@@ -24,6 +24,7 @@ FILES = MappingProxyType({
     "character_continuity_transition_evidence/1":"character-continuity-transition-evidence-v1.schema.json",
     "character_continuity_observation_set/1":"character-continuity-observation-set-v1.schema.json",
     "shot_cinematography_observation/1":"shot-cinematography-observation-v1.schema.json",
+    "shot_cinematography_observation_set/1":"shot-cinematography-observation-set-v1.schema.json",
 })
 COMPATIBILITY = MappingProxyType({
     "analyze_character_continuity/1": "character_continuity_observation_set/1",
