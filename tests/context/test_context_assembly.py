@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from vss_context import ContextAssembler
 from vss_context_contracts import ContextContractRegistry, ContextContractError, validate_context
+import vss_context_contracts.registry as registry_module
 
 ROOT = Path(__file__).resolve().parents[2]
 REQUEST = ROOT / "tests/fixtures/context/context-assembly-request-valid.json"
@@ -21,6 +25,7 @@ class ContextAssemblyTests(unittest.TestCase):
     def test_registry_is_deterministic_and_exact(self):
         first = ContextContractRegistry.built_in()
         second = ContextContractRegistry.built_in()
+        self.assertIs(first, second)
         self.assertEqual(first.digest, second.digest)
         self.assertEqual({(item.identity, item.version) for item in first.registrations}, {
             ("context_assembly_request", "1"), ("context_object", "1"),
@@ -33,6 +38,20 @@ class ContextAssemblyTests(unittest.TestCase):
         })
         with self.assertRaises(ContextContractError):
             first.resolve("context_object", "2")
+
+    def test_schema_replacement_invalidates_built_in_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for filename in registry_module._FILES.values():
+                shutil.copy2(ROOT / "schemas" / filename, root / filename)
+            with patch.object(registry_module, "_ROOT", root):
+                first = ContextContractRegistry.built_in()
+                schema_path = root / registry_module._FILES["vss.context_object/1"]
+                schema = json.loads(schema_path.read_text())
+                schema["title"] = "replacement"
+                schema_path.write_text(json.dumps(schema))
+                second = ContextContractRegistry.built_in()
+                self.assertNotEqual(first.digest, second.digest)
 
     def test_assembly_is_bounded_and_deterministic_in_content(self):
         request = load(REQUEST)

@@ -4,8 +4,6 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from jsonschema import Draft202012Validator
-
 from vss_context_contracts import ContextContractRegistry, ValidatedContext
 from vss_context_contracts.limits import MAX_CONTEXT_BYTES
 from vss_movie_contracts import (
@@ -97,7 +95,7 @@ def validate_shot_cinematography_context(
     if not isinstance(value, dict):
         raise ValueError("shot cinematography Context must be an object")
     registry = registry or ContextContractRegistry.built_in()
-    errors = list(Draft202012Validator(thaw_json(registry.schema("vss.shot_cinematography_context/1").schema)).iter_errors(value))
+    errors = list(registry.iter_errors("vss.shot_cinematography_context/1", value))
     if errors:
         raise ValueError("shot cinematography Context does not match its contract")
     payload = value["payload"]

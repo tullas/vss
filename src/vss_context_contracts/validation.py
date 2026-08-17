@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from jsonschema import Draft202012Validator
-
 from vss_knowledge_contracts import KnowledgeContractRegistry, KnowledgeRevocationRegistry, validate_package
 from vss_reasoning_contracts import canonical_digest
 from vss_reasoning_contracts.canonicalization import validate_json_value
@@ -15,8 +13,8 @@ from .models import ValidatedAssemblyReport, ValidatedContext
 from .registry import ContextContractRegistry
 
 
-def _schema(value: Any, schema: Any, message: str) -> None:
-    errors = sorted(Draft202012Validator(schema).iter_errors(value), key=lambda e: list(e.path))
+def _schema(value: Any, errors: Any, message: str) -> None:
+    errors = sorted(errors, key=lambda e: list(e.path))
     if errors:
         raise InvalidContextInput(message)
 
@@ -35,7 +33,7 @@ def validate_request(value: Any, registry: ContextContractRegistry) -> dict[str,
         raise InvalidContextInput("context request is unsafe") from exc
     if not isinstance(value, dict):
         raise InvalidContextInput("context request must be an object")
-    _schema(value, registry.schema("vss.context_assembly_request/1").schema, "context request is invalid")
+    _schema(value, registry.iter_errors("vss.context_assembly_request/1", value), "context request is invalid")
     if value["semantic_task"] != "generate_options" or value["semantic_task_version"] != "1" or value["context_family"] != "generate_options_context" or value["context_family_version"] != "1":
         raise InvalidContextInput("context task and family are incompatible")
     if value["policy_identity"] != "generate_options_context_local" or value["policy_version"] != "1" or value["purpose"] != "generate_options_local_validation" or value["environment"] != "development" or value["classification_ceiling"] not in {"public", "internal"} or value["minimum_trust"] != "approved_fixture":
@@ -85,8 +83,8 @@ def validate_context(value: Any, registry: ContextContractRegistry) -> Validated
             return validate_shot_cinematography_context(value, registry=registry)
         except Exception as exc:
             raise InvalidContextInput("shot cinematography context is invalid") from exc
-    _schema(value, registry.schema("vss.context_object/1").schema, "context is invalid")
-    _schema(value["payload"], registry.schema("vss.generate_options_context/1").schema, "context payload is invalid")
+    _schema(value, registry.iter_errors("vss.context_object/1", value), "context is invalid")
+    _schema(value["payload"], registry.iter_errors("vss.generate_options_context/1", value["payload"]), "context payload is invalid")
     if value["context_family"] != "generate_options_context" or value["context_family_version"] != "1" or value["purpose"] != "generate_options_local_validation" or value["semantic_task"] != "generate_options" or value["semantic_task_version"] != "1" or value["lifecycle"] != "validated":
         raise InvalidContextInput("context compatibility is invalid")
     if value["classification"] not in {"public", "internal"}:
@@ -116,7 +114,7 @@ def validate_report(value: Any, registry: ContextContractRegistry) -> ValidatedA
             raise ValueError
     except Exception as exc:
         raise InvalidContextInput("assembly report is unsafe") from exc
-    _schema(value, registry.schema("vss.context_assembly_report/1").schema, "assembly report is invalid")
+    _schema(value, registry.iter_errors("vss.context_assembly_report/1", value), "assembly report is invalid")
     material = dict(value)
     integrity = dict(material["integrity"])
     expected = integrity.pop("complete_report_sha256")

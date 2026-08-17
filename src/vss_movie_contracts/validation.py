@@ -1,4 +1,3 @@
-from jsonschema import Draft202012Validator
 import re
 from vss_reasoning_contracts.canonicalization import validate_json_value, thaw_json
 from .errors import MovieContractError
@@ -21,7 +20,7 @@ def _validate(value, identity, registry, maximum):
     except Exception as exc: raise MovieContractError("movie artifact is unsafe") from exc
     if not isinstance(value,dict): raise MovieContractError("movie artifact must be an object")
     registry.resolve(identity)
-    errors=list(Draft202012Validator(thaw_json(registry.schemas[identity]["schema"])).iter_errors(value))
+    errors=list(registry.iter_errors(identity, value))
     if errors: raise MovieContractError("movie artifact does not match its contract")
     return ValidatedMovieArtifact._create(value)
 

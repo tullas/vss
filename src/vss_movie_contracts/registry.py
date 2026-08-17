@@ -1,11 +1,12 @@
 import hashlib, json, os, stat
+from threading import Lock
 from pathlib import Path
 from types import MappingProxyType
 from jsonschema import Draft202012Validator
 from vss_reasoning_contracts import canonical_digest
 from .errors import MovieRegistryError, MovieContractError
 from .models import MovieRegistration
-from vss_reasoning_contracts.canonicalization import freeze_json
+from vss_reasoning_contracts.canonicalization import freeze_json, thaw_json
 
 ROOT = Path(__file__).resolve().parents[2] / "schemas"
 FILES = MappingProxyType({
@@ -43,6 +44,21 @@ def _pairs(pairs):
         if k in out: raise MovieRegistryError("movie schema has duplicate keys")
         out[k]=v
     return out
+_BUILT_IN = {}
+_BUILT_IN_LOCK = Lock()
+
+
+def _schema_metadata_fingerprint():
+    fingerprint = []
+    for filename in FILES.values():
+        path = ROOT / filename
+        try:
+            item = os.lstat(path)
+            fingerprint.append((filename, item.st_mode, item.st_ino, item.st_size, item.st_mtime_ns))
+        except OSError:
+            fingerprint.append((filename, None))
+    return tuple(fingerprint)
+
 def _load(identity, filename):
     path=ROOT/filename
     if path.is_symlink(): raise MovieRegistryError("movie schema symlink rejected")
@@ -78,7 +94,7 @@ def _load(identity, filename):
     return {"identity":identity,"sha256":hashlib.sha256(raw).hexdigest(),"schema":freeze_json(schema)}
 
 class MovieContractRegistry:
-    __slots__=("registrations","schemas","compatibility","digest")
+    __slots__=("registrations","schemas","compatibility","digest","_validators")
     def __init__(self):
         regs=tuple(
             MovieRegistration(
@@ -90,10 +106,32 @@ class MovieContractRegistry:
         )
         schemas={i:_load(i,f) for i,f in FILES.items()}
         self.registrations=regs; self.schemas=freeze_json(schemas)
+        # Schema validation above is repository-metadata validation. Compile
+        # each immutable schema once per registry; artifact validation still
+        # runs for every caller/provider value through these validators.
+        self._validators=MappingProxyType({
+            identity: Draft202012Validator(thaw_json(record["schema"]))
+            for identity, record in schemas.items()
+        })
         self.compatibility=freeze_json(dict(COMPATIBILITY))
         self.digest=canonical_digest({"registry":"movie_domain_contract_registry/1","registrations":[r.__dict__ if hasattr(r,"__dict__") else {"identity":r.identity,"version":r.version,"schema_identity":r.schema_identity,"lifecycle":r.lifecycle,"owner":r.owner} for r in regs],"schemas":{k:v["sha256"] for k,v in sorted(schemas.items())},"compatibility":dict(COMPATIBILITY)})
     @classmethod
-    def built_in(cls): return cls()
+    def built_in(cls):
+        key = (cls, str(ROOT), _schema_metadata_fingerprint())
+        registry = _BUILT_IN.get(key)
+        if registry is None:
+            with _BUILT_IN_LOCK:
+                registry = _BUILT_IN.get(key)
+                if registry is None:
+                    registry = cls()
+                    _BUILT_IN[key] = registry
+        return registry
+
+    def iter_errors(self, identity, value):
+        try:
+            return self._validators[identity].iter_errors(value)
+        except KeyError as exc:
+            raise MovieContractError("unknown movie contract") from exc
     def resolve(self, identity, version=None):
         if not isinstance(identity, str) or not identity or "*" in identity or identity.endswith("latest"):
             raise MovieContractError("unknown movie contract")
