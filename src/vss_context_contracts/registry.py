@@ -11,11 +11,16 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator
+from threading import Lock
 
 from vss_reasoning_contracts import canonical_digest
+from vss_reasoning_contracts.canonicalization import thaw_json
 
 from .errors import ContextRegistryError
 from .models import ContextRegistration, ContextSchemaRecord
+
+_BUILT_IN: dict[tuple[type, str], ContextContractRegistry] = {}
+_BUILT_IN_LOCK = Lock()
 
 _DIALECT = "https://json-schema.org/draft/2020-12/schema"
 _ROOT = Path(__file__).resolve().parents[2] / "schemas"
@@ -97,6 +102,7 @@ def _load(identity: str, filename: str) -> ContextSchemaRecord:
 class ContextContractRegistry:
     registrations: tuple[ContextRegistration, ...] = field(default_factory=tuple)
     _schemas: Mapping[str, ContextSchemaRecord] = field(init=False, repr=False)
+    _validators: Mapping[str, Draft202012Validator] = field(init=False, repr=False)
     digest: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -117,6 +123,10 @@ class ContextContractRegistry:
         schemas = {identity: _load(identity, filename) for identity, filename in _FILES.items()}
         object.__setattr__(self, "registrations", tuple(registrations))
         object.__setattr__(self, "_schemas", MappingProxyType(schemas))
+        object.__setattr__(self, "_validators", MappingProxyType({
+            identity: Draft202012Validator(thaw_json(record.schema))
+            for identity, record in schemas.items()
+        }))
         object.__setattr__(self, "digest", canonical_digest({
             "registrations": [r.__dict__ if hasattr(r, "__dict__") else {name: getattr(r, name) for name in r.__dataclass_fields__} for r in registrations],
             "schemas": {key: schemas[key].sha256 for key in sorted(schemas)},
@@ -125,11 +135,25 @@ class ContextContractRegistry:
 
     @classmethod
     def built_in(cls) -> "ContextContractRegistry":
-        return cls()
+        key = (cls, str(_ROOT))
+        registry = _BUILT_IN.get(key)
+        if registry is None:
+            with _BUILT_IN_LOCK:
+                registry = _BUILT_IN.get(key)
+                if registry is None:
+                    registry = cls()
+                    _BUILT_IN[key] = registry
+        return registry
 
     def schema(self, identity: str) -> ContextSchemaRecord:
         try:
             return self._schemas[identity]
+        except KeyError as exc:
+            raise ContextRegistryError("unknown context schema") from exc
+
+    def iter_errors(self, identity: str, value: Any):
+        try:
+            return self._validators[identity].iter_errors(value)
         except KeyError as exc:
             raise ContextRegistryError("unknown context schema") from exc
 

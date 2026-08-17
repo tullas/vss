@@ -1,4 +1,5 @@
 import json, unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from vss_movie_contracts import MovieContractRegistry, validate_story_fragment, validate_scene_breakdown, validate_scene_task, ValidatedMovieArtifact
 from vss_movie_contracts.errors import MovieContractError
@@ -9,6 +10,7 @@ def load(name): return json.loads((ROOT/'tests/fixtures/movie'/name).read_text()
 class MovieContractTests(unittest.TestCase):
     def test_registry_is_exact_and_stable(self):
         a=MovieContractRegistry.built_in(); b=MovieContractRegistry.built_in()
+        self.assertIs(a, b)
         self.assertEqual(a.digest,b.digest)
         self.assertEqual({r.identity for r in a.registrations},{'story_fragment/1','break_down_scenes/1','scene_breakdown/1','generate_scene_production_options/1','scene_production_option_set/1','character_reference/1','character_identity/1','continuity_sequence/1','character_observation/1','analyze_character_continuity/1','analyze_character_continuity/2','analyze_character_continuity/3','character_continuity_transition_evidence/1','character_continuity_observation_set/1','shot_cinematography_observation/1','shot_cinematography_observation_set/1','analyze_shot_cinematography_patterns/1','shot_cinematography_pattern_set/1','derive_shot_cinematography_lesson_candidates/1','shot_cinematography_lesson_candidate_set/1'})
         with self.assertRaises(MovieContractError): a.resolve('movie_project','1')
@@ -16,6 +18,11 @@ class MovieContractTests(unittest.TestCase):
         with self.assertRaises(MovieContractError): a.resolve('story_fragment', '*')
         with self.assertRaises(TypeError): ValidatedMovieArtifact({'x': 1})
         with self.assertRaises(TypeError): a.schemas['story_fragment/1']['schema']['properties'] = {}
+
+    def test_built_in_registry_is_thread_safe_singleton(self):
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            registries = list(pool.map(lambda _: MovieContractRegistry.built_in(), range(32)))
+        self.assertTrue(all(registry is registries[0] for registry in registries))
     def test_story_fragment_valid_and_immutable(self):
         artifact=validate_story_fragment(load('story-fragment-valid.json'))
         exported=artifact.to_json_value(); exported['payload']['fragment_text']='changed'

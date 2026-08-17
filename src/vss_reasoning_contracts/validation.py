@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from jsonschema import Draft202012Validator
-
 from .canonicalization import validate_json_value
 from .constants import ADMITTED_LIFECYCLE_MODE, REQUEST_ENVELOPE_ID, RESULT_ENVELOPE_ID
 from .errors import (
@@ -15,9 +13,9 @@ from .models import ValidatedSemanticRequest, ValidatedSemanticResult
 from .registry import SemanticContractRegistry
 
 
-def _schema_validate(value: Any, schema: Any, kind: str) -> None:
+def _schema_validate(value: Any, errors: Any, kind: str) -> None:
     errors = sorted(
-        Draft202012Validator(schema).iter_errors(value),
+        errors,
         key=lambda error: list(error.path),
     )
     if errors:
@@ -90,7 +88,7 @@ def validate_request(
     envelope = registry.schema(
         f"vss.{REQUEST_ENVELOPE_ID}/{value.get('schema_version', '')}"
     )
-    _schema_validate(value, envelope.schema, "semantic request envelope")
+    _schema_validate(value, registry.iter_errors(f"vss.{REQUEST_ENVELOPE_ID}/{value.get('schema_version', '')}", value), "semantic request envelope")
     if value["lifecycle_mode"] != ADMITTED_LIFECYCLE_MODE:
         raise InvalidSemanticInput("semantic lifecycle mode is not admitted")
     registration = registry.resolve(
@@ -99,11 +97,7 @@ def validate_request(
         value["required_result_family"],
         value["required_result_version"],
     )
-    _schema_validate(
-        value["payload"],
-        registry.schema(registration.request_schema_identity).schema,
-        "semantic task payload",
-    )
+    _schema_validate(value["payload"], registry.iter_errors(registration.request_schema_identity, value["payload"]), "semantic task payload")
     constraint_ids = [item["id"] for item in value["payload"]["constraints"]]
     if len(constraint_ids) != len(set(constraint_ids)):
         raise InvalidSemanticInput(
@@ -146,7 +140,7 @@ def validate_result(
     envelope = registry.schema(
         f"vss.{RESULT_ENVELOPE_ID}/{value.get('schema_version', '')}"
     )
-    _schema_validate(value, envelope.schema, "semantic result envelope")
+    _schema_validate(value, registry.iter_errors(f"vss.{RESULT_ENVELOPE_ID}/{value.get('schema_version', '')}", value), "semantic result envelope")
     registration = registry.resolve(
         value["task_identity"],
         value["task_version"],
@@ -155,11 +149,7 @@ def validate_result(
     )
     if value["contract_identity"] != registration.result_schema_identity:
         raise InvalidSemanticInput("semantic result contract identity mismatch")
-    _schema_validate(
-        value["payload"],
-        registry.schema(registration.result_schema_identity).schema,
-        "semantic family payload",
-    )
+    _schema_validate(value["payload"], registry.iter_errors(registration.result_schema_identity, value["payload"]), "semantic family payload")
     _ensure_unique_identities(value)
     _validate_constraint_references(value)
     return ValidatedSemanticResult._from_validated_value(value)

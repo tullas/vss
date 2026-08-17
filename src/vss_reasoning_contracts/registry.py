@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import stat
+from threading import Lock
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -13,7 +14,7 @@ from urllib.parse import urlparse
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from .canonicalization import canonical_digest
+from .canonicalization import canonical_digest, thaw_json
 from .constants import (
     ACTIVE_LIFECYCLE,
     CONTRACT_VERSION,
@@ -45,6 +46,21 @@ _SCHEMA_FILES = MappingProxyType(
 )
 _TRUSTED_SCHEMA_ROOT = Path(__file__).resolve().parents[2] / "schemas"
 _MAX_SCHEMA_BYTES = 262_144
+_BUILT_IN = {}
+_BUILT_IN_LOCK = Lock()
+
+
+def _schema_metadata_fingerprint(root: Path) -> tuple[Any, ...]:
+    """Cheaply detect repository-schema replacement before reusing a cache entry."""
+    fingerprint = []
+    for filename in _SCHEMA_FILES.values():
+        path = root / filename
+        try:
+            item = os.lstat(path)
+            fingerprint.append((filename, item.st_mode, item.st_ino, item.st_size, item.st_mtime_ns))
+        except OSError:
+            fingerprint.append((filename, None))
+    return tuple(fingerprint)
 
 
 def _reject_external_references(value: Any, *, root: bool = True) -> None:
@@ -155,6 +171,7 @@ class SemanticContractRegistry:
     _contracts: Mapping[tuple[str, str], ContractRegistration] = field(
         init=False, repr=False
     )
+    _validators: Mapping[str, Draft202012Validator] = field(init=False, repr=False)
     digest: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -216,6 +233,10 @@ class SemanticContractRegistry:
 
         object.__setattr__(self, "_schemas", MappingProxyType(schemas))
         object.__setattr__(self, "_contracts", MappingProxyType(contracts))
+        object.__setattr__(self, "_validators", MappingProxyType({
+            identity: Draft202012Validator(thaw_json(record.schema))
+            for identity, record in schemas.items()
+        }))
         snapshot = {
             "registrations": [registration_to_json(item) for item in registrations],
             "schemas": {key: schemas[key].sha256 for key in sorted(schemas)},
@@ -224,7 +245,16 @@ class SemanticContractRegistry:
 
     @classmethod
     def built_in(cls) -> "SemanticContractRegistry":
-        return cls()
+        root = _TRUSTED_SCHEMA_ROOT
+        key = (cls, str(root), _schema_metadata_fingerprint(root))
+        registry = _BUILT_IN.get(key)
+        if registry is None:
+            with _BUILT_IN_LOCK:
+                registry = _BUILT_IN.get(key)
+                if registry is None:
+                    registry = cls()
+                    _BUILT_IN[key] = registry
+        return registry
 
     @property
     def schemas(self) -> Mapping[str, SchemaRecord]:
@@ -270,6 +300,12 @@ class SemanticContractRegistry:
     def schema(self, identity: str) -> SchemaRecord:
         try:
             return self._schemas[identity]
+        except KeyError as exc:
+            raise UnknownContractIdentity("unknown semantic schema identity") from exc
+
+    def iter_errors(self, identity: str, value: Any):
+        try:
+            return self._validators[identity].iter_errors(value)
         except KeyError as exc:
             raise UnknownContractIdentity("unknown semantic schema identity") from exc
 

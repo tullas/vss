@@ -21,6 +21,7 @@ class ContextAssemblyTests(unittest.TestCase):
     def test_registry_is_deterministic_and_exact(self):
         first = ContextContractRegistry.built_in()
         second = ContextContractRegistry.built_in()
+        self.assertIs(first, second)
         self.assertEqual(first.digest, second.digest)
         self.assertEqual({(item.identity, item.version) for item in first.registrations}, {
             ("context_assembly_request", "1"), ("context_object", "1"),
