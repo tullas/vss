@@ -124,6 +124,69 @@ must preserve definitions and does not turn counts into targets.
   major semantic family must reassess Gateway and governance repetition before
   adding framework machinery.
 
+## Snapshot: post-M6 cinematic semantic progression checkpoint
+
+- **Reviewed main:** `cdd9a4cdfb41249c6b72be10676a699c1370d86a`
+- **Checkpoint:** accepted M6.1-M6.4 Observation -> Pattern -> Lesson Candidate
+  progression and readiness for narrow Admitted Knowledge
+- **Comparable prior snapshot:** post-M5 integration checkpoint
+- **Decision:** `WATCH`
+
+### Evidence counts
+
+| Category | M6 checkpoint | Change from post-M5 and definition |
+|---|---:|---|
+| Non-Context contract registration records | 22 | Movie 20 + Semantic 1 + Knowledge 1; +6 Movie registrations |
+| Movie contract families / registered versions | 18 / 20 | +6 families/versions; all are distinct M6 observation, set, task, Pattern, Lesson-task, or candidate-result meanings |
+| Context families / registered versions | 8 / 9 | +1 Shot/Cinematography Context family/version |
+| Federated contract registries | 4 | Unchanged: Semantic, Knowledge, Context, Movie |
+| Versioned semantic strategy/provider paths | 7 | +2 deterministic cinematic Pattern and Lesson Candidate paths |
+| Major public semantic execution paths | 7 | +2 exact Gateway paths; assembly is not counted as execution |
+| First-party Python packages | 23 | +3 bounded cinematic observation, Pattern, and Lesson domain packages |
+| Mandatory external persistent services | 0 | Unchanged; no database, broker, cache, model server, or distributed service |
+| Authority-bearing concepts | 2 | Unchanged; Runtime execution authority and retained human creative/production authority |
+| Cross-domain dependency exceptions | 1 | Unchanged documented legacy Workflow -> CommandRunner adapter |
+| Current framework candidates | 1 | ADRL-002 evidence-binding candidate remains `WAIT_FOR_EVIDENCE` |
+| Current retirement candidates | 0 | No removal justified |
+| Accepted review deviations/exceptions | 1 | Unchanged legacy dependency exception |
+
+Counts use the same definitions as the post-M5 snapshot. First-party package
+count is the top-level `src/vss_*` directory count. Strategy/provider and
+public-path counts add only the exact M6.3 and M6.4 deterministic behaviors;
+M6.1 validation and M6.2 Context assembly are not provider execution paths.
+
+### Change and pressure
+
+| Dimension | Pressure | Evidence |
+|---|---|---|
+| Gateway complexity | `WATCH` | Boundary remains sound; Gateway is 942 lines and M6.3/M6.4 add repeated exact route lifecycle/audit adapters |
+| Registry complexity | `WATCH` | Federation and ownership remain coherent; Movie exact maps and digest evidence are growing |
+| Versioning complexity | `LOW` | M6 versions are semantically justified and exact; no latest/wildcard/range behavior |
+| Operational complexity | `LOW` | No persistent component, service, worker, queue, cache, AI, media, or infrastructure |
+| Cognitive complexity | `WATCH` | Evidence lineage crosses observation, set, Context, Pattern, and candidate digest domains |
+| Domain coupling | `LOW` | Existing architecture dependency direction is preserved |
+| CI/test complexity | `WATCH` | 475 Python tests with valuable but material determinism, concurrency, security, and regression cost |
+| Governance overhead | `WATCH` | M6 acceptance caught real integrity defects; review and evidence volume remain substantial |
+
+- **Meaningful increase:** six Movie contracts, one Context, two deterministic
+  semantic paths, three domain packages, exact lineage, and two Gateway routes.
+- **Meaningful simplification:** one local deterministic path per operation; no
+  generic Pattern/Lesson/Knowledge framework, service, database, external
+  provider, raw-media path, or new authority center.
+- **Framework candidate:** ADRL-002 remains `WAIT_FOR_EVIDENCE`; same-domain M6
+  repetition documents pressure but does not isolate a safe cross-domain unit.
+- **Candidates for Removal:** None.
+- **Things deliberately not built:** generic evidence/Knowledge frameworks,
+  external learning, AI/CV/media ingestion, probabilistic confidence,
+  cross-project Knowledge, persistent Knowledge infrastructure,
+  recommendation/Creative Intent, Plan IR, and Data/Compute/rendering systems.
+  Reconsider only on the concrete evidence triggers recorded in the M6
+  checkpoint report.
+- **Decision rationale:** M6 growth represents real semantic boundaries and
+  preserves authority. Retain the design while constraining M6.5 to one local
+  admission boundary and reassessing Gateway pressure before adding another
+  provider route or framework.
+
 ## Snapshot template
 
 | Field | Entry |
