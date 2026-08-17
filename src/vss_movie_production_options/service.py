@@ -215,7 +215,7 @@ def production_provider_view_v2(context: Any, *, validation_time: str | None = N
     c = v2.to_json_value(); payload = dict(c["payload"]); bindings = tuple(payload.pop("knowledge_bindings"))
     base = dict(c); base["schema_version"] = "1"; base["context_family_version"] = "1"; base["result_version"] = "1"; base["semantic_task_version"] = "1"; base["purpose"] = "scene_production_options_local_validation"; base["policy_version"] = "1"; base["payload"] = payload; base["context_content_digest"] = canonical_digest(payload); base["integrity"] = {"complete_context_sha256":"0"*64}; base["integrity"]["complete_context_sha256"] = canonical_digest({**base, "integrity": {}})
     view = production_provider_view(validate_production_options_context(base))
-    projected = tuple(freeze_json({"knowledge_id": b["knowledge"]["knowledge_id"], "knowledge_content_digest": b["knowledge"]["knowledge_content_digest"], "admission_decision_id": b["knowledge"]["admission_decision_id"], "admission_decision_digest": b["knowledge"]["admission_decision_digest"], "source_candidate": b["knowledge"]["source_candidate"], "use": "informational_context_only"}) for b in bindings)
+    projected = tuple(freeze_json({"knowledge_id": b["knowledge"]["knowledge_id"], "knowledge_content_digest": b["knowledge"]["knowledge_content_digest"], "admission_decision_id": b["knowledge"]["admission_decision_id"], "admission_decision_digest": b["knowledge"]["admission_decision_digest"], "source_candidate": b["knowledge"]["source_candidate"], "proposition": b["knowledge"]["proposition"], "use": "informational_context_only"}) for b in bindings)
     material = {"base": view.provider_visible_digest, "knowledge_bindings": list(projected)}
     return replace(view, provider_visible_digest=canonical_digest(material), knowledge_bindings=projected)
 
@@ -254,10 +254,16 @@ def create_production_option_set_v2(view: SceneProductionOptionsProviderView, bi
     common = create_production_option_set(base_view, {**binding, "context_content_digest": binding["context_content_digest"]}, candidates)
     options = []
     ids = [item["knowledge_id"] for item in view.knowledge_bindings]
+    attributes = [item["proposition"]["attribute"] for item in view.knowledge_bindings]
+    values = []
+    for item in view.knowledge_bindings:
+        proposition = item["proposition"]
+        supplied = proposition.get("values", (proposition.get("value"),))
+        values.extend(thaw_json(supplied))
     for original in common["payload"]["options"]:
         option = dict(original)
         if ids:
-            option["knowledge_influence"] = {"mode": "informational_context_only", "knowledge_ids": ids}
+            option["knowledge_influence"] = {"mode": "informational_context_only", "knowledge_ids": ids, "knowledge_attributes": attributes, "knowledge_values": values}
         if ids:
             material = dict(option); material.pop("option_id", None); material.pop("option_content_digest", None)
             option["option_content_digest"] = canonical_digest(material)
@@ -265,7 +271,7 @@ def create_production_option_set_v2(view: SceneProductionOptionsProviderView, bi
         options.append(option)
     payload = dict(common["payload"]); payload["options"] = options
     payload["semantic_result_digest"] = canonical_digest({**payload, "semantic_result_digest": None})
-    lineage = [thaw_json(item) for item in view.knowledge_bindings]
+    lineage = [{key: thaw_json(item[key]) for key in ("knowledge_id", "knowledge_content_digest", "admission_decision_id", "admission_decision_digest", "source_candidate", "use")} for item in view.knowledge_bindings]
     result = dict(common); result.update({"schema_version":"2","result_version":"2","context_version":"2","policy_version":"2","strategy_version":V2_STRATEGY_VERSION,"provider_version":V2_PROVIDER_VERSION,"knowledge_bindings":lineage,"payload":payload})
     result["integrity"] = {"payload_sha256":canonical_digest(payload),"complete_result_sha256":"0"*64}
     result["integrity"]["complete_result_sha256"] = canonical_digest({**result, "integrity":{"payload_sha256":result["integrity"]["payload_sha256"]}})

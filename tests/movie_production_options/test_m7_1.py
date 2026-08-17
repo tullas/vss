@@ -5,6 +5,7 @@ from pathlib import Path
 from vss_reasoning_contracts import canonical_digest
 from vss_reasoning.gateway import ReasoningGateway
 from vss_movie_production_options import validate_production_options_context_v2
+from tests.shot_cinematography_knowledge.test_knowledge_m6_5 import ShotCinematographyKnowledgeTests
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,6 +53,22 @@ class M71ProductionOptionsTests(unittest.TestCase):
         outcome = ReasoningGateway.built_in().execute_scene_production_options(_v2_task(), _v2_context(), environment="development", correlation_id="m4-3-local-run", dry_run=True)
         self.assertFalse(outcome["readiness"]["provider_invoked"])
         self.assertEqual(outcome["readiness"]["provider_call_count"], 0)
+
+    def test_eligible_knowledge_changes_only_structured_option_considerations(self):
+        _, _, _, admitted = ShotCinematographyKnowledgeTests()._admit()
+        context = _v2_context()
+        context.update(project_id=admitted.knowledge.value["project_id"], classification=admitted.knowledge.value["classification"])
+        context["payload"]["knowledge_bindings"] = [{"knowledge": admitted.knowledge.to_json_value(), "lifecycle_events": [], "replacements": []}]
+        context["context_content_digest"] = canonical_digest(context["payload"])
+        context["integrity"] = {"complete_context_sha256": "0" * 64}
+        context["integrity"]["complete_context_sha256"] = canonical_digest({**context, "integrity": {}})
+        task = _v2_task(); task.update(project_id=context["project_id"], classification=context["classification"])
+        result = ReasoningGateway.built_in().execute_scene_production_options(task, context, environment="development", correlation_id=task["correlation_id"])["scene_production_option_set"]
+        influence = result["payload"]["options"][0]["knowledge_influence"]
+        self.assertEqual(influence["mode"], "informational_context_only")
+        self.assertEqual(influence["knowledge_ids"], [admitted.knowledge.value["knowledge_id"]])
+        self.assertEqual(influence["knowledge_attributes"], [admitted.knowledge.value["proposition"]["attribute"]])
+        self.assertEqual(influence["knowledge_values"], list(admitted.knowledge.value["proposition"]["values"]))
 
 
 if __name__ == "__main__":

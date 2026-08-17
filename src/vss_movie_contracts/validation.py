@@ -153,6 +153,19 @@ def validate_production_option_set_v2(value, *, context=None, registry=None):
             k = item["knowledge"]
             expected.append({"knowledge_id":k["knowledge_id"],"knowledge_content_digest":k["knowledge_content_digest"],"admission_decision_id":k["admission_decision_id"],"admission_decision_digest":k["admission_decision_digest"],"source_candidate":k["source_candidate"],"use":"informational_context_only"})
         if bindings != expected: raise MovieContractError("Knowledge lineage does not match Context")
+        expected_ids = [item["knowledge"]["knowledge_id"] for item in c["payload"].get("knowledge_bindings", ())]
+        expected_attributes = [item["knowledge"]["proposition"]["attribute"] for item in c["payload"].get("knowledge_bindings", ())]
+        expected_values = []
+        for item in c["payload"].get("knowledge_bindings", ()):
+            proposition = item["knowledge"]["proposition"]
+            expected_values.extend(proposition.get("values", [proposition.get("value")]))
+        for option in data["payload"]["options"]:
+            influence = option.get("knowledge_influence")
+            expected_influence = {"mode":"informational_context_only","knowledge_ids":expected_ids,"knowledge_attributes":expected_attributes,"knowledge_values":expected_values}
+            if expected_ids and influence != expected_influence:
+                raise MovieContractError("Knowledge influence does not match Context")
+            if not expected_ids and influence is not None:
+                raise MovieContractError("unexpected Knowledge influence")
     # Re-run the accepted v1 result validator against the immutable common payload.
     base = dict(data); base.pop("knowledge_bindings", None); base["schema_version"] = "1"; base["result_version"] = "1"; base["context_version"] = "1"; base["policy_version"] = "1"; base["strategy_version"] = "1.0.0"; base["provider_version"] = "1.0.0"; base["context_content_digest"] = data["context_content_digest"]
     base_payload = dict(base["payload"]); base_payload["options"] = []
