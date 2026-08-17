@@ -1,0 +1,19 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"vss.movie.shot_cinematography_knowledge_admission/1",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","contract_identity","contract_version","decision_id","decision","actor_kind","actor_identity","project_id","domain","purpose","classification","policy_identity","policy_version","decision_at","source_candidate","decision_content_digest"],
+  "properties":{
+    "schema_version":{"const":"1"},"contract_identity":{"const":"shot_cinematography_knowledge_admission"},"contract_version":{"const":"1"},
+    "decision_id":{"type":"string","pattern":"^shot-knowledge-admission-[0-9a-f]{32}$"},"decision":{"const":"admit"},"actor_kind":{"const":"human"},"actor_identity":{"type":"string","pattern":"^human-[a-z0-9][a-z0-9._:-]{0,63}$"},
+    "project_id":{"$ref":"#/$defs/id"},"domain":{"const":"shot_cinematography"},"purpose":{"const":"shot_cinematography_local_knowledge"},"classification":{"enum":["public","internal"]},
+    "policy_identity":{"const":"vss.shot-cinematography.knowledge-admission"},"policy_version":{"const":"1.0.0"},"decision_at":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "source_candidate":{"$ref":"#/$defs/sourceCandidate"},"decision_content_digest":{"$ref":"#/$defs/digest"}
+  },
+  "$defs":{
+    "id":{"type":"string","pattern":"^[a-z][a-z0-9._:-]{0,127}$"},"digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "sourceCandidate":{"type":"object","additionalProperties":false,"required":["candidate_id","candidate_digest","candidate_type","source_pattern_id","source_pattern_digest","supporting_evidence_digest","pattern_set_digest","pattern_set_complete_digest","context_id","context_content_digest","complete_context_digest"],"properties":{
+      "candidate_id":{"type":"string","pattern":"^shot-lesson-candidate-[0-9a-f]{32}$"},"candidate_digest":{"$ref":"#/$defs/digest"},"candidate_type":{"enum":["recurrence_lesson_candidate","variation_lesson_candidate"]},"source_pattern_id":{"type":"string","pattern":"^shot-pattern-[0-9a-f]{32}$"},"source_pattern_digest":{"$ref":"#/$defs/digest"},"supporting_evidence_digest":{"$ref":"#/$defs/digest"},"pattern_set_digest":{"$ref":"#/$defs/digest"},"pattern_set_complete_digest":{"$ref":"#/$defs/digest"},"context_id":{"type":"string","pattern":"^shot-context-[0-9a-f]{32}$"},"context_content_digest":{"$ref":"#/$defs/digest"},"complete_context_digest":{"$ref":"#/$defs/digest"}
+    }}
+  }
+}
