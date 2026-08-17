@@ -4,6 +4,8 @@ import datetime as dt
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -42,6 +44,42 @@ def component(component_id: str, name: str, ecosystem: str, version: str, licens
 
 
 class SupplyChainPolicyTests(unittest.TestCase):
+    def test_python_lock_audit_covers_every_lock_and_propagates_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "scripts/security/audit-python-locks.sh"
+            script.parent.mkdir(parents=True)
+            shutil.copy2(ROOT / "scripts/security/audit-python-locks.sh", script)
+            locks = root / "requirements/locks"
+            locks.mkdir(parents=True)
+            expected = {
+                "bootstrap-py311.lock.txt",
+                "bootstrap-py312.lock.txt",
+                "development.lock.txt",
+                "runtime.lock.txt",
+            }
+            for name in expected:
+                (locks / name).write_text("safe==1\n", encoding="utf-8")
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            audit_log = root / "audit.log"
+            fake_python = fake_bin / "python"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$AUDIT_LOG\"\n"
+                "[[ -z ${FAIL_LOCK:-} || $* != *\"$FAIL_LOCK\"* ]]\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            environment = dict(os.environ)
+            environment.update({"PATH": f"{fake_bin}:{environment['PATH']}", "AUDIT_LOG": str(audit_log)})
+            result = subprocess.run([str(script)], cwd=root, env=environment, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            audited = {Path(line.rsplit(" ", 1)[1]).name for line in audit_log.read_text(encoding="utf-8").splitlines()}
+            self.assertEqual(audited, expected)
+            environment["FAIL_LOCK"] = "development.lock.txt"
+            failed = subprocess.run([str(script)], cwd=root, env=environment, capture_output=True, text=True, check=False)
+            self.assertNotEqual(failed.returncode, 0)
+
     def _container_scan_fixture(self, root: Path) -> tuple[str, Path]:
         image = "docker.io/library/ubuntu@sha256:" + "a" * 64
         fixture_component = component("ubuntu", "ubuntu", "oci", "sha256:" + "a" * 64, source=image)

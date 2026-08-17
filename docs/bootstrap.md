@@ -47,7 +47,7 @@ Bootstrap uses deterministic environment-marked pins based on the official
 
 | Control-node Python | ansible-core | VSS policy |
 | --- | --- | --- |
-| 3.11 | 2.19.9 | Supported |
+| 3.11 | 2.19.11 | Supported |
 | 3.12–3.14 | 2.21.2 | Supported |
 | 3.15 or newer | None selected | Rejected until explicitly validated |
 

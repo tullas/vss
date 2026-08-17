@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "reviewed": {
     "ansible-compat==26.6.0": "MIT",
-    "ansible-core==2.19.9": "GPL-3.0-or-later",
+    "ansible-core==2.19.11": "GPL-3.0-or-later",
     "ansible-core==2.21.2": "GPL-3.0-or-later",
     "ansible-lint==26.6.0": "GPL-3.0-or-later",
     "yamllint==1.38.0": "GPL-3.0-or-later"
