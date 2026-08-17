@@ -178,7 +178,7 @@ class ShotObservationContextTests(unittest.TestCase):
     def test_context_registry_is_exact(self):
         registry = ContextContractRegistry.built_in()
         self.assertEqual(registry.resolve("shot_cinematography_context", "1").schema_identity, "vss.shot_cinematography_context/1")
-        self.assertEqual(registry.digest, "bcf063ad0ec60984ccfe422bb0d7da6f96fb5edb65d12c94520de9d6df6fc9f7")  # pragma: allowlist secret
+        self.assertEqual(registry.digest, "91db620f1c7b6c657171d2be509a806db2f9f1e319313822ab1180913b5504b5")  # pragma: allowlist secret
         for version in ("2", "latest", "*", ">=1"):
             with self.subTest(version=version), self.assertRaises(ContextRegistryError):
                 registry.resolve("shot_cinematography_context", version)

@@ -64,9 +64,9 @@ def validate_context(value: Any, registry: ContextContractRegistry) -> Validated
         except Exception as exc:
             raise InvalidContextInput("scene context is invalid") from exc
     if value.get("context_family") == "scene_production_options_context":
-        from vss_movie_production_options import validate_production_options_context
+        from vss_movie_production_options import validate_production_options_context, validate_production_options_context_v2
         try:
-            validated = validate_production_options_context(value, registry=registry)
+            validated = validate_production_options_context_v2(value, registry=registry) if value.get("context_family_version") == "2" else validate_production_options_context(value, registry=registry)
             return ValidatedContext.create(validated.to_json_value())
         except Exception as exc:
             raise InvalidContextInput("scene production options context is invalid") from exc

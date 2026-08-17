@@ -14,7 +14,9 @@ FILES = MappingProxyType({
     "break_down_scenes/1":"break-down-scenes-task-v1.schema.json",
     "scene_breakdown/1":"scene-breakdown-v1.schema.json",
     "generate_scene_production_options/1":"generate-scene-production-options-task-v1.schema.json",
+    "generate_scene_production_options/2":"generate-scene-production-options-task-v2.schema.json",
     "scene_production_option_set/1":"scene-production-option-set-v1.schema.json",
+    "scene_production_option_set/2":"scene-production-option-set-v2.schema.json",
     "character_reference/1":"character-reference-v1.schema.json",
     "character_identity/1":"character-identity-v1.schema.json",
     "continuity_sequence/1":"continuity-sequence-v1.schema.json",
@@ -35,6 +37,8 @@ FILES = MappingProxyType({
     "shot_cinematography_knowledge_lifecycle_event/1":"shot-cinematography-knowledge-lifecycle-event-v1.schema.json",
 })
 COMPATIBILITY = MappingProxyType({
+    "generate_scene_production_options/1": "scene_production_option_set/1",
+    "generate_scene_production_options/2": "scene_production_option_set/2",
     "analyze_character_continuity/1": "character_continuity_observation_set/1",
     "analyze_character_continuity/2": "character_continuity_observation_set/1",
     "analyze_character_continuity/3": "character_continuity_observation_set/1",
