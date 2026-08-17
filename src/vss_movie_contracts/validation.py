@@ -345,6 +345,42 @@ def validate_shot_cinematography_lesson_candidate_set(value, *, task, pattern_se
     return result
 
 
+def validate_shot_cinematography_knowledge_admission(value, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "shot_cinematography_knowledge_admission/1", registry, MAX_STORY_BYTES)
+    _require_digest(result.value, "decision_content_digest", "shot knowledge admission decision")
+    return result
+
+
+def validate_shot_cinematography_admitted_knowledge(value, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "shot_cinematography_admitted_knowledge/1", registry, MAX_RESULT_BYTES)
+    data = result.value
+    if data["effective_from"] > data["admitted_at"] or data["admitted_at"] > data["effective_until"] or data["effective_until"] > data["retention_until"]:
+        raise MovieContractError("shot knowledge temporal ordering is invalid")
+    content_keys = ("knowledge_type", "project_id", "domain", "purpose", "classification",
+                    "source_candidate", "proposition", "scope", "limitations", "lifecycle_status")
+    if data["knowledge_content_digest"] != canonical_digest({key: data[key] for key in content_keys}):
+        raise MovieContractError("shot knowledge content digest mismatch")
+    if data["knowledge_id"] != "shot-knowledge-" + data["knowledge_content_digest"][:32]:
+        raise MovieContractError("shot knowledge identity mismatch")
+    complete = dict(data)
+    complete["complete_knowledge_sha256"] = "0" * 64
+    if data["complete_knowledge_sha256"] != canonical_digest(complete):
+        raise MovieContractError("shot knowledge complete digest mismatch")
+    return result
+
+
+def validate_shot_cinematography_knowledge_lifecycle_event(value, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "shot_cinematography_knowledge_lifecycle_event/1", registry, MAX_STORY_BYTES)
+    material = dict(result.value)
+    expected = material.pop("event_content_digest")
+    if expected != canonical_digest(material):
+        raise MovieContractError("shot knowledge lifecycle event digest mismatch")
+    return result
+
+
 def validate_character_continuity_task(value, continuity_sequence=None, character_identities=None, registry=None):
     registry = registry or MovieContractRegistry.built_in()
     version = value.get("task_version") if isinstance(value, dict) else None
