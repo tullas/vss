@@ -32,6 +32,7 @@ class ContextAssemblyTests(unittest.TestCase):
             ("generate_options_context", "1"), ("context_assembly_report", "1"),
             ("scene_breakdown_context", "1"),
             ("scene_production_options_context", "1"),
+            ("scene_production_options_context", "2"),
             ("character_continuity_context", "1"),
             ("character_continuity_context", "2"),
             ("shot_cinematography_context", "1"),
