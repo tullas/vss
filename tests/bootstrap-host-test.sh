@@ -9,7 +9,7 @@ trap 'rm -rf -- "$test_dir"' EXIT
 
 [[ -x $script ]]
 bash -n "$script"
-grep -Fq 'ansible-core==2.19.9; python_version >= "3.11" and python_version < "3.12"' "$root/requirements-bootstrap.txt"
+grep -Fq 'ansible-core==2.19.11; python_version >= "3.11" and python_version < "3.12"' "$root/requirements-bootstrap.txt"
 grep -Fq 'ansible-core==2.21.2; python_version >= "3.12" and python_version < "3.15"' "$root/requirements-bootstrap.txt"
 
 bootstrap_env() {
@@ -107,7 +107,7 @@ for version in 3.11 3.12 3.13 3.14; do
   compatibility_venv="$test_dir/compatibility-$version"
   rm -rf -- "$compatibility_venv"
   output=$(run_install "$version" "$compatibility_venv" 2>"$test_dir/compatibility-$version.err")
-  if [[ $version == 3.11 ]]; then expected=2.19.9; else expected=2.21.2; fi
+  if [[ $version == 3.11 ]]; then expected=2.19.11; else expected=2.21.2; fi
   grep -Fq "\"selected_ansible_core\":\"$expected\"" "$test_dir/compatibility-$version.err"
   grep -Fq "\"ansible_core_version\":\"$expected\"" <<<"$output"
 done

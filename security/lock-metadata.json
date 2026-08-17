@@ -1,18 +1,18 @@
 {
   "generator": "uv 0.10.7",
   "inputs": {
-    "requirements/inputs/bootstrap.in": "b01d6e7625b6263442e870b4f85dc1297aa787ff3b39678d292af3f13e4b74b5",
+    "requirements/inputs/bootstrap.in": "5316945b396b1b89e22b587e7c6ae06fd74294a0d3a001689d0efe90605deb0a",
     "requirements/inputs/development.in": "e11d8ec351a946497d254bec736a1462dcaebcfb79b59abcaec2c023f25d4f51",
     "requirements/inputs/runtime.in": "a19b30fb9121464f7e45d44bd5c29f4e8dc3fa2f95532e2a27a2232f9998539d"
   },
   "locks": {
-    "requirements/locks/bootstrap-py311.lock.txt": "a51a2fbae05b13466660e06a234a8908a0fd4bd238cb594be8b88283c5c8e8eb",
-    "requirements/locks/bootstrap-py312.lock.txt": "3a92735e1a50895c7e254665b5c60a67d36476ba823356412ea5cf07b3d3b314",
-    "requirements/locks/development.lock.txt": "9378fb5dfaff5baf6fe58c003ae0c78411976f9bc82b02f7d8b4d10f5ee707dd",
+    "requirements/locks/bootstrap-py311.lock.txt": "b5fe905842e10b8848747815c6346b5c4201bc7b6799d146d2a93ae5e6e6d299",
+    "requirements/locks/bootstrap-py312.lock.txt": "a35d30fae49aa233f1285100fbf0009890f182b2e2e01fcc1fe53e369c6c943a",
+    "requirements/locks/development.lock.txt": "8aa2c46d4be63909a97dad868898893ffbf14e36301fccfcd310fac032c80d80",
     "requirements/locks/runtime.lock.txt": "086f6c8339ba9d59282336559c763a9179309487e13725f5d18adb778a727ba4"
   },
   "policy_files": {
-    "security/python-license-reviews.yml": "1ab8e9ebba1adb85e29f2b71e816364d649b08ffe2207f74066e0c89b94b1464"
+    "security/python-license-reviews.yml": "619874d2601cd1d6cea1df87ca5f0234b5445dc0bc65b09a698bdab747d8657c"
   },
   "schema_version": "1.0"
 }

@@ -27,7 +27,7 @@ jobs:
         id: audit
         run: |
           set +e
-          pip-audit --require-hashes -r requirements/locks/runtime.lock.txt
+          scripts/security/audit-python-locks.sh
           status=$?
           printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
           exit 0

@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import tomllib
 import yaml
@@ -290,7 +291,7 @@ def validate_workflow_invariants(root: Path) -> None:
     required_runs = {
         "policy": {"python3 scripts/security/validate-supply-chain.py"},
         "python-vulnerability": {
-            "pip-audit --require-hashes -r requirements/locks/runtime.lock.txt",
+            "scripts/security/audit-python-locks.sh",
             "python3 scripts/security/validate-python-licenses.py",
         },
         "bootstrap-python311-license": {"python3 scripts/security/validate-python-licenses.py --lock requirements/locks/bootstrap-py311.lock.txt"},
@@ -329,6 +330,21 @@ def validate_workflow_invariants(root: Path) -> None:
     required_images = sorted(record["source"] for record in component_map(root).values() if record["ecosystem"] == "oci")
     if not isinstance(scanned_images, list) or sorted(scanned_images) != required_images:
         raise PolicyFailure("container scan matrix does not cover every admitted image")
+    audit_script = root / "scripts/security/audit-python-locks.sh"
+    audit_text = audit_script.read_text(encoding="utf-8") if audit_script.is_file() else ""
+    if not os.access(audit_script, os.X_OK):
+        raise PolicyFailure("Python lock vulnerability audit is not executable")
+    required_audit_fragments = (
+        "requirements/locks/*.lock.txt",
+        'python -m pip_audit --require-hashes -r "$lock"',
+        "set -Eeuo pipefail",
+    )
+    if not all(fragment in audit_text for fragment in required_audit_fragments):
+        raise PolicyFailure("Python lock vulnerability audit does not fail closed across every lock")
+    lifecycle = root / ".github/workflows/security-lifecycle.yml"
+    lifecycle_text = lifecycle.read_text(encoding="utf-8") if lifecycle.is_file() else ""
+    if "scripts/security/audit-python-locks.sh" not in lifecycle_text:
+        raise PolicyFailure("security lifecycle omits the complete Python lock audit")
     codeowners = root / ".github/CODEOWNERS"
     if not codeowners.is_file() or "/.github/workflows/ @tullas" not in codeowners.read_text(encoding="utf-8"):
         raise PolicyFailure("security control paths lack CODEOWNERS review")

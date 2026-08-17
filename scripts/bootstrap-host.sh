@@ -177,7 +177,7 @@ command -v "$python_bin" >/dev/null 2>&1 || { log 'ERROR: Python 3.11 or newer i
 python_version=$("$python_bin" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 [[ $python_version =~ ^[0-9]+\.[0-9]+$ ]] || { log 'ERROR: unable to determine the Python version'; exit 69; }
 case $python_version in
-  3.11) selected_ansible_version=2.19.9; bootstrap_lock=requirements/locks/bootstrap-py311.lock.txt ;;
+  3.11) selected_ansible_version=2.19.11; bootstrap_lock=requirements/locks/bootstrap-py311.lock.txt ;;
   3.12|3.13|3.14) selected_ansible_version=2.21.2; bootstrap_lock=requirements/locks/bootstrap-py312.lock.txt ;;
   *) log "ERROR: Python $python_version is unsupported by the VSS Ansible compatibility policy; supported versions are 3.11 through 3.14"; exit 69 ;;
 esac
