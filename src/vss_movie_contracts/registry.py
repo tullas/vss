@@ -30,6 +30,9 @@ FILES = MappingProxyType({
     "shot_cinematography_pattern_set/1":"shot-cinematography-pattern-set-v1.schema.json",
     "derive_shot_cinematography_lesson_candidates/1":"derive-shot-cinematography-lesson-candidates-task-v1.schema.json",
     "shot_cinematography_lesson_candidate_set/1":"shot-cinematography-lesson-candidate-set-v1.schema.json",
+    "shot_cinematography_knowledge_admission/1":"shot-cinematography-knowledge-admission-v1.schema.json",
+    "shot_cinematography_admitted_knowledge/1":"shot-cinematography-admitted-knowledge-v1.schema.json",
+    "shot_cinematography_knowledge_lifecycle_event/1":"shot-cinematography-knowledge-lifecycle-event-v1.schema.json",
 })
 COMPATIBILITY = MappingProxyType({
     "analyze_character_continuity/1": "character_continuity_observation_set/1",

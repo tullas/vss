@@ -435,3 +435,20 @@ to at most one candidate, with no cross-Pattern synthesis. Bounds cap both
 source Patterns and candidates at 40. The provider has no files, network,
 subprocess, dynamic import, raw media, model, Knowledge store, Runtime
 capability, retry, or fallback. Dry-run calls no provider and creates no result.
+
+## M6.5 admitted cinematic Knowledge threats
+
+M6.5 accepts only a validated M6.4 Lesson Candidate whose Pattern Set and
+Context lineage are independently revalidated. Admission requires a closed,
+human-attributable decision and exact project/domain scope; actor, decision,
+candidate, Pattern, Context, and digest substitution therefore fail closed.
+There is no automatic promotion, provider admission path, recommendation text,
+external source, or cross-project generalization.
+
+Knowledge content is immutable and storage-neutral. Lifecycle events are
+versioned and human-attributable; malformed or ambiguous chains, challenge,
+withdrawal, revocation, and supersession make current-use eligibility fail
+closed while preserving historical artifacts. This prevents stale Knowledge,
+evidence laundering, scope escalation, duplicate admission, and lifecycle
+resealing from becoming current input. No persistence service, Runtime authority,
+or Knowledge promotion workflow is introduced.

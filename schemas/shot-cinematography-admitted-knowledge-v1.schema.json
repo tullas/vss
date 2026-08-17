@@ -1,0 +1,21 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"vss.movie.shot_cinematography_admitted_knowledge/1",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","contract_identity","contract_version","knowledge_id","knowledge_type","project_id","domain","purpose","classification","source_candidate","proposition","scope","limitations","admission_decision_id","admission_decision_digest","lifecycle_status","admitted_at","effective_from","effective_until","retention_until","knowledge_content_digest","complete_knowledge_sha256"],
+  "properties":{
+    "schema_version":{"const":"1"},"contract_identity":{"const":"shot_cinematography_admitted_knowledge"},"contract_version":{"const":"1"},"knowledge_id":{"type":"string","pattern":"^shot-knowledge-[0-9a-f]{32}$"},"knowledge_type":{"const":"shot_cinematography_admitted_knowledge"},
+    "project_id":{"$ref":"#/$defs/id"},"domain":{"const":"shot_cinematography"},"purpose":{"const":"shot_cinematography_local_knowledge"},"classification":{"enum":["public","internal"]},"scope":{"const":"exact_project_shot_cinematography"},
+    "source_candidate":{"$ref":"#/$defs/sourceCandidate"},"proposition":{"$ref":"#/$defs/proposition"},"limitations":{"type":"array","const":["exact_project_scope","exact_source_context","local_manual_or_synthetic_lineage","human_admission_required","no_causal_interpretation","no_evaluative_interpretation","no_recommendation","not_universal_truth","not_runtime_authority"]},
+    "admission_decision_id":{"type":"string","pattern":"^shot-knowledge-admission-[0-9a-f]{32}$"},"admission_decision_digest":{"$ref":"#/$defs/digest"},"lifecycle_status":{"const":"active"},
+    "admitted_at":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},"effective_from":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},"effective_until":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},"retention_until":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "knowledge_content_digest":{"$ref":"#/$defs/digest"},"complete_knowledge_sha256":{"$ref":"#/$defs/digest"}
+  },
+  "$defs":{
+    "id":{"type":"string","pattern":"^[a-z][a-z0-9._:-]{0,127}$"},"digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "sourceCandidate":{"type":"object","additionalProperties":false,"required":["candidate_id","candidate_digest","candidate_type","source_pattern_id","source_pattern_digest","supporting_evidence_digest","pattern_set_digest","pattern_set_complete_digest","context_id","context_content_digest","complete_context_digest"],"properties":{
+      "candidate_id":{"type":"string","pattern":"^shot-lesson-candidate-[0-9a-f]{32}$"},"candidate_digest":{"$ref":"#/$defs/digest"},"candidate_type":{"enum":["recurrence_lesson_candidate","variation_lesson_candidate"]},"source_pattern_id":{"type":"string","pattern":"^shot-pattern-[0-9a-f]{32}$"},"source_pattern_digest":{"$ref":"#/$defs/digest"},"supporting_evidence_digest":{"$ref":"#/$defs/digest"},"pattern_set_digest":{"$ref":"#/$defs/digest"},"pattern_set_complete_digest":{"$ref":"#/$defs/digest"},"context_id":{"type":"string","pattern":"^shot-context-[0-9a-f]{32}$"},"context_content_digest":{"$ref":"#/$defs/digest"},"complete_context_digest":{"$ref":"#/$defs/digest"}
+    }},
+    "proposition":{"type":"object","additionalProperties":false,"required":["attribute","values","occurrence_count"],"properties":{"attribute":{"enum":["shot_scale","camera_angle","camera_elevation","camera_movement","composition","screen_direction","subject_count","focal_length_mm"]},"values":{"type":"array","minItems":1,"maxItems":8,"uniqueItems":true,"items":{"anyOf":[{"enum":["extreme_close_up","close_up","medium_close_up","medium","medium_wide","wide","extreme_wide","level","high_angle","low_angle","dutch_angle","ground","eye_level","elevated","overhead","static","pan","tilt","dolly","truck","pedestal","zoom","crane","orbit","centered","rule_of_thirds","symmetrical","frame_within_frame","left_facing","right_facing","toward_camera","away_from_camera"]},{"type":"integer","minimum":0,"maximum":128},{"type":"number","minimum":1,"maximum":2000}]}},"occurrence_count":{"type":"integer","minimum":2,"maximum":8}}}
+  }
+}
