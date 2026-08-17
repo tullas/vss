@@ -62,7 +62,7 @@ class ShotCinematographyKnowledgeTests(unittest.TestCase):
     def test_duplicate_and_automatic_admission_are_rejected(self):
         source, candidates, decision, admitted = self._admit()
         with self.assertRaises(ValueError):
-            admit_lesson_candidate(candidates, lesson_task=lesson_task(source), pattern_set=source[2], pattern_task=source[1], context=source[0], pattern_invocation_binding_digest=source[3], candidate_invocation_binding_digest="0" * 64, admission_decision=decision, effective_until="2027-01-01T00:00:00Z", retention_until="2028-01-01T00:00:00Z", prior_admissions=[admitted.knowledge])
+            admit_lesson_candidate(candidates, lesson_task=lesson_task(source), pattern_set=source[2], pattern_task=source[1], context=source[0], pattern_invocation_binding_digest=source[3], candidate_invocation_binding_digest=candidates.value["invocation_binding_digest"], admission_decision=decision, effective_until="2027-01-01T00:00:00Z", retention_until="2028-01-01T00:00:00Z", prior_admissions=[admitted.knowledge])
         forged = decision.to_json_value(); forged["actor_kind"] = "provider"
         forged["decision_content_digest"] = canonical_digest({k: v for k, v in forged.items() if k != "decision_content_digest"})
         with self.assertRaises(Exception):

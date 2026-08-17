@@ -153,7 +153,7 @@ def admit_lesson_candidate(candidate_set: Any, *, lesson_task: Any, pattern_set:
             previous.to_json_value() if isinstance(previous, ValidatedMovieArtifact) else previous
         )
         previous_value = previous_artifact.value
-        if previous_value.get("source_candidate", {}).get("candidate_id") == candidate["candidate_id"] and previous_value.get("policy_identity") == ADMISSION_POLICY_IDENTITY:
+        if previous_value.get("source_candidate", {}).get("candidate_id") == candidate["candidate_id"]:
             raise ValueError("duplicate admission for candidate and policy")
     admitted_at = decision_value["decision_at"]
     if not (_timestamp(effective_until) > _timestamp(admitted_at) and _timestamp(retention_until) >= _timestamp(effective_until)):
