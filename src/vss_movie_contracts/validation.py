@@ -44,6 +44,15 @@ def validate_production_options_task(value, registry=None):
         raise MovieContractError("production task policy is invalid")
     return result
 
+def validate_production_options_task_v2(value, registry=None):
+    result = _validate(value, "generate_scene_production_options/2", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
+    task = result.value
+    if task["expected_context_family"] != "scene_production_options_context" or task["expected_context_version"] != "2" or task["expected_result_family"] != "scene_production_option_set" or task["expected_result_version"] != "2":
+        raise MovieContractError("production v2 task compatibility is invalid")
+    if task["purpose"] != "scene_production_options_local_analysis" or task["environment"] != "development":
+        raise MovieContractError("production v2 task policy is invalid")
+    return result
+
 def validate_scene_breakdown(value, registry=None):
     result=_validate(value,"scene_breakdown/1",registry or MovieContractRegistry.built_in(),MAX_RESULT_BYTES)
     scenes=result.value["payload"]["ordered_scenes"]
@@ -75,7 +84,7 @@ def validate_scene_breakdown(value, registry=None):
 def validate_production_option_set(value, registry=None):
     result = _validate(value, "scene_production_option_set/1", registry or MovieContractRegistry.built_in(), MAX_RESULT_BYTES)
     from vss_reasoning_contracts import canonical_digest
-    data = result.value
+    data = thaw_json(result.value)
     if data["integrity"]["payload_sha256"] != canonical_digest(data["payload"]):
         raise MovieContractError("production option payload digest mismatch")
     if data["payload"]["semantic_result_digest"] != canonical_digest({**data["payload"], "semantic_result_digest": None}):
@@ -121,6 +130,57 @@ def validate_production_option_set(value, registry=None):
         text = " ".join(text for field in honesty_fields for text in strings(option[field])).lower()
         if any(re.search(pattern, text) for pattern in affirmative_claims):
             raise MovieContractError("production option makes a prohibited semantic claim")
+    return result
+
+def validate_production_option_set_v2(value, *, context=None, registry=None):
+    result = _validate(value, "scene_production_option_set/2", registry or MovieContractRegistry.built_in(), MAX_RESULT_BYTES)
+    data = thaw_json(result.value)
+    if data.get("strategy_identity") != "vss.generate-scene-production-options.deterministic" or data.get("strategy_version") != "1.0.0" or data.get("provider_identity") != "vss.reasoning.deterministic-scene-production-options" or data.get("provider_version") != "1.0.0":
+        raise MovieContractError("production v2 implementation identity is invalid")
+    if context is not None:
+        c = context.to_json_value() if hasattr(context, "to_json_value") else context
+        if data["context_content_digest"] != c["context_content_digest"] or data["complete_context_digest"] != canonical_digest(c):
+            raise MovieContractError("production v2 Context binding is invalid")
+    bindings = data["knowledge_bindings"]
+    ids = [item["knowledge_id"] for item in bindings]
+    if len(ids) != len(set(ids)): raise MovieContractError("production v2 Knowledge binding is duplicated")
+    required_binding = {"knowledge_id","knowledge_content_digest","admission_decision_id","admission_decision_digest","source_candidate","use"}
+    if any(set(item) != required_binding or item.get("use") != "informational_context_only" for item in bindings): raise MovieContractError("Knowledge lineage binding is invalid")
+    if context is not None:
+        c = context.to_json_value() if hasattr(context, "to_json_value") else context
+        expected = []
+        for item in c["payload"].get("knowledge_bindings", ()):
+            k = item["knowledge"]
+            expected.append({"knowledge_id":k["knowledge_id"],"knowledge_content_digest":k["knowledge_content_digest"],"admission_decision_id":k["admission_decision_id"],"admission_decision_digest":k["admission_decision_digest"],"source_candidate":k["source_candidate"],"use":"informational_context_only"})
+        if bindings != expected: raise MovieContractError("Knowledge lineage does not match Context")
+        expected_ids = [item["knowledge"]["knowledge_id"] for item in c["payload"].get("knowledge_bindings", ())]
+        expected_attributes = [item["knowledge"]["proposition"]["attribute"] for item in c["payload"].get("knowledge_bindings", ())]
+        expected_values = []
+        for item in c["payload"].get("knowledge_bindings", ()):
+            proposition = item["knowledge"]["proposition"]
+            expected_values.extend(proposition.get("values", [proposition.get("value")]))
+        for option in data["payload"]["options"]:
+            influence = option.get("knowledge_influence")
+            expected_influence = {"mode":"informational_context_only","knowledge_ids":expected_ids,"knowledge_attributes":expected_attributes,"knowledge_values":expected_values}
+            if expected_ids and influence != expected_influence:
+                raise MovieContractError("Knowledge influence does not match Context")
+            if not expected_ids and influence is not None:
+                raise MovieContractError("unexpected Knowledge influence")
+    # Re-run the accepted v1 result validator against the immutable common payload.
+    base = dict(data); base.pop("knowledge_bindings", None); base["schema_version"] = "1"; base["result_version"] = "1"; base["context_version"] = "1"; base["policy_version"] = "1"; base["strategy_version"] = "1.0.0"; base["provider_version"] = "1.0.0"; base["context_content_digest"] = data["context_content_digest"]
+    base_payload = dict(base["payload"]); base_payload["options"] = []
+    for option in data["payload"]["options"]:
+        item = dict(option); item.pop("knowledge_influence", None)
+        item.pop("option_content_digest")
+        digest_material = dict(item); digest_material.pop("option_id", None)
+        item["option_content_digest"] = canonical_digest(digest_material)
+        base_payload["options"].append(item)
+    base_payload["semantic_result_digest"] = canonical_digest({**base_payload, "semantic_result_digest": None})
+    base["payload"] = base_payload
+    base["integrity"] = {"payload_sha256": canonical_digest(base_payload), "complete_result_sha256": "0"*64}
+    base["integrity"]["complete_result_sha256"] = canonical_digest({**base, "integrity": {"payload_sha256": base["integrity"]["payload_sha256"]}})
+    try: validate_production_option_set(base, registry=registry or MovieContractRegistry.built_in())
+    except Exception as exc: raise MovieContractError("production v2 common result is invalid") from exc
     return result
 
 def validate_character_reference(value, registry=None):
