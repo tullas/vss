@@ -217,7 +217,7 @@ def current_use_eligible(knowledge: Any, *, lifecycle_events: Iterable[Any] = ()
             raise ValueError("future lifecycle event is ambiguous")
         if _timestamp(event.value["event_at"]) < _timestamp(value["admitted_at"]):
             raise ValueError("lifecycle event predates admission")
-    if any(event.value["event_kind"] in {"challenge", "withdraw", "revoke", "archive"} for event in events):
+    if any(event.value["event_kind"] in {"challenge", "withdraw", "revoke"} for event in events):
         raise ValueError("knowledge is not currently eligible")
     supersedes = [event for event in events if event.value["event_kind"] == "supersede"]
     if supersedes:
