@@ -19,7 +19,7 @@ from vss_reasoning_contracts.canonicalization import thaw_json
 from .errors import ContextRegistryError
 from .models import ContextRegistration, ContextSchemaRecord
 
-_BUILT_IN: dict[tuple[type, str], ContextContractRegistry] = {}
+_BUILT_IN: dict[tuple[type, str, tuple[Any, ...]], ContextContractRegistry] = {}
 _BUILT_IN_LOCK = Lock()
 
 _DIALECT = "https://json-schema.org/draft/2020-12/schema"
@@ -35,6 +35,18 @@ _FILES = MappingProxyType({
     "vss.shot_cinematography_context/1": "shot-cinematography-context-v1.schema.json",
     "vss.context_assembly_report/1": "context-assembly-report-v1.schema.json",
 })
+
+
+def _schema_metadata_fingerprint() -> tuple[Any, ...]:
+    fingerprint = []
+    for filename in _FILES.values():
+        path = _ROOT / filename
+        try:
+            item = os.lstat(path)
+            fingerprint.append((filename, item.st_mode, item.st_ino, item.st_size, item.st_mtime_ns))
+        except OSError:
+            fingerprint.append((filename, None))
+    return tuple(fingerprint)
 
 
 def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -135,7 +147,7 @@ class ContextContractRegistry:
 
     @classmethod
     def built_in(cls) -> "ContextContractRegistry":
-        key = (cls, str(_ROOT))
+        key = (cls, str(_ROOT), _schema_metadata_fingerprint())
         registry = _BUILT_IN.get(key)
         if registry is None:
             with _BUILT_IN_LOCK:

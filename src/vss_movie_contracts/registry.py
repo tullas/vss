@@ -47,6 +47,18 @@ def _pairs(pairs):
 _BUILT_IN = {}
 _BUILT_IN_LOCK = Lock()
 
+
+def _schema_metadata_fingerprint():
+    fingerprint = []
+    for filename in FILES.values():
+        path = ROOT / filename
+        try:
+            item = os.lstat(path)
+            fingerprint.append((filename, item.st_mode, item.st_ino, item.st_size, item.st_mtime_ns))
+        except OSError:
+            fingerprint.append((filename, None))
+    return tuple(fingerprint)
+
 def _load(identity, filename):
     path=ROOT/filename
     if path.is_symlink(): raise MovieRegistryError("movie schema symlink rejected")
@@ -105,7 +117,7 @@ class MovieContractRegistry:
         self.digest=canonical_digest({"registry":"movie_domain_contract_registry/1","registrations":[r.__dict__ if hasattr(r,"__dict__") else {"identity":r.identity,"version":r.version,"schema_identity":r.schema_identity,"lifecycle":r.lifecycle,"owner":r.owner} for r in regs],"schemas":{k:v["sha256"] for k,v in sorted(schemas.items())},"compatibility":dict(COMPATIBILITY)})
     @classmethod
     def built_in(cls):
-        key = (cls, str(ROOT))
+        key = (cls, str(ROOT), _schema_metadata_fingerprint())
         registry = _BUILT_IN.get(key)
         if registry is None:
             with _BUILT_IN_LOCK:

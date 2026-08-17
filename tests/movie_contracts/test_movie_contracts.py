@@ -1,6 +1,8 @@
-import json, unittest
+import json, shutil, tempfile, unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
+import vss_movie_contracts.registry as registry_module
 from vss_movie_contracts import MovieContractRegistry, validate_story_fragment, validate_scene_breakdown, validate_scene_task, ValidatedMovieArtifact
 from vss_movie_contracts.errors import MovieContractError
 from vss_reasoning_contracts import canonical_digest
@@ -23,6 +25,20 @@ class MovieContractTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             registries = list(pool.map(lambda _: MovieContractRegistry.built_in(), range(32)))
         self.assertTrue(all(registry is registries[0] for registry in registries))
+
+    def test_schema_replacement_invalidates_built_in_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for filename in registry_module.FILES.values():
+                shutil.copy2(ROOT / "schemas" / filename, root / filename)
+            with patch.object(registry_module, "ROOT", root):
+                first = MovieContractRegistry.built_in()
+                schema_path = root / registry_module.FILES["story_fragment/1"]
+                schema = json.loads(schema_path.read_text())
+                schema["title"] = "replacement"
+                schema_path.write_text(json.dumps(schema))
+                second = MovieContractRegistry.built_in()
+                self.assertNotEqual(first.digest, second.digest)
     def test_story_fragment_valid_and_immutable(self):
         artifact=validate_story_fragment(load('story-fragment-valid.json'))
         exported=artifact.to_json_value(); exported['payload']['fragment_text']='changed'
