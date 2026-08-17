@@ -126,7 +126,7 @@ must preserve definitions and does not turn counts into targets.
 
 ## Snapshot: post-M6 cinematic semantic progression checkpoint
 
-- **Reviewed main:** `0b94e837eceb9b4d533739699070fe86050a4e97`
+- **Reviewed main:** `cdd9a4cdfb41249c6b72be10676a699c1370d86a`
 - **Checkpoint:** accepted M6.1-M6.4 Observation -> Pattern -> Lesson Candidate
   progression and readiness for narrow Admitted Knowledge
 - **Comparable prior snapshot:** post-M5 integration checkpoint
@@ -165,7 +165,7 @@ M6.1 validation and M6.2 Context assembly are not provider execution paths.
 | Operational complexity | `LOW` | No persistent component, service, worker, queue, cache, AI, media, or infrastructure |
 | Cognitive complexity | `WATCH` | Evidence lineage crosses observation, set, Context, Pattern, and candidate digest domains |
 | Domain coupling | `LOW` | Existing architecture dependency direction is preserved |
-| CI/test complexity | `WATCH` | 474 Python tests with valuable but material determinism, concurrency, security, and regression cost |
+| CI/test complexity | `WATCH` | 475 Python tests with valuable but material determinism, concurrency, security, and regression cost |
 | Governance overhead | `WATCH` | M6 acceptance caught real integrity defects; review and evidence volume remain substantial |
 
 - **Meaningful increase:** six Movie contracts, one Context, two deterministic

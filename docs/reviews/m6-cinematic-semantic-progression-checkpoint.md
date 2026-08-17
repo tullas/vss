@@ -3,7 +3,7 @@
 ## Review metadata
 
 - Review date: 2026-08-16
-- Authoritative reviewed `main`: `0b94e837eceb9b4d533739699070fe86050a4e97`
+- Authoritative reviewed `main`: `cdd9a4cdfb41249c6b72be10676a699c1370d86a`
 - Review branch: `agent/m6-architecture-checkpoint`
 - Scope: merged PRs #71 through #74 (M6.1 through M6.4) and readiness for
   bounded Shot/Cinematography Admitted Knowledge
@@ -16,7 +16,7 @@ implement or authorize M6.5.
 
 ## Checkpoint verdict
 
-`REMEDIATE_BEFORE_M6_5`
+`READY_WITH_NON_BLOCKING_GUARDRAILS`
 
 M6 has established a coherent and independently validated progression:
 
@@ -32,23 +32,22 @@ The accepted semantic architecture is sufficient for a narrow M6.5 without a
 new architecture decision. ADR-0015 defines typed, lifecycle-governed
 Knowledge; ADR-0016 prevents a semantic producer from approving itself; and
 ADR-0024 defines domain-owned explicit promotion, challenge, evidence
-evolution, and withdrawal. However, the repository does not satisfy the stated
-security-health prerequisite: four open High Dependabot alerts affect admitted
-development/bootstrap locks while the green vulnerability job audits only the
-runtime lock. Remediate that supply-chain defect and close the coverage gap
-before starting M6.5. After remediation, M6.5 must implement the existing
-semantic decisions conservatively and must not treat the existence, frequency,
-or provider origin of a candidate as an admission decision.
+evolution, and withdrawal. PR #76 remediated the supply-chain blocker: all
+installable Python locks are now audited fail-closed and the affected
+`ansible-core` and `cryptography` findings are cleared on current `main`.
+M6.5 must implement the existing semantic decisions conservatively and must
+not treat the existence, frequency, or provider origin of a candidate as an
+admission decision.
 
 ## Findings
 
-No Critical or Medium semantic/architecture finding was found. One High
-supply-chain finding blocks progression even though it does not invalidate the
-accepted M6.1-M6.4 semantic artifacts.
+No Critical, High, or Medium semantic/architecture finding remains. The former
+High supply-chain finding was remediated by merged PR #76 and verified on
+current `main`.
 
 | Severity | Finding | Required disposition |
 |---|---|---|
-| High | GitHub Dependabot reports four open High alerts in repository-controlled locks: `ansible-core` in `bootstrap-py311.lock.txt` (GHSA-w8p5-mx5w-cpqj; arbitrary code execution through argument injection) and `cryptography` in `bootstrap-py311.lock.txt`, `bootstrap-py312.lock.txt`, and `development.lock.txt` (GHSA-g6cj-pr64-35w5). The Security Supply Chain workflow is green because its vulnerability job runs `pip-audit` only against `runtime.lock.txt`; bootstrap jobs perform license checks but no vulnerability audit. | Before M6.5, update/relock to admitted fixed versions, validate bootstrap/development compatibility, and extend fail-closed vulnerability coverage to every shipped/bootstrap/development lock that CI installs. Close or explicitly govern all four alerts and rerun CI/Security. This checkpoint does not make dependency or workflow changes. |
+| High (resolved) | The prior checkpoint identified four High dependency findings and a vulnerability-audit coverage gap. | PR #76 upgraded the affected dependencies, added canonical fail-closed auditing for all four installable locks, and passed focused and required GitHub security checks. |
 | Low | `ReasoningGateway` has grown from the post-M5 724-line checkpoint to 942 lines and now contains two additional cinematic route adapters. The routes remain semantic-only and contain no cinematic recurrence or Lesson transformation rules, but exact validation, provider-view binding, lifecycle, result validation, and terminal-audit mechanics repeat. | Classify `HEALTHY_WITH_PRESSURE`. Do not refactor before M6.5 solely for size. Reassess if M6.5 would add another provider route, if one integrity fix must be repeated, or if route behavior drifts. The smallest future extraction would be a typed semantic-route lifecycle adapter; domain validation and rules must remain outside it. |
 | Low | Lesson Candidates deliberately add a thin semantic layer: a closed, scoped proposition and fixed limitations over one exact Pattern. This is real value because it names a reviewable promotion input, but another restatement layer after M6.5 would be wrapper inflation. | M6.5 should consume the candidate directly and add only admission decision, lifecycle, governed-use eligibility, and exact lineage. Do not add a generic Lesson framework or another intermediate proposal wrapper. |
 | Low | Admitted Knowledge creates reusable eligibility and therefore raises stale-evidence and withdrawal risk beyond inert M6.1-M6.4 artifacts. | M6.5 must fail closed on challenged, disputed, superseded, withdrawn, or unverifiable lineage; preserve historical interpretation separately from current-use eligibility; and test revalidation before reuse. No synchronization service or database is justified. |
@@ -294,21 +293,18 @@ non-semantic.
 
 ### Security readiness
 
-`REMEDIATE_BEFORE_M6_5`. The semantic integrity controls are strong, but the
-repository vulnerability posture is not currently healthy: four open High
-alerts affect locks used by development/bootstrap paths, and current workflow
-coverage can remain green without auditing those locks. Remediation must update
-the affected locks and make vulnerability coverage match the lock files CI
-installs.
-
-After that correction, M6.5 acceptance must adversarially cover forged
-promotion, candidate/Pattern/evidence substitution, outer-hash resealing,
-evidence laundering, duplicate admission, scope or purpose escalation,
-limitation removal, recommendation smuggling, self-promotion by a provider,
+`READY_WITH_NON_BLOCKING_GUARDRAILS`. PR #76 cleared the four High dependency
+findings and made the canonical vulnerability audit cover every installable
+Python lockfile with fail-closed behavior. Current main CI and Security Supply
+Chain workflows are green, and no M6 semantic, Runtime, Gateway, or provider
+changes were introduced. M6.5 must still adversarially cover forged promotion,
+candidate/Pattern/evidence substitution, outer-hash resealing, evidence
+laundering, duplicate admission, scope or purpose escalation, limitation
+removal, recommendation smuggling, self-promotion by a provider,
 policy/approver substitution, stale or revoked evidence reuse, and poisoned
-lineage. Inputs remain hostile inert data. No file access, network, subprocess,
-dynamic import, source execution, arbitrary construction, raw media, or
-external retrieval belongs in the admission path.
+lineage. Inputs remain hostile inert data. No file access, network,
+subprocess, dynamic import, source execution, arbitrary construction, raw
+media, or external retrieval belongs in the admission path.
 
 ## Test and CI health
 
@@ -317,8 +313,9 @@ Classification: `WATCH`.
 Focused M6 coverage (11 M6.1, 15 M6.2, 17 M6.3, and 11 M6.4 tests) exercises
 qualification, exact dispatch, resealing, lineage, provider lifecycle,
 determinism, and concurrency rather than merely accumulating happy paths. The
-complete Python suite has reached 474 tests. CI and Security Supply Chain are
-green on the reviewed main. No flaky result is evidenced, but full local and CI
+complete Python suite has reached 475 tests. CI and Security Supply Chain are
+green on the reviewed main, including the all-lock vulnerability audit. No
+flaky result is evidenced, but full local and CI
 time is material and several domains repeat broad regression runs. Preserve the
 layers and reassess only with measured duration/flakiness data.
 
@@ -394,9 +391,9 @@ and an explicit admission-decision operation over the accepted
    persist through a service/database, generalize across projects, ingest
    external sources, invoke AI/CV, or add another Gateway provider route.
 
-Do not begin this scope until the High supply-chain finding is remediated and
-the resulting main CI/Security checks and alerts confirm a healthy baseline.
-No new ADR is required for this scope. A proposal for automatic admission,
+The supply-chain prerequisite is now satisfied: PR #76 remediated the finding
+and current main CI/Security checks confirm a healthy baseline. No new ADR is
+required for this scope. A proposal for automatic admission,
 cross-project reuse, external/reference evidence, probabilistic promotion, or
 a persistent Knowledge subsystem would exceed this readiness verdict and
 requires its own architecture evidence or decision.
@@ -404,7 +401,7 @@ requires its own architecture evidence or decision.
 ## Validation evidence
 
 - Focused M6 suites: 11 M6.1, 15 M6.2, 17 M6.3, and 11 M6.4 tests passed.
-- Complete Python regression: 474 tests passed across architecture, M3-M6,
+- Complete Python regression: 475 tests passed across architecture, M3-M6,
   Runtime, Context, Gateway, providers, command/public paths, security,
   determinism, and concurrency suites.
 - Bash syntax, ADR/reference validation, Ansible syntax, OpenTofu formatting/
@@ -412,9 +409,8 @@ requires its own architecture evidence or decision.
   runtime-lock `pip-audit`, Python license checks, secret scanning,
   SBOM/provenance, release-artifact/sensitive-content validation, and
   `git diff --check` passed.
-- Independent Dependabot review found four open High alerts outside the
-  runtime lock and exposed the blocking vulnerability-coverage gap documented
-  above.
+- The merged security remediation verified all four installable lockfiles with
+  the canonical vulnerability audit; no High/Critical findings remain.
 - Container/IaC scanning and CodeQL remain workflow-owned gates and must pass on
   the checkpoint pull request before review completion.
 - There is no public cinematic CLI execution route to exercise; existing
@@ -426,12 +422,13 @@ requires its own architecture evidence or decision.
 - PR #72 merged as `b7d064dd766163630929ad74c35951655d536599`.
 - PR #73 merged as `5625f84dc827ff3ba4ab0557a2444f45f43cf4a0`.
 - PR #74 merged as `0b94e837eceb9b4d533739699070fe86050a4e97`.
+- PR #76 merged as `cdd9a4cdfb41249c6b72be10676a699c1370d86a`, remediating the
+  M6 checkpoint supply-chain blocker without semantic changes.
 - ADR-0010 through ADR-0024 are `Accepted`.
 - ADRL-002 remains `WAIT_FOR_EVIDENCE`.
-- Main CI, ADR Validation, Ansible Validation, Security Supply Chain, and the
-  current Dependabot workflow completed successfully at the checkpoint, but
-  workflow success is insufficient security evidence because four High
-  Dependabot alerts remain open in development/bootstrap locks.
+- Main CI, ADR Validation, Ansible Validation, Security Supply Chain,
+  Dependency Graph, and Dependabot workflows completed successfully on the
+  reviewed main. The all-lock vulnerability audit reports no known findings.
 - `.local/secrets/development.auto.tfvars.example` was neither inspected nor
   modified; it remains an unrelated untracked path and is excluded from this
   checkpoint.
