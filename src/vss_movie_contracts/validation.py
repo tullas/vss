@@ -135,6 +135,21 @@ def validate_production_option_set(value, registry=None):
 def validate_production_option_set_v2(value, *, context=None, registry=None):
     result = _validate(value, "scene_production_option_set/2", registry or MovieContractRegistry.built_in(), MAX_RESULT_BYTES)
     data = thaw_json(result.value)
+    # Verify every v2 seal over the supplied representation before projecting
+    # any common fields into the v1 validator.  v2-only influence/lineage data
+    # is part of the semantic result and cannot be stripped before checking.
+    if data["integrity"]["payload_sha256"] != canonical_digest(data["payload"]):
+        raise MovieContractError("production v2 payload digest mismatch")
+    if data["payload"]["semantic_result_digest"] != canonical_digest({**data["payload"], "semantic_result_digest": None}):
+        raise MovieContractError("production v2 semantic result digest mismatch")
+    for option in data["payload"]["options"]:
+        material = dict(option)
+        supplied = material.pop("option_content_digest")
+        material.pop("option_id", None)
+        if supplied != canonical_digest(material):
+            raise MovieContractError("production v2 option content digest mismatch")
+    if data["integrity"]["complete_result_sha256"] != canonical_digest({**data, "integrity": {"payload_sha256": data["integrity"]["payload_sha256"]}}):
+        raise MovieContractError("production v2 complete result digest mismatch")
     if data.get("strategy_identity") != "vss.generate-scene-production-options.deterministic" or data.get("strategy_version") != "1.0.0" or data.get("provider_identity") != "vss.reasoning.deterministic-scene-production-options" or data.get("provider_version") != "1.0.0":
         raise MovieContractError("production v2 implementation identity is invalid")
     if context is not None:
@@ -166,7 +181,8 @@ def validate_production_option_set_v2(value, *, context=None, registry=None):
                 raise MovieContractError("Knowledge influence does not match Context")
             if not expected_ids and influence is not None:
                 raise MovieContractError("unexpected Knowledge influence")
-    # Re-run the accepted v1 result validator against the immutable common payload.
+    # Re-run the accepted v1 result validator against an immutable common
+    # projection only after the complete v2 representation has been sealed.
     base = dict(data); base.pop("knowledge_bindings", None); base["schema_version"] = "1"; base["result_version"] = "1"; base["context_version"] = "1"; base["policy_version"] = "1"; base["strategy_version"] = "1.0.0"; base["provider_version"] = "1.0.0"; base["context_content_digest"] = data["context_content_digest"]
     base_payload = dict(base["payload"]); base_payload["options"] = []
     for option in data["payload"]["options"]:

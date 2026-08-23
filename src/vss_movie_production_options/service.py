@@ -160,6 +160,15 @@ def validate_production_options_context_v2(value: Any, *, registry: ContextContr
     errors = list(reg.iter_errors("vss.scene_production_options_context/2", value["payload"]))
     if errors: raise ValueError("production Context v2 schema is invalid")
     payload = value["payload"]
+    # Verify the caller-supplied v2 seals before projecting to the accepted v1
+    # common Context.  Never normalize/reseal hostile content on its behalf.
+    if value["context_content_digest"] != canonical_digest(payload):
+        raise ValueError("production Context v2 content digest mismatch")
+    supplied_integrity = value["integrity"]
+    complete_material = dict(value)
+    complete_material["integrity"] = {}
+    if supplied_integrity["complete_context_sha256"] != canonical_digest(complete_material):
+        raise ValueError("production Context v2 integrity mismatch")
     if len(payload["knowledge_bindings"]) > MAX_KNOWLEDGE_BINDINGS:
         raise ValueError("Knowledge binding bound exceeded")
     base = dict(value); base_payload = dict(payload); bindings = base_payload.pop("knowledge_bindings")
@@ -168,11 +177,16 @@ def validate_production_options_context_v2(value: Any, *, registry: ContextContr
     base["payload"] = base_payload; base["integrity"] = {"complete_context_sha256":"0"*64}; base["integrity"]["complete_context_sha256"] = canonical_digest({**base, "integrity": {}})
     base_context = validate_production_options_context(base, registry=reg)
     when = validation_time or value.get("constructed_at")
+    if _ts(when) >= _ts(value["expires_at"]):
+        raise ValueError("production Context v2 is expired")
     normalized = [_knowledge_binding(item, project_id=value["project_id"], classification=value["classification"], validation_time=when) for item in bindings]
     ids = [item["knowledge"]["knowledge_id"] for item in normalized]
     if len(ids) != len(set(ids)): raise ValueError("duplicate Knowledge binding")
     out = dict(value); out["payload"] = dict(payload); out["payload"]["knowledge_bindings"] = normalized
-    out["context_content_digest"] = canonical_digest(out["payload"]); out["integrity"] = {"complete_context_sha256":"0"*64}; out["integrity"]["complete_context_sha256"] = canonical_digest({**out, "integrity": {}})
+    if canonical_digest(out["payload"]) != value["context_content_digest"]:
+        raise ValueError("production Context v2 binding normalization changed sealed content")
+    out["context_content_digest"] = value["context_content_digest"]
+    out["integrity"] = dict(value["integrity"])
     # Preserve the immutable Context artifact shape while retaining the v2 value.
     return SceneProductionOptionsContext.create(out)
 

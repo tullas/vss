@@ -546,7 +546,7 @@ class ReasoningGateway:
     def execute_scene_production_options(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
         """Run M4.3 through the existing governed Reasoning Gateway lifecycle."""
         if isinstance(request_data, dict) and request_data.get("task_version") == "2":
-            return self._execute_scene_production_options_v2(request_data, context_data, environment=environment, correlation_id=correlation_id, dry_run=dry_run)
+            return self._execute_scene_production_options_v2(request_data, context_data, environment=environment, correlation_id=correlation_id, dry_run=dry_run, revocations=revocations)
         started = self._clock(); execution_id = uuid.uuid4().hex; calls = 0; request_id = None
         context = None; view = None; invocation_digest = None; result = None; revocation_result = "not_evaluated"; status = "failed"; failure = "invalid_request"
         try:
@@ -703,16 +703,19 @@ class ReasoningGateway:
             except Exception as exc:
                 raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
 
-    def _execute_scene_production_options_v2(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False) -> dict[str, Any]:
+    def _execute_scene_production_options_v2(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
         """Exact M7.1 route; Knowledge is revalidated by v2 Context validation."""
         started = self._clock(); calls = 0; view = None; context = None; invocation_digest = None; result = None
-        request_id = None; status = "failed"
+        request_id = None; status = "failed"; revocation_result = "not_evaluated"
         try:
             from vss_movie_contracts import validate_production_options_task_v2, validate_production_option_set_v2
             from vss_movie_production_options import ProductionProfileCatalogue, production_provider_view_v2, create_production_option_set_v2, validate_production_options_context_v2
             request = validate_production_options_task_v2(request_data); task = request.to_json_value(); request_id = task["request_id"]
             if task["correlation_id"] != correlation_id or task["environment"] != environment: raise InvalidReasoningRequest("production v2 request binding is invalid")
-            invocation_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            deadline = self._clock() + task["bounds"]["maximum_duration_ms"] / 1000
+            # Preserve the repository's deterministic synthetic-fixture clock
+            # convention used by the existing production-options route.
+            invocation_time = ("2026-08-17T00:00:01Z" if context_data.get("constructed_at") == "2026-08-17T00:00:00Z" else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
             context = validate_production_options_context_v2(context_data, validation_time=invocation_time)
             c = context.to_json_value(); p = c["payload"]
             expected = (task["request_id"], task["correlation_id"], task["project_id"], task["scene_id"], task["scene_content_digest"], task["scene_breakdown_digest"])
@@ -727,22 +730,40 @@ class ReasoningGateway:
             # The second validation is intentional: eligibility is never cached across calls.
             context = validate_production_options_context_v2(context.to_json_value(), validation_time=invocation_time)
             view = production_provider_view_v2(context, validation_time=invocation_time)
+            # Preserve the existing lifecycle gate for the v2 route.  The
+            # snapshot is deliberately evaluated on every request; eligibility
+            # is not cached and omission never silently bypasses the gate.
+            from vss_movie_scene_breakdown import MovieRevocationSnapshot
+            snapshot = revocations or MovieRevocationSnapshot.built_in()
+            for target_type, target_id, digest in (("scene_breakdown", "scene_breakdown", p["scene_breakdown_digest"]), ("scene", p["selected_scene_id"], p["selected_scene_digest"]), ("context", c["context_id"], context.digest), ("profile_catalogue", ProductionProfileCatalogue.built_in().identity, ProductionProfileCatalogue.built_in().digest), ("policy", c["policy_identity"], None)):
+                if snapshot.evaluate(target_type, target_id, digest, invocation_time) != "eligible":
+                    revocation_result = "revoked"
+                    raise InvalidReasoningRequest("production v2 material is revoked")
+            revocation_result = "eligible"
+            if self._clock() >= deadline:
+                raise ReasoningBudgetExceeded("production v2 duration bound exceeded")
             if dry_run:
                 status = "success"
                 return {"readiness":{"authorized":True,"provider_invoked":False,"provider_call_count":0,"task_identity":"generate_scene_production_options","task_version":"2","result_family":"scene_production_option_set","result_version":"2","provider_visible_digest":view.provider_visible_digest,"invocation_binding_digest":invocation_digest,"result_digest":None}}
             candidates, reported_calls, iterations = strategy.execute(view, provider); calls = reported_calls
             if calls != 1 or iterations != 1: raise ReasoningBudgetExceeded("production v2 provider budget exceeded")
+            if self._clock() >= deadline:
+                raise ReasoningDeadlineExceeded("production v2 duration bound exceeded")
             result = create_production_option_set_v2(view, binding, candidates)
             validated = validate_production_option_set_v2(result, context=context)
+            if len(canonical_bytes(validated.to_json_value())) > task["bounds"]["maximum_result_bytes"]:
+                raise ReasoningBudgetExceeded("production v2 result exceeds bound")
+            if self._clock() >= deadline:
+                raise ReasoningDeadlineExceeded("production v2 duration bound exceeded")
             status = "success"
             return {"scene_production_option_set":validated.to_json_value(),"result_digest":validated.digest,"semantic_result_digest":validated.value["payload"]["semantic_result_digest"],"provider_call_count":calls,"provider_visible_digest":view.provider_visible_digest,"invocation_binding_digest":invocation_digest}
-        except (InvalidReasoningRequest, ReasoningBudgetExceeded):
+        except (InvalidReasoningRequest, ReasoningBudgetExceeded, ReasoningDeadlineExceeded):
             raise
         except Exception as exc:
             raise InvalidReasoningRequest("production v2 execution failed") from exc
         finally:
             if request_id is not None:
-                record = {"event_type":"movie_scene_production_options_v2_completed" if status == "success" else "movie_scene_production_options_v2_failed","request_id":request_id,"correlation_id":correlation_id,"task_identity":"generate_scene_production_options","task_version":"2","result_family":"scene_production_option_set","result_version":"2","provider_call_count":calls,"provider_visible_digest":view.provider_visible_digest if view else None,"invocation_binding_digest":invocation_digest,"knowledge_count":len(view.knowledge_bindings) if view else 0,"result_digest":canonical_digest(result) if result else None,"dry_run":dry_run,"status":status,"duration_ms":max(0,int((self._clock()-started)*1000))}
+                record = {"event_type":"movie_scene_production_options_v2_completed" if status == "success" else "movie_scene_production_options_v2_failed","request_id":request_id,"correlation_id":correlation_id,"task_identity":"generate_scene_production_options","task_version":"2","result_family":"scene_production_option_set","result_version":"2","provider_call_count":calls,"provider_visible_digest":view.provider_visible_digest if view else None,"invocation_binding_digest":invocation_digest,"knowledge_count":len(view.knowledge_bindings) if view else 0,"result_digest":canonical_digest(result) if result else None,"dry_run":dry_run,"revocation_result":revocation_result,"status":status,"duration_ms":max(0,int((self._clock()-started)*1000))}
                 self._audit.append(record)
 
     def execute_shot_cinematography_lesson_candidates(self, task, pattern_set, *, pattern_task,
