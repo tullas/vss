@@ -143,7 +143,8 @@ architecture; do not present conceptual ADR material as implemented capability.
 Current product direction prioritizes demonstrable movie-production value. M8.0 / POC-1
 establishes story → scene breakdown → production options → human review → accepted review
 decision → deterministic shot-plan draft → provider-neutral storyboard specification → explicit
-Runtime-authorized deterministic local SVG review render. Rendered output remains development
+Runtime-authorized deterministic local SVG review render → explicit one-frame local pictorial
+PNG review candidate. Rendered output remains development
 review media and grants no production, asset, publication, workflow, or autonomous authority.
 
 The canonical local entry point for that complete path is `vss movie demo`; keep

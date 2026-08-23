@@ -478,3 +478,20 @@ relative metadata and closed false authority fields; it is development review
 media, never an approved asset. This trusted-local Python boundary does not
 claim resistance to an attacker racing filesystem mutations between validation
 and publication.
+
+## M8.2 one-frame pictorial effect threats
+
+The public adapter reconstructs the full authoritative chain before creating an
+opaque immutable in-process admission. Only one exact frame projection reaches the
+separate pictorial provider; upstream review, story, and Knowledge content are not
+forwarded. Runtime enforces development-only explicit invocation, exact provider and
+implementation identity, one call, and only `provider_access` plus `filesystem_write`.
+
+The local provider has no network, credentials, subprocess, model, or GPU. Its PNG
+result is bounded and checked for signature, chunk order, CRC, fixed RGB dimensions,
+compression bounds, filters, trailing data, digest consistency, and disallowed
+metadata. The fixed content-addressed publisher rejects canonical root escapes,
+symlink or special-file components, multiply-linked existing destinations, and
+conflicting bytes; audit precedes create-only atomic publication. These trusted-local
+checks do not claim resistance to an attacker racing filesystem mutations between
+validation and publication. The PNG and response remain non-production review media.

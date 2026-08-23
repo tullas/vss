@@ -10,6 +10,7 @@ from vss_providers.contracts import ClockProvider
 class ProviderAccessor(Protocol):
     def get_clock(self) -> ClockProvider: ...
     def get_storyboard_renderer(self) -> Any: ...
+    def get_pictorial_frame_generator(self) -> Any: ...
 
 
 class HostInspectionAccessor(Protocol):
@@ -18,6 +19,10 @@ class HostInspectionAccessor(Protocol):
 
 class ArtifactPublisherAccessor(Protocol):
     def stage(self, digest: str, content: bytes) -> str: ...
+
+
+class PictorialArtifactPublisherAccessor(Protocol):
+    def stage(self, storyboard_digest: str, frame_id: str, content_digest: str, content: bytes) -> str: ...
 
 
 def _freeze(value: Any) -> Any:
@@ -45,6 +50,7 @@ class CapabilityExecutionContext:
     providers: ProviderAccessor | None = None
     host_inspection: HostInspectionAccessor | None = None
     artifact_publisher: ArtifactPublisherAccessor | None = None
+    pictorial_artifact_publisher: PictorialArtifactPublisherAccessor | None = None
     admitted_request: object | None = None
 
     def __post_init__(self) -> None:
