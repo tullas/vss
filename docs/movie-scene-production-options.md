@@ -146,3 +146,37 @@ workflow activation, capability grant, provider execution authority, or
 Runtime execution authority. It does not establish feasibility and performs
 no media generation, external model call, storage, orchestration, or Runtime
 operation.
+
+## M8.0 provider-neutral storyboard specifications
+
+`create_scene_storyboard_specification/1` consumes the exact accepted review
+decision, review packet, production option set, scene breakdown, and validated
+`scene_shot_plan_draft/1`. Admission reconstructs the complete upstream chain,
+including the selected option and inherited informational Knowledge lineage.
+`scene_storyboard_specification/1` contains exactly one deterministically ordered
+frame specification for each shot card.
+
+Each frame carries its source shot identity and digest, supported subject, action,
+environment, and time cues, qualified framing and camera fields, accepted-option
+style direction, continuity constraints, explicit assumptions and unknowns, a
+provider-neutral prompt, negative constraints, and its own semantic digest. Literal
+time cues use only a closed set found in validated source observations when the
+scene contract has no declared time indicator. Other missing facts remain explicit
+unknowns; the derivation does not invent appearance, blocking, lens, palette, set
+dressing, weather, or architecture.
+
+The artifact is `specification_only`. It grants no production approval, final frame
+selection, scheduling, workflow activation, capability, provider execution,
+Runtime execution, or media-generation authority. The built-in deterministic
+provider is an internal governed transformation only; no external image provider
+is configured or called. Dry-run validates the authoritative chain with zero
+provider calls.
+
+```text
+vss movie create-storyboard-specification --decision <decision-v1.json> --review-packet <review-packet-v1.json> --option-set <option-set-v2.json> --scene-breakdown <scene-breakdown-v1.json> --shot-plan <shot-plan-v1.json> --request-id <request-id> --environment development --correlation-id <correlation-id>
+vss movie demo --story tests/fixtures/movie/story-fragment-valid.json --reviewer-id local.reviewer --storyboard-specification
+```
+
+Add `--dry-run` to the standalone command for readiness only. Without
+`--storyboard-specification`, the demo retains its M7.4 behavior and stops after
+the shot-plan draft.

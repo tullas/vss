@@ -1,4 +1,4 @@
-"""Local interactive demo for the existing story-to-shot-plan pipeline."""
+"""Local interactive demo for the story-to-shot-plan and optional storyboard pipeline."""
 
 from .service import DemoPrepared, finish_demo, prepare_demo
 

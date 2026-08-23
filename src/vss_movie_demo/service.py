@@ -78,7 +78,7 @@ def prepare_demo(story_data: dict[str, Any], *, correlation_id: str) -> DemoPrep
 
 
 def finish_demo(prepared: DemoPrepared, *, option_id: str, reviewer_id: str,
-                rationale: str, correlation_id: str) -> dict[str, Any]:
+                rationale: str, correlation_id: str, include_storyboard: bool = False) -> dict[str, Any]:
     """Record an accepted human review choice and create the real deterministic draft."""
     decision = record_option_review_decision(
         prepared.review_packet, prepared.option_set, option_id=option_id,
@@ -91,7 +91,7 @@ def finish_demo(prepared: DemoPrepared, *, option_id: str, reviewer_id: str,
         request_id=f"{correlation_id}-shot-plan", environment="development",
         correlation_id=correlation_id,
     )["scene_shot_plan_draft"]
-    return {
+    result = {
         "selected_option_id": option_id,
         "scene_breakdown": prepared.scene_breakdown,
         "scene_production_option_set": prepared.option_set,
@@ -99,3 +99,10 @@ def finish_demo(prepared: DemoPrepared, *, option_id: str, reviewer_id: str,
         "review_decision": decision,
         "scene_shot_plan_draft": draft,
     }
+    if include_storyboard:
+        result["scene_storyboard_specification"] = ReasoningGateway.built_in().execute_scene_storyboard_specification(
+            decision, prepared.review_packet, prepared.option_set, prepared.scene_breakdown, draft,
+            request_id=f"{correlation_id}-storyboard", environment="development",
+            correlation_id=correlation_id,
+        )["scene_storyboard_specification"]
+    return result

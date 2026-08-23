@@ -415,6 +415,88 @@ def validate_scene_shot_plan_draft(value, *, task, decision, packet, option_set,
         raise MovieContractError("shot-plan does not match authoritative upstream artifacts")
     return result
 
+def validate_scene_storyboard_task(value, *, decision, packet, option_set, breakdown, shot_plan, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "create_scene_storyboard_specification/1", registry, MAX_STORY_BYTES)
+    registry.resolve_result("create_scene_storyboard_specification/1", "scene_storyboard_specification/1")
+    _require_digest(result.value, "task_content_digest", "scene storyboard task")
+    required = (
+        isinstance(decision, ValidatedMovieArtifact), isinstance(packet, ValidatedMovieArtifact),
+        isinstance(option_set, ValidatedMovieArtifact), isinstance(breakdown, ValidatedMovieArtifact),
+        isinstance(shot_plan, ValidatedMovieArtifact),
+    )
+    if not all(required):
+        raise MovieContractError("storyboard task requires independently validated upstream artifacts")
+    # Reconstruct the shot-plan admission chain; validated wrappers are not authority tokens.
+    from vss_movie_shot_plan import admit_shot_plan_inputs
+    shot_task, checked_decision, checked_packet, checked_options, checked_breakdown, _ = admit_shot_plan_inputs(
+        decision.to_json_value(), packet.to_json_value(), option_set.to_json_value(), breakdown.to_json_value(),
+        request_id=shot_plan.value["request_id"], correlation_id=shot_plan.value["correlation_id"],
+        environment="development",
+    )
+    checked_shot_plan = validate_scene_shot_plan_draft(
+        shot_plan.to_json_value(), task=shot_task, decision=checked_decision, packet=checked_packet,
+        option_set=checked_options, breakdown=checked_breakdown, registry=registry,
+    )
+    selected = checked_decision.value["payload"]["decisions"][0]
+    expected = (
+        checked_decision.value["project_id"], checked_decision.value["scene_id"], checked_decision.digest,
+        checked_decision.value["integrity"]["complete_result_sha256"],
+        checked_packet.value["payload"]["review_packet_digest"], checked_packet.value["integrity"]["complete_result_sha256"],
+        checked_options.digest, checked_options.value["integrity"]["complete_result_sha256"],
+        selected["option_id"], selected["option_content_digest"], checked_breakdown.digest,
+        checked_breakdown.value["integrity"]["payload_sha256"], checked_shot_plan.digest,
+        checked_shot_plan.value["integrity"]["complete_result_sha256"],
+        checked_shot_plan.value["payload"]["shot_plan_digest"],
+    )
+    keys = ("project_id", "scene_id", "decision_digest", "decision_complete_digest",
+            "review_packet_digest", "review_packet_complete_digest", "option_set_digest",
+            "option_set_complete_digest", "selected_option_id", "selected_option_content_digest",
+            "scene_breakdown_digest", "scene_breakdown_payload_digest", "shot_plan_digest",
+            "shot_plan_complete_digest", "shot_plan_semantic_digest")
+    if tuple(result.value[k] for k in keys) != expected:
+        raise MovieContractError("storyboard task authoritative binding mismatch")
+    return result
+
+def validate_scene_storyboard_specification(value, *, task, decision, packet, option_set,
+                                            breakdown, shot_plan, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "scene_storyboard_specification/1", registry, MAX_RESULT_BYTES * 2)
+    validate_scene_storyboard_task(
+        task.to_json_value() if isinstance(task, ValidatedMovieArtifact) else task,
+        decision=decision, packet=packet, option_set=option_set, breakdown=breakdown,
+        shot_plan=shot_plan, registry=registry,
+    )
+    keys = ("request_id", "correlation_id", "project_id", "scene_id", "decision_digest",
+            "decision_complete_digest", "review_packet_digest", "review_packet_complete_digest",
+            "option_set_digest", "option_set_complete_digest", "selected_option_id",
+            "selected_option_content_digest", "scene_breakdown_digest", "scene_breakdown_payload_digest",
+            "shot_plan_digest", "shot_plan_complete_digest", "shot_plan_semantic_digest")
+    if tuple(result.value[k] for k in keys) != tuple(task.value[k] for k in keys):
+        raise MovieContractError("storyboard result binding mismatch")
+    payload = result.value["payload"]
+    for ordinal, frame in enumerate(payload["ordered_frames"], 1):
+        raw = thaw_json(frame); supplied = raw.pop("frame_specification_digest")
+        if supplied != canonical_digest(raw) or frame["source_ordinal"] != ordinal:
+            raise MovieContractError("storyboard frame integrity or order mismatch")
+    if len({f["frame_id"] for f in payload["ordered_frames"]}) != len(payload["ordered_frames"]):
+        raise MovieContractError("duplicate storyboard frame identity")
+    if payload["storyboard_specification_digest"] != canonical_digest({**thaw_json(payload), "storyboard_specification_digest": None}):
+        raise MovieContractError("storyboard semantic digest mismatch")
+    if result.value["integrity"]["payload_sha256"] != canonical_digest(payload):
+        raise MovieContractError("storyboard payload digest mismatch")
+    expected_complete = canonical_digest({**thaw_json(result.value), "integrity": {"payload_sha256": result.value["integrity"]["payload_sha256"]}})
+    if result.value["integrity"]["complete_result_sha256"] != expected_complete:
+        raise MovieContractError("storyboard complete digest mismatch")
+    from vss_movie_storyboard import expected_storyboard_payload, storyboard_provider_view
+    scenes = [s for s in breakdown.value["payload"]["ordered_scenes"] if s["scene_id"] == task.value["scene_id"]]
+    if len(scenes) != 1:
+        raise MovieContractError("storyboard source scene missing")
+    view = storyboard_provider_view(task, option_set, scenes[0], shot_plan)
+    if thaw_json(payload) != expected_storyboard_payload(view):
+        raise MovieContractError("storyboard does not match authoritative upstream artifacts")
+    return result
+
 def validate_character_reference(value, registry=None):
     result = _validate(value, "character_reference/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
     _require_digest(result.value, "content_digest", "character reference")

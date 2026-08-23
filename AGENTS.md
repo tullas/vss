@@ -140,9 +140,9 @@ architecture; do not present conceptual ADR material as implemented capability.
 
 ## POC priority
 
-Current product direction prioritizes demonstrable movie-production value. M7.4 / POC-1
+Current product direction prioritizes demonstrable movie-production value. M8.0 / POC-1
 establishes story → scene breakdown → production options → human review → accepted review
-decision → deterministic shot-plan draft.
+decision → deterministic shot-plan draft → provider-neutral storyboard specification.
 
 The canonical local entry point for that complete path is `vss movie demo`; keep
 it backed by the real stage services rather than fixture-only or parallel demo logic.
