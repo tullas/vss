@@ -153,6 +153,11 @@ it backed by the real stage services rather than fixture-only or parallel demo l
 Prefer extending this executable path toward tangible user-visible outputs
 over governance layers that do not improve demonstrability.
 
+Before a multi-candidate or paid creative run, inspect the first human-visible candidate for
+narrative relationship/action legibility, absence of control-plane text, preserved deliberate
+ambiguity, bounded artistic interpretation, and canonical contradictions; record a human
+`USE`, `REGENERATE`, or `REJECT` disposition before continuing.
+
 ## AGENTS.md maintenance
 
 At the end of each milestone, review whether `AGENTS.md` needs updating.
