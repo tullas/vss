@@ -452,3 +452,29 @@ closed while preserving historical artifacts. This prevents stale Knowledge,
 evidence laundering, scope escalation, duplicate admission, and lifecycle
 resealing from becoming current input. No persistence service, Runtime authority,
 or Knowledge promotion workflow is introduced.
+
+## M8.1 local storyboard render effect threats
+
+The public adapter reconstructs the complete accepted M7/M8 chain and admits
+only an opaque immutable in-process projection; direct minimized JSON cannot
+invoke the Runtime capability. Runtime policy separately authorizes the exact
+capability permissions and trusted built-in provider identity, version, API,
+and implementation identity. Review acceptance, storyboard resealing, and
+provider success therefore cannot be laundered into execution or production
+authority.
+
+The SVG provider has no network, credentials, subprocess, GPU, model, script,
+external reference, or caller-selected parameter. Its bounded result is checked
+for type, dimensions, digest, exact frame bindings, parseable XML, active SVG
+elements, event attributes, URL references, and size. Source text is escaped.
+
+Runtime alone receives the fixed-root publisher. Initial canonical repository
+containment, fixed-parent and destination symlink rejection,
+and special-file rejection, restrictive permissions, atomic publication,
+idempotent identical content, conflicting-content rejection, cancellation of
+late staging, and temporary cleanup address escape, overwrite, and partial-file
+attacks. Audit failure occurs before publication. The result contains only safe
+relative metadata and closed false authority fields; it is development review
+media, never an approved asset. This trusted-local Python boundary does not
+claim resistance to an attacker racing filesystem mutations between validation
+and publication.

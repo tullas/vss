@@ -180,3 +180,31 @@ vss movie demo --story tests/fixtures/movie/story-fragment-valid.json --reviewer
 Add `--dry-run` to the standalone command for readiness only. Without
 `--storyboard-specification`, the demo retains its M7.4 behavior and stops after
 the shot-plan draft.
+
+## M8.1 governed deterministic local storyboard rendering
+
+`movie.render-storyboard` independently reconstructs the complete accepted
+review, option, scene, shot-plan, storyboard, semantic-digest, and Knowledge
+lineage before admitting a minimized immutable request to Runtime. Runtime
+authorizes the repository-owned `movie.storyboard-render` capability's exact
+`provider_access` and `filesystem_write` permissions and statically selects the
+built-in `movie.storyboard-render.local/1.0.0` provider.
+
+The standard-library provider produces a deterministic 1200×1500 SVG review
+sheet with three ordered schematic panels. Runtime atomically publishes it at
+`.local/movie/storyboards/<storyboard-specification-digest>/storyboard.svg`.
+Callers cannot supply a path. Identical content is idempotent; conflicts,
+symlinks, escapes, and special destinations fail closed.
+
+```console
+vss movie render-storyboard --decision <decision.json> --review-packet <packet.json> --option-set <options.json> --scene-breakdown <breakdown.json> --shot-plan <shot-plan.json> --storyboard <storyboard.json> --environment development --correlation-id <correlation-id>
+vss movie demo --story tests/fixtures/movie/story-fragment-valid.json --reviewer-id local.reviewer --render-storyboard
+```
+
+The demo flag implies storyboard specification generation and uses the same
+public adapter and Runtime capability. Dry-run performs admission and policy
+checks but calls no render provider and writes no media. The output is only
+`development_review_media`: not pictorial AI generation, production approval,
+asset admission, final selection, publication, scheduling, workflow activation,
+or autonomous authority. External providers, raster output, production
+rendering, asset catalogs, revisions, queues, and workers remain unimplemented.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Mapping, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,3 +18,24 @@ class ClockProvider(Protocol):
     def now_utc(self) -> UtcTimestamp: ...
 
     def monotonic_time(self) -> MonotonicReading: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StoryboardRenderRequest:
+    project_id: str
+    scene_id: str
+    storyboard_specification_digest: str
+    frames: tuple[Mapping[str, Any], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedMedia:
+    media_type: str
+    content: bytes
+    width: int
+    height: int
+    content_sha256: str
+
+
+class StoryboardRenderProvider(Protocol):
+    def render(self, request: StoryboardRenderRequest) -> GeneratedMedia: ...

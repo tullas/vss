@@ -1,0 +1,60 @@
+schema_version: "1"
+namespace: movie
+name: storyboard-render
+version: 1.0.0
+description: Render an admitted storyboard specification as deterministic local development review media.
+runtime_api_version: "1"
+sdk_api_version: "1"
+required_providers:
+  - type: storyboard_render
+    identity: movie.storyboard-render.local
+    api_version: "1"
+entry_point: handler.py:execute
+commands:
+  - name: movie.storyboard-render
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [admission_id]
+      properties:
+        admission_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [review_media_status, artifact_path, media_type, content_sha256, storyboard_specification_digest, frame_bindings, authority_boundary]
+      properties:
+        review_media_status: {enum: [development_review_media, validation_only]}
+        artifact_path: {type: [string, "null"], pattern: "^\\.local/movie/storyboards/[0-9a-f]{64}/storyboard\\.svg$"}
+        media_type: {type: [string, "null"], enum: [image/svg+xml, null]}
+        content_sha256: {type: [string, "null"], pattern: "^[0-9a-f]{64}$"}
+        storyboard_specification_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        frame_bindings:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required: [frame_id, frame_specification_digest]
+            properties:
+              frame_id: {type: string, pattern: "^frame-[0-9a-f]{24}$"}
+              frame_specification_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        authority_boundary:
+          type: object
+          additionalProperties: false
+          required: [production_approval, production_asset_admission, final_selection, publication_authority, scheduling_authority, workflow_authority, autonomous_authority]
+          properties:
+            production_approval: {const: false}
+            production_asset_admission: {const: false}
+            final_selection: {const: false}
+            publication_authority: {const: false}
+            scheduling_authority: {const: false}
+            workflow_authority: {const: false}
+            autonomous_authority: {const: false}
+    supports_dry_run: true
+permissions:
+  - provider_access
+  - filesystem_write
+compatibility:
+  python: ">=3.11,<3.15"
+lifecycle_status: active
