@@ -8,7 +8,7 @@
   "locks": {
     "requirements/locks/bootstrap-py311.lock.txt": "b5fe905842e10b8848747815c6346b5c4201bc7b6799d146d2a93ae5e6e6d299",
     "requirements/locks/bootstrap-py312.lock.txt": "a35d30fae49aa233f1285100fbf0009890f182b2e2e01fcc1fe53e369c6c943a",
-    "requirements/locks/development.lock.txt": "8aa2c46d4be63909a97dad868898893ffbf14e36301fccfcd310fac032c80d80",
+    "requirements/locks/development.lock.txt": "dae609a3be6d5e391eed4fb06689ae2518379f37fae8fc72e3b4c4a80fad7634",
     "requirements/locks/runtime.lock.txt": "086f6c8339ba9d59282336559c763a9179309487e13725f5d18adb778a727ba4"
   },
   "policy_files": {
