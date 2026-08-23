@@ -74,6 +74,10 @@ Do not weaken existing Gateway routes while adding a new one.
 Use Runtime for effectful or governed capability execution. Do not route inert deterministic
 transformations through it for symmetry. Runtime remains the execution authority.
 
+For external execution, run cheap closed readiness checks before irreversible attempt reservation.
+Preflight must not call providers or expose secrets; reserve immediately before credentialed transport.
+Before retrying a failure, assess whether a deterministic preflight or invariant can prevent recurrence.
+
 ## Tests
 
 Every meaningful milestone requires automated tests. Use
@@ -93,6 +97,9 @@ isolated discovery across every test directory.
 ## Required validation
 
 For substantial changes, run as applicable:
+
+`./scripts/validate-change.sh tests/<domain> ...` runs focused repository validation; omit test
+directories for canonical isolated discovery across every Python test directory.
 
 - Canonical per-directory Python tests, focused regressions, and compilation.
 - Recursive strict-schema inspection and `git diff --check`.

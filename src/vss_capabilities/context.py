@@ -25,6 +25,15 @@ class PictorialArtifactPublisherAccessor(Protocol):
     def stage(self, storyboard_digest: str, frame_id: str, content_digest: str, content: bytes) -> str: ...
 
 
+class CreativeSmokeAccessor(Protocol):
+    def prepare(self, request: Any) -> str: ...
+    def generate(self, request: Any, *, timeout_seconds: float = 120.0) -> Any: ...
+
+
+class CreativeSmokeArtifactPublisherAccessor(Protocol):
+    def stage(self, admitted: Any, result: Any, attempt_id: str) -> Mapping[str, str]: ...
+
+
 def _freeze(value: Any) -> Any:
     if isinstance(value, dict):
         return MappingProxyType({key: _freeze(item) for key, item in value.items()})
@@ -51,6 +60,8 @@ class CapabilityExecutionContext:
     host_inspection: HostInspectionAccessor | None = None
     artifact_publisher: ArtifactPublisherAccessor | None = None
     pictorial_artifact_publisher: PictorialArtifactPublisherAccessor | None = None
+    creative_smoke_access: CreativeSmokeAccessor | None = None
+    creative_smoke_artifact_publisher: CreativeSmokeArtifactPublisherAccessor | None = None
     admitted_request: object | None = None
 
     def __post_init__(self) -> None:
