@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vss.movie.scene_shot_plan_draft/1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "result_family", "result_version", "request_id", "correlation_id", "project_id", "scene_id", "decision_digest", "decision_complete_digest", "review_packet_digest", "review_packet_complete_digest", "option_set_digest", "option_set_complete_digest", "selected_option_id", "selected_option_content_digest", "scene_breakdown_digest", "scene_breakdown_payload_digest", "payload", "integrity"],
+  "properties": {
+    "schema_version": {"const": "1"}, "result_family": {"const": "scene_shot_plan_draft"}, "result_version": {"const": "1"},
+    "request_id": {"$ref": "#/$defs/id"}, "correlation_id": {"$ref": "#/$defs/id"}, "project_id": {"$ref": "#/$defs/id"}, "scene_id": {"$ref": "#/$defs/id"},
+    "decision_digest": {"$ref": "#/$defs/digest"}, "decision_complete_digest": {"$ref": "#/$defs/digest"},
+    "review_packet_digest": {"$ref": "#/$defs/digest"}, "review_packet_complete_digest": {"$ref": "#/$defs/digest"},
+    "option_set_digest": {"$ref": "#/$defs/digest"}, "option_set_complete_digest": {"$ref": "#/$defs/digest"},
+    "selected_option_id": {"$ref": "#/$defs/id"}, "selected_option_content_digest": {"$ref": "#/$defs/digest"},
+    "scene_breakdown_digest": {"$ref": "#/$defs/digest"}, "scene_breakdown_payload_digest": {"$ref": "#/$defs/digest"},
+    "payload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["draft_status", "stable_order_is_not_ranking", "ordered_shots", "source_knowledge_bindings", "knowledge_influence", "authority_boundary", "limitations", "shot_plan_digest"],
+      "properties": {
+        "draft_status": {"const": "draft_only"}, "stable_order_is_not_ranking": {"const": true},
+        "ordered_shots": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/shot_card"}},
+        "source_knowledge_bindings": {"type": "array", "maxItems": 2, "items": {"$ref": "#/$defs/knowledge_binding"}},
+        "knowledge_influence": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/knowledge_influence"}]},
+        "authority_boundary": {"$ref": "#/$defs/authority_boundary"},
+        "limitations": {"$ref": "#/$defs/nonempty_strings"}, "shot_plan_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "integrity": {"type": "object", "additionalProperties": false, "required": ["payload_sha256", "complete_result_sha256"], "properties": {"payload_sha256": {"$ref": "#/$defs/digest"}, "complete_result_sha256": {"$ref": "#/$defs/digest"}}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"}, "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "strings": {"type": "array", "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"}},
+    "nonempty_strings": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"}},
+    "shot_card": {
+      "type": "object", "additionalProperties": false,
+      "required": ["shot_id", "source_ordinal", "shot_purpose", "narrative_focus", "option_application", "shot_scale_qualification", "camera_angle_qualification", "camera_elevation_qualification", "camera_movement_qualification", "composition_qualification", "screen_direction_qualification", "evidence_references", "assumptions", "unresolved_unknowns", "limitations", "knowledge_influence", "derivation_basis", "shot_card_digest"],
+      "properties": {
+        "shot_id": {"type": "string", "pattern": "^shot-[0-9a-f]{24}$"}, "source_ordinal": {"type": "integer", "minimum": 1, "maximum": 3},
+        "shot_purpose": {"enum": ["scene_orientation", "primary_action", "detail_or_transition"]},
+        "narrative_focus": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": ".*\\S.*"},
+        "option_application": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"},
+        "shot_scale_qualification": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"},
+        "camera_angle_qualification": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"},
+        "camera_elevation_qualification": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"},
+        "camera_movement_qualification": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"},
+        "composition_qualification": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"},
+        "screen_direction_qualification": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": ".*\\S.*"},
+        "evidence_references": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "assumptions": {"$ref": "#/$defs/strings"}, "unresolved_unknowns": {"$ref": "#/$defs/nonempty_strings"}, "limitations": {"$ref": "#/$defs/nonempty_strings"},
+        "knowledge_influence": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/knowledge_influence"}]},
+        "derivation_basis": {"const": "deterministic_structural_draft"}, "shot_card_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "authority_boundary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scope", "production_approval", "final_shot_selection", "production_plan_authority", "scheduling_authority", "workflow_activation", "capability_grant", "provider_execution_authority", "runtime_execution_authority"],
+      "properties": {"scope": {"const": "draft_only"}, "production_approval": {"const": false}, "final_shot_selection": {"const": false}, "production_plan_authority": {"const": false}, "scheduling_authority": {"const": false}, "workflow_activation": {"const": false}, "capability_grant": {"const": false}, "provider_execution_authority": {"const": false}, "runtime_execution_authority": {"const": false}}
+    },
+    "knowledge_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["knowledge_id", "knowledge_content_digest", "admission_decision_id", "admission_decision_digest", "source_candidate", "use"],
+      "properties": {
+        "knowledge_id": {"$ref": "#/$defs/id"}, "knowledge_content_digest": {"$ref": "#/$defs/digest"}, "admission_decision_id": {"$ref": "#/$defs/id"}, "admission_decision_digest": {"$ref": "#/$defs/digest"},
+        "source_candidate": {"type": "object", "additionalProperties": false, "required": ["candidate_id", "candidate_digest", "candidate_type", "source_pattern_id", "source_pattern_digest", "supporting_evidence_digest", "pattern_set_digest", "pattern_set_complete_digest", "context_id", "context_content_digest", "complete_context_digest"], "properties": {"candidate_id": {"$ref": "#/$defs/id"}, "candidate_digest": {"$ref": "#/$defs/digest"}, "candidate_type": {"enum": ["recurrence_lesson_candidate", "variation_lesson_candidate"]}, "source_pattern_id": {"$ref": "#/$defs/id"}, "source_pattern_digest": {"$ref": "#/$defs/digest"}, "supporting_evidence_digest": {"$ref": "#/$defs/digest"}, "pattern_set_digest": {"$ref": "#/$defs/digest"}, "pattern_set_complete_digest": {"$ref": "#/$defs/digest"}, "context_id": {"$ref": "#/$defs/id"}, "context_content_digest": {"$ref": "#/$defs/digest"}, "complete_context_digest": {"$ref": "#/$defs/digest"}}},
+        "use": {"const": "informational_context_only"}
+      }
+    },
+    "knowledge_influence": {
+      "type": "object", "additionalProperties": false, "required": ["mode", "knowledge_ids", "knowledge_attributes", "knowledge_values"],
+      "properties": {"mode": {"const": "informational_context_only"}, "knowledge_ids": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/$defs/id"}}, "knowledge_attributes": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"enum": ["shot_scale", "camera_angle", "camera_elevation", "camera_movement", "composition", "screen_direction", "subject_count", "focal_length_mm"]}}, "knowledge_values": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 128}, {"type": "integer", "minimum": 0, "maximum": 128}, {"type": "number", "minimum": 1, "maximum": 2000}]}}}
+    }
+  }
+}

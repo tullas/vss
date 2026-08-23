@@ -489,6 +489,99 @@ class ReasoningGateway:
             except Exception as exc:
                 raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
 
+    def execute_scene_shot_plan_draft(
+        self, decision_data: dict[str, Any], packet_data: dict[str, Any],
+        option_set_data: dict[str, Any], breakdown_data: dict[str, Any], *,
+        request_id: str, environment: str, correlation_id: str, dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Create the M7.4 local draft through one governed deterministic provider call."""
+        started = self._clock(); execution_id = uuid.uuid4().hex; calls = 0
+        status = "failed"; failure = "invalid_request"; task = None; view = None
+        result = None; invocation_digest = None
+        try:
+            if type(correlation_id) is not str or not _CORRELATION_ID.fullmatch(correlation_id):
+                raise InvalidReasoningRequest("reasoning correlation identity is invalid")
+            from vss_movie_shot_plan import admit_shot_plan_inputs, create_shot_plan_result, shot_plan_provider_view
+            try:
+                task, decision, packet, option_set, breakdown, scene = admit_shot_plan_inputs(
+                    decision_data, packet_data, option_set_data, breakdown_data,
+                    request_id=request_id, correlation_id=correlation_id, environment=environment,
+                )
+            except Exception as exc:
+                raise InvalidReasoningRequest("shot-plan authoritative inputs are invalid") from exc
+            from .registry import SceneShotPlanImplementationRegistry
+            implementations = SceneShotPlanImplementationRegistry.built_in()
+            strategy, provider = implementations.resolve()
+            view = shot_plan_provider_view(task, decision, option_set, scene)
+            invocation_digest = canonical_digest({
+                "request_id": request_id, "correlation_id": correlation_id,
+                "task_digest": task.digest, "decision_digest": decision.digest,
+                "review_packet_digest": packet.value["payload"]["review_packet_digest"],
+                "option_set_digest": option_set.digest, "scene_breakdown_digest": breakdown.digest,
+                "provider_visible_digest": view.provider_visible_digest,
+                "strategy": [strategy.identity, strategy.version],
+                "provider": [provider.identity, provider.version, provider.api_version],
+                "implementation_registry_digest": implementations.digest,
+                "calls": 1, "iterations": 1, "retry": False, "fallback": False,
+            })
+            if dry_run:
+                status = "success"; failure = "none"
+                return {"readiness": {
+                    "authorized": True, "provider_invoked": False, "provider_call_count": 0,
+                    "task_identity": "create_scene_shot_plan_draft", "task_version": "1",
+                    "result_family": "scene_shot_plan_draft", "result_version": "1",
+                    "provider_visible_digest": view.provider_visible_digest,
+                    "invocation_binding_digest": invocation_digest,
+                    "strategy_identity": strategy.identity, "provider_identity": provider.identity,
+                    "result_digest": None,
+                }}
+            try:
+                cards, calls, iterations = strategy.execute(view, provider)
+                candidate = create_shot_plan_result(task, decision, packet, option_set,
+                                                    breakdown, scene, cards)
+            except Exception as exc:
+                failure = "candidate_generation_failure"
+                raise CandidateGenerationFailure("shot-plan generation failed") from exc
+            if calls != 1 or iterations != 1:
+                failure = "provider_budget_exceeded"
+                raise ReasoningBudgetExceeded("shot-plan provider budget exceeded")
+            from vss_movie_contracts import validate_scene_shot_plan_draft
+            try:
+                validated = validate_scene_shot_plan_draft(
+                    candidate, task=task, decision=decision, packet=packet,
+                    option_set=option_set, breakdown=breakdown,
+                )
+            except Exception as exc:
+                failure = "invalid_result"
+                raise InvalidReasoningResult("shot-plan result validation failed") from exc
+            result = validated.to_json_value()
+            if len(canonical_bytes(result)) > task.value["bounds"]["maximum_result_bytes"]:
+                failure = "result_size_budget_exceeded"
+                raise ReasoningBudgetExceeded("shot-plan result exceeds bound")
+            status = "success"; failure = "none"
+            return {"scene_shot_plan_draft": result, "result_digest": validated.digest,
+                    "complete_result_digest": result["integrity"]["complete_result_sha256"],
+                    "provider_call_count": calls, "provider_visible_digest": view.provider_visible_digest,
+                    "invocation_binding_digest": invocation_digest}
+        finally:
+            record = {
+                "event_type": "scene_shot_plan_draft_readiness_completed" if dry_run and status == "success" else "scene_shot_plan_draft_completed" if status == "success" else "scene_shot_plan_draft_failed",
+                "execution_id": execution_id, "request_id": request_id,
+                "correlation_id": correlation_id, "task_identity": "create_scene_shot_plan_draft",
+                "task_version": "1", "result_family": "scene_shot_plan_draft", "result_version": "1",
+                "provider_visible_digest": view.provider_visible_digest if view else None,
+                "invocation_binding_digest": invocation_digest, "provider_call_count": calls,
+                "dry_run": dry_run, "status": status, "failure_classification": failure,
+                "complete_result_digest": result["integrity"]["complete_result_sha256"] if result else None,
+                "duration_ms": max(0, int((self._clock() - started) * 1000)),
+            }
+            try:
+                self._audit.append(record)
+            except ReasoningAuditFailure:
+                raise
+            except Exception as exc:
+                raise ReasoningAuditFailure("reasoning audit record could not be written") from exc
+
     def execute_scene_breakdown(self, request_data: dict[str, Any], context_data: dict[str, Any], *, environment: str, correlation_id: str, dry_run: bool = False, revocations=None) -> dict[str, Any]:
         """Admit the bounded movie task through the existing Gateway boundary."""
         started = self._clock(); execution_id = uuid.uuid4().hex; calls = 0; audit_attempted = False

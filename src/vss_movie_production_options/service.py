@@ -213,9 +213,34 @@ def assemble_production_options_context(scene_breakdown: Any, *, request_id: str
     context["integrity"]["complete_context_sha256"] = canonical_digest({**context,"integrity":{}})
     return validate_production_options_context(context)
 
+def assemble_production_options_context_v2(scene_breakdown: Any, *, request_id: str,
+                                           correlation_id: str, project_id: str,
+                                           scene_id: str, scene_content_digest: str,
+                                           environment: str = "development",
+                                           validation_time: str | None = None) -> SceneProductionOptionsContext:
+    """Construct the governed v2 Context with no silently supplied Knowledge."""
+    base = assemble_production_options_context(
+        scene_breakdown, request_id=request_id, correlation_id=correlation_id,
+        project_id=project_id, scene_id=scene_id,
+        scene_content_digest=scene_content_digest, environment=environment,
+        validation_time=validation_time,
+    ).to_json_value()
+    value = dict(base); value["payload"] = dict(base["payload"])
+    value.update(schema_version="2", context_family_version="2", result_version="2",
+                 semantic_task_version="2", purpose="scene_production_options_local_analysis",
+                 policy_version=V2_POLICY_VERSION)
+    value["payload"]["knowledge_bindings"] = []
+    value["context_content_digest"] = canonical_digest(value["payload"])
+    value["integrity"] = {"complete_context_sha256": "0" * 64}
+    value["integrity"]["complete_context_sha256"] = canonical_digest({**value, "integrity": {}})
+    return validate_production_options_context_v2(value, validation_time=value["constructed_at"])
+
 def production_context_report(context: SceneProductionOptionsContext) -> dict[str, Any]:
-    c = validate_production_options_context(context).to_json_value(); p = c["payload"]
-    report = {"schema_version":"1","report_family":"scene_production_options_context_assembly_report","report_version":"1","request_id":c["request_id"],"correlation_id":c["correlation_id"],"scene_breakdown_identity":p["scene_breakdown_identity"],"scene_breakdown_digest":p["scene_breakdown_digest"],"selected_scene_id":p["selected_scene_id"],"selected_scene_digest":p["selected_scene_digest"],"context_id":c["context_id"],"context_family":c["context_family"],"context_version":"1","context_content_digest":c["context_content_digest"],"complete_context_digest":canonical_digest(c),"project_id":c["project_id"],"environment":c["environment"],"purpose":c["purpose"],"classification":c["classification"],"trust":c["trust"],"rights_qualification_status":"claim_preserved","cultural_qualification_status":"claim_preserved","profile_catalogue_identity":p["profile_catalogue_identity"],"profile_catalogue_version":p["profile_catalogue_version"],"included_count":1,"omitted_count":0,"ambiguity_count":len(p["ambiguity"]),"conflict_count":len(p["conflicts"]),"unknown_count":len(p["unknowns"]),"limitation_count":len(p["limitations"]),"budget_use":{"context_bytes":len(canonical_bytes(c)),"maximum_context_bytes":MAX_CONTEXT_BYTES},"constructed_at":c["constructed_at"],"expires_at":c["expires_at"],"status":"success"}
+    raw = context.to_json_value() if isinstance(context, SceneProductionOptionsContext) else thaw_json(context)
+    validated = (validate_production_options_context_v2(raw, validation_time=raw["constructed_at"])
+                 if raw.get("schema_version") == "2" else validate_production_options_context(raw))
+    c = validated.to_json_value(); p = c["payload"]
+    report = {"schema_version":"1","report_family":"scene_production_options_context_assembly_report","report_version":"1","request_id":c["request_id"],"correlation_id":c["correlation_id"],"scene_breakdown_identity":p["scene_breakdown_identity"],"scene_breakdown_digest":p["scene_breakdown_digest"],"selected_scene_id":p["selected_scene_id"],"selected_scene_digest":p["selected_scene_digest"],"context_id":c["context_id"],"context_family":c["context_family"],"context_version":c["context_family_version"],"context_content_digest":c["context_content_digest"],"complete_context_digest":validated.digest,"project_id":c["project_id"],"environment":c["environment"],"purpose":c["purpose"],"classification":c["classification"],"trust":c["trust"],"rights_qualification_status":"claim_preserved","cultural_qualification_status":"claim_preserved","profile_catalogue_identity":p["profile_catalogue_identity"],"profile_catalogue_version":p["profile_catalogue_version"],"included_count":1,"omitted_count":0,"ambiguity_count":len(p["ambiguity"]),"conflict_count":len(p["conflicts"]),"unknown_count":len(p["unknowns"]),"limitation_count":len(p["limitations"]),"budget_use":{"context_bytes":len(canonical_bytes(c)),"maximum_context_bytes":MAX_CONTEXT_BYTES},"constructed_at":c["constructed_at"],"expires_at":c["expires_at"],"status":"success"}
     report["report_digest"] = canonical_digest(report); return freeze_json(report)
 
 def production_provider_view(context: Any) -> SceneProductionOptionsProviderView:

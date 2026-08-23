@@ -200,6 +200,7 @@ jobs:
         run: |
           python -m unittest discover -s tests/movie_production_options -p 'test_*.py'
           python -m unittest discover -s tests/movie_option_review -p 'test_*.py'
+          python -m unittest discover -s tests/movie_shot_plan -p 'test_*.py'
           vss movie context-assemble-scene-production-options --request tests/fixtures/movie/scene-production-options-context-request-valid.json --scene-breakdown tests/fixtures/movie/scene-breakdown-valid.json --environment development --correlation-id m4-3-local-run
           vss context validate --input tests/fixtures/movie/scene-production-options-context-valid.json --environment development --correlation-id m4-3-local-run
           vss movie generate-scene-production-options --request tests/fixtures/movie/generate-scene-production-options-request-valid.json --context tests/fixtures/movie/scene-production-options-context-valid.json --environment development --correlation-id m4-3-local-run

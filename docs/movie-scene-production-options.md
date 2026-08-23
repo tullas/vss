@@ -93,3 +93,36 @@ The caller-supplied reviewer ID is integrity-bound accountability metadata; it
 is not authenticated, identity-verified, authorization-checked, or digitally
 signed by this local milestone. Consumers must not treat the identifier as
 proof of reviewer identity or authority.
+
+## M7.4 deterministic shot-plan draft POC
+
+`create_scene_shot_plan_draft/1` consumes an independently validated accepted
+M7.3 decision together with its exact review packet, v2 Option Set, and scene
+breakdown. Through the Reasoning Gateway it makes exactly one call to the local
+deterministic shot-plan provider and emits `scene_shot_plan_draft/1`. Reject and
+defer assessments fail closed. Dry-run completes admission and binding but
+calls no provider and emits no draft.
+
+The draft contains three stable structural cards: scene orientation, primary
+action, and detail or transition. Their order describes narrative structure;
+it is not ranking or recommendation. Each card preserves source evidence,
+assumptions, unknowns, limitations, and exact cinematography Knowledge
+influence when present. Composition qualifications use declared scene
+locations, characters, time indicators, events, and unknowns; missing angle,
+elevation, movement, or screen-direction evidence is reported as unspecified
+rather than invented.
+The validator independently reconstructs every card from the authoritative
+upstream artifacts, so resealing cannot legitimize substitution, omission,
+addition, reordering, or content mutation.
+
+```text
+vss movie create-shot-plan-draft --decision <decision-v1.json> --review-packet <review-packet-v1.json> --option-set <option-set-v2.json> --scene-breakdown <scene-breakdown-v1.json> --request-id <request-id> --environment development --correlation-id <correlation-id>
+vss movie create-shot-plan-draft --decision <decision-v1.json> --review-packet <review-packet-v1.json> --option-set <option-set-v2.json> --scene-breakdown <scene-breakdown-v1.json> --request-id <request-id> --environment development --correlation-id <correlation-id> --dry-run
+```
+
+The artifact is structurally `draft_only`. It provides no production
+approval, final shot selection, production-plan authority, scheduling,
+workflow activation, capability grant, provider execution authority, or
+Runtime execution authority. It does not establish feasibility and performs
+no media generation, external model call, storage, orchestration, or Runtime
+operation.
