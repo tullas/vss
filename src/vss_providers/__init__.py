@@ -1,6 +1,6 @@
-from .access import ProviderAccess, SafeClockHandle, SafeStoryboardRenderHandle
-from .constants import LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, PROVIDER_API_VERSION
-from .contracts import ClockProvider, GeneratedMedia, MonotonicReading, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
+from .access import ProviderAccess, SafeClockHandle, SafePictorialFrameHandle, SafeStoryboardRenderHandle
+from .constants import LOCAL_CLOCK_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, PROVIDER_API_VERSION
+from .contracts import ClockProvider, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
 from .errors import (
     ProviderAccessDenied,
     ProviderExecutionFailure,
@@ -17,9 +17,13 @@ __all__ = (
     "LOCAL_CLOCK_IDENTITY",
     "LOCAL_STORYBOARD_RENDER_IDENTITY",
     "GeneratedMedia",
+    "LOCAL_PICTORIAL_FRAME_IDENTITY",
+    "PictorialFrameProvider",
+    "PictorialFrameRequest",
     "StoryboardRenderProvider",
     "StoryboardRenderRequest",
     "SafeStoryboardRenderHandle",
+    "SafePictorialFrameHandle",
     "MonotonicReading",
     "PROVIDER_API_VERSION",
     "ProviderAccess",

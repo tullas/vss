@@ -21,6 +21,7 @@ from vss_capabilities import (
 from vss_commands.exit_codes import ExitCode
 from vss_providers import (
     LOCAL_CLOCK_IDENTITY,
+    LOCAL_PICTORIAL_FRAME_IDENTITY,
     LOCAL_STORYBOARD_RENDER_IDENTITY,
     ProviderAccess,
     ProviderFailure,
@@ -40,7 +41,7 @@ from .host_inspection import HostInspector
 from .models import ExecutionContext
 from .policy import RuntimePolicy
 from .registry import CapabilityRegistry
-from .artifacts import StoryboardArtifactPublisher
+from .artifacts import PictorialArtifactPublisher, StoryboardArtifactPublisher
 
 
 def repository_root() -> Path:
@@ -66,10 +67,11 @@ class RuntimeController:
         self.loader = CapabilityLoader(builtins_root)
         self.policy = policy or RuntimePolicy(
             allowed_builtin_permissions=("provider_access",),
-            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY),
+            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY),
             allowed_capability_permissions={
                 "bootstrap.check": ("filesystem_read", "subprocess"),
                 "movie.storyboard-render": ("provider_access", "filesystem_write"),
+                "movie.pictorial-frame-generation": ("provider_access", "filesystem_write"),
             },
         )
         self.provider_registry = provider_registry or ProviderRegistry(
@@ -115,6 +117,7 @@ class RuntimeController:
         errors: list[str] = []
         status = "error"
         artifact_publisher: StoryboardArtifactPublisher | None = None
+        pictorial_artifact_publisher: PictorialArtifactPublisher | None = None
         exit_code: ExitCode = ExitCode.INTERNAL_ERROR
         try:
             capability = self.registry.resolve_command(command)
@@ -155,6 +158,10 @@ class RuntimeController:
                 from vss_movie_storyboard_render import AdmittedStoryboardRender
                 if type(admitted_request) is not AdmittedStoryboardRender:
                     raise InvalidCapabilityInput("storyboard render requires authoritative movie admission")
+            elif command == "movie.pictorial-frame-generate":
+                from vss_movie_pictorial import AdmittedPictorialFrame
+                if environment != "development" or type(admitted_request) is not AdmittedPictorialFrame:
+                    raise InvalidCapabilityInput("pictorial frame generation requires authoritative movie admission")
             elif admitted_request is not None:
                 raise InvalidCapabilityInput("admitted request is not valid for this capability")
             provider_access = ProviderAccess()
@@ -165,8 +172,12 @@ class RuntimeController:
                     )
                 elif registration.metadata.provider_type == "storyboard_render":
                     provider_access = ProviderAccess(storyboard=self.provider_registry.initialize(registration))
+                elif registration.metadata.provider_type == "storyboard_image_generation":
+                    provider_access = ProviderAccess(pictorial=self.provider_registry.initialize(registration))
             if capability.manifest.identity == "movie.storyboard-render" and "filesystem_write" in authorized:
                 artifact_publisher = StoryboardArtifactPublisher(self.root)
+            if capability.manifest.identity == "movie.pictorial-frame-generation" and "filesystem_write" in authorized:
+                pictorial_artifact_publisher = PictorialArtifactPublisher(self.root)
             if capability.manifest.sdk_api_version is not None:
                 try:
                     validate_input(input_data, command_record["input_schema"])
@@ -190,6 +201,7 @@ class RuntimeController:
                         else None
                     ),
                     artifact_publisher=artifact_publisher,
+                    pictorial_artifact_publisher=pictorial_artifact_publisher,
                     admitted_request=admitted_request,
                 )
             else:
@@ -295,22 +307,24 @@ class RuntimeController:
         try:
             self.audit.append(audit_record)
         except RuntimeInternalFailure as exc:
-            if artifact_publisher is not None:
-                artifact_publisher.abort()
+            publisher = artifact_publisher or pictorial_artifact_publisher
+            if publisher is not None:
+                publisher.abort()
             response["status"] = "error"
             response["exit_code"] = int(ExitCode.INTERNAL_ERROR)
             response["output"] = {}
             response["errors"] = [str(exc)]
             return response, int(ExitCode.INTERNAL_ERROR)
-        if status == "success" and artifact_publisher is not None and not dry_run:
+        publisher = artifact_publisher or pictorial_artifact_publisher
+        if status == "success" and publisher is not None and not dry_run:
             try:
-                artifact_publisher.publish()
+                publisher.publish()
             except RuntimeInternalFailure as exc:
                 response["status"] = "error"
                 response["exit_code"] = int(ExitCode.INTERNAL_ERROR)
                 response["output"] = {}
                 response["errors"] = [str(exc)]
                 return response, int(ExitCode.INTERNAL_ERROR)
-        elif artifact_publisher is not None:
-            artifact_publisher.abort()
+        elif publisher is not None:
+            publisher.abort()
         return response, int(exit_code)

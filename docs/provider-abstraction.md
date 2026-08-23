@@ -19,7 +19,7 @@ millisecond-precision `YYYY-MM-DDTHH:MM:SS.sssZ`; monotonic readings are finite,
 non-negative numbers. A safe runtime handle validates both methods and converts
 provider exceptions into fixed provider failures.
 
-The sole implementation is:
+The initial clock implementation is:
 
 - type: `clock`;
 - identity: `system.clock.local`;
@@ -102,4 +102,13 @@ Vendor and AI providers, clouds, object storage, network calls, credentials,
 secrets, dynamic installation or discovery, marketplaces, fallback, load
 balancing, cost optimization, retries, workflow provider configuration,
 provider CLI management, and media-production providers are intentionally
+deferred.
+
+Later movie POC slices add two separate provider-neutral review-media contracts:
+the three-panel deterministic SVG storyboard renderer and the one-frame pictorial
+PNG generator. Both have one exact statically selected repository-owned local
+implementation, are authorized through Runtime, and use no network, credentials,
+vendor parameters, retries, or fallback. The PNG request exposes only the admitted
+selected-frame projection and separates its deterministic semantic identity from
+the execution attempt and output content digest. External AI implementations remain
 deferred.

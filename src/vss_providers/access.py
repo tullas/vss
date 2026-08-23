@@ -5,8 +5,9 @@ import re
 import hashlib
 import xml.etree.ElementTree as ET
 
-from .contracts import ClockProvider, GeneratedMedia, MonotonicReading, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
+from .contracts import ClockProvider, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
 from .errors import ProviderAccessDenied, ProviderExecutionFailure
+from .png import validate_pictorial_png
 
 UTC_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
@@ -47,15 +48,17 @@ class SafeClockHandle:
 class ProviderAccess:
     """A non-enumerable set of provider handles authorized for one execution."""
 
-    __slots__ = ("__clock", "__storyboard")
+    __slots__ = ("__clock", "__storyboard", "__pictorial")
 
     def __init__(
         self,
         clock: ClockProvider | None = None,
         storyboard: StoryboardRenderProvider | None = None,
+        pictorial: PictorialFrameProvider | None = None,
     ) -> None:
         object.__setattr__(self, "_ProviderAccess__clock", SafeClockHandle(clock) if clock is not None else None)
         object.__setattr__(self, "_ProviderAccess__storyboard", SafeStoryboardRenderHandle(storyboard) if storyboard is not None else None)
+        object.__setattr__(self, "_ProviderAccess__pictorial", SafePictorialFrameHandle(pictorial) if pictorial is not None else None)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("provider access is immutable")
@@ -69,6 +72,11 @@ class ProviderAccess:
         if self.__storyboard is None:
             raise ProviderAccessDenied("storyboard render provider access was not declared and authorized")
         return self.__storyboard
+
+    def get_pictorial_frame_generator(self) -> "SafePictorialFrameHandle":
+        if self.__pictorial is None:
+            raise ProviderAccessDenied("pictorial frame provider access was not declared and authorized")
+        return self.__pictorial
 
 
 class SafeStoryboardRenderHandle:
@@ -114,4 +122,32 @@ class SafeStoryboardRenderHandle:
                         raise ValueError
         except (ET.ParseError, UnicodeError, ValueError, KeyError) as exc:
             raise ProviderExecutionFailure("storyboard render provider returned unsafe SVG") from exc
+        return result
+
+
+class SafePictorialFrameHandle:
+    __slots__ = ("__provider", "__calls")
+
+    def __init__(self, provider: PictorialFrameProvider) -> None:
+        object.__setattr__(self, "_SafePictorialFrameHandle__provider", provider)
+        object.__setattr__(self, "_SafePictorialFrameHandle__calls", 0)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("pictorial frame provider handle is immutable")
+
+    def generate(self, request: PictorialFrameRequest) -> GeneratedMedia:
+        if self.__calls != 0:
+            raise ProviderAccessDenied("pictorial frame provider call ceiling exceeded")
+        object.__setattr__(self, "_SafePictorialFrameHandle__calls", 1)
+        try:
+            result = self.__provider.generate(request)
+        except Exception as exc:
+            raise ProviderExecutionFailure("pictorial frame provider execution failed") from exc
+        if (not isinstance(result, GeneratedMedia) or result.media_type != "image/png"
+                or not isinstance(result.content, bytes)
+                or result.content_sha256 != hashlib.sha256(result.content).hexdigest()):
+            raise ProviderExecutionFailure("pictorial frame provider returned invalid media")
+        width, height = validate_pictorial_png(result.content)
+        if (result.width, result.height) != (width, height):
+            raise ProviderExecutionFailure("pictorial frame provider returned inconsistent dimensions")
         return result

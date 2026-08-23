@@ -39,3 +39,19 @@ class GeneratedMedia:
 
 class StoryboardRenderProvider(Protocol):
     def render(self, request: StoryboardRenderRequest) -> GeneratedMedia: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PictorialFrameRequest:
+    project_id: str
+    scene_id: str
+    storyboard_specification_digest: str
+    frame_id: str
+    frame_specification_digest: str
+    semantic_request_digest: str
+    provider_visible_digest: str
+    projection: Mapping[str, Any]
+
+
+class PictorialFrameProvider(Protocol):
+    def generate(self, request: PictorialFrameRequest) -> GeneratedMedia: ...

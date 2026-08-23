@@ -208,3 +208,26 @@ checks but calls no render provider and writes no media. The output is only
 asset admission, final selection, publication, scheduling, workflow activation,
 or autonomous authority. External providers, raster output, production
 rendering, asset catalogs, revisions, queues, and workers remain unimplemented.
+
+## M8.2 governed one-frame pictorial review candidate
+
+`movie.generate-pictorial-frame` reconstructs the same complete accepted M7/M8
+chain, selects one explicit frame as this execution target only, and deterministically
+adapts its supported visual fields into a minimized provider-neutral projection.
+Runtime authorizes the separate `movie.pictorial-frame-generation` capability and
+statically selects `movie.storyboard-image.local/1.0.0`. The standard-library local
+provider produces one intentionally abstract 640×360 RGB PNG with a neutral
+silhouette; it does not claim AI generation or invent unresolved appearance facts.
+
+```console
+vss movie generate-pictorial-frame --decision <decision.json> --review-packet <packet.json> --option-set <options.json> --scene-breakdown <breakdown.json> --shot-plan <shot-plan.json> --storyboard <storyboard.json> --frame-id <frame-id> --environment development --correlation-id <correlation-id>
+```
+
+The strictly checked PNG is published create-only beneath
+`.local/movie/storyboard-images/<storyboard-digest>/<frame-id>/<content-sha256>.png`.
+The result distinguishes deterministic request/projection digests, the Runtime
+execution-attempt ID, and generated-content digest. It remains development review
+media: frame targeting is not final selection, and no production approval, asset
+admission, publication, workflow, autonomy, or future execution authority is granted.
+Dry-run performs validation and Runtime admission with no provider call or file write.
+The command is intentionally separate from `movie demo`.
