@@ -245,6 +245,79 @@ def validate_scene_option_review_packet(value, *, task, option_set, registry=Non
         raise MovieContractError("review packet does not match the source Option Set")
     return result
 
+def validate_scene_option_review_decision_task(value, *, packet, option_set, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "record_scene_option_review_decision/1", registry, MAX_STORY_BYTES)
+    registry.resolve_result("record_scene_option_review_decision/1", "scene_option_review_decision/1")
+    _require_digest(result.value, "task_content_digest", "scene option review decision task")
+    if (not isinstance(packet, ValidatedMovieArtifact)
+            or packet.value.get("result_family") != "scene_option_review_packet"
+            or packet.value.get("result_version") != "1"
+            or not isinstance(option_set, ValidatedMovieArtifact)
+            or option_set.value.get("result_family") != "scene_production_option_set"
+            or option_set.value.get("result_version") != "2"):
+        raise MovieContractError("decision task requires independently validated packet and Option Set")
+    data, pv, source = result.value, packet.value, option_set.value
+    entries = [entry for entry in pv["payload"]["review_entries"] if entry["option_id"] == data["option_id"]]
+    if len(entries) != 1:
+        raise MovieContractError("decision option is not present exactly once")
+    expected = (
+        pv["project_id"], pv["scene_id"], pv["payload"]["review_packet_digest"],
+        pv["integrity"]["complete_result_sha256"], option_set.digest,
+        source["integrity"]["complete_result_sha256"], entries[0]["option_content_digest"],
+    )
+    actual = (
+        data["project_id"], data["scene_id"], data["review_packet_digest"],
+        data["review_packet_complete_digest"], data["option_set_digest"],
+        data["option_set_complete_digest"], data["option_content_digest"],
+    )
+    if actual != expected:
+        raise MovieContractError("decision task authoritative source binding mismatch")
+    if (data["outcome"] == "defer") != bool(data["deferred_review_conditions"]):
+        raise MovieContractError("deferred review conditions do not match outcome")
+    return result
+
+def validate_scene_option_review_decision(value, *, task, packet, option_set, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "scene_option_review_decision/1", registry, MAX_RESULT_BYTES)
+    if (not isinstance(task, ValidatedMovieArtifact)
+            or task.value.get("task_identity") != "record_scene_option_review_decision"
+            or task.value.get("task_version") != "1"
+            or not isinstance(packet, ValidatedMovieArtifact)
+            or packet.value.get("result_family") != "scene_option_review_packet"
+            or packet.value.get("result_version") != "1"
+            or not isinstance(option_set, ValidatedMovieArtifact)
+            or option_set.value.get("result_family") != "scene_production_option_set"
+            or option_set.value.get("result_version") != "2"):
+        raise MovieContractError("decision requires independently validated task, packet, and Option Set")
+    data, tv, pv, source = result.value, task.value, packet.value, option_set.value
+    expected_binding = (
+        tv["request_id"], tv["correlation_id"], pv["project_id"], pv["scene_id"],
+        pv["payload"]["review_packet_digest"], pv["integrity"]["complete_result_sha256"],
+        option_set.digest, source["integrity"]["complete_result_sha256"],
+    )
+    actual_binding = (
+        data["request_id"], data["correlation_id"], data["project_id"], data["scene_id"],
+        data["review_packet_digest"], data["review_packet_complete_digest"],
+        data["option_set_digest"], data["option_set_complete_digest"],
+    )
+    if actual_binding != expected_binding:
+        raise MovieContractError("decision result binding mismatch")
+    payload = data["payload"]
+    decision = payload["decisions"][0]
+    if decision["decision_digest"] != canonical_digest({key: thaw_json(item) for key, item in decision.items() if key != "decision_digest"}):
+        raise MovieContractError("decision content digest mismatch")
+    if payload["decision_record_digest"] != canonical_digest({**thaw_json(payload), "decision_record_digest": None}):
+        raise MovieContractError("decision record semantic digest mismatch")
+    if data["integrity"]["payload_sha256"] != canonical_digest(payload):
+        raise MovieContractError("decision payload digest mismatch")
+    if data["integrity"]["complete_result_sha256"] != canonical_digest({**thaw_json(data), "integrity": {"payload_sha256": data["integrity"]["payload_sha256"]}}):
+        raise MovieContractError("decision complete digest mismatch")
+    from vss_movie_option_review import expected_decision_payload
+    if thaw_json(payload) != expected_decision_payload(task, packet):
+        raise MovieContractError("decision result does not match authoritative task and packet")
+    return result
+
 def validate_character_reference(value, registry=None):
     result = _validate(value, "character_reference/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
     _require_digest(result.value, "content_digest", "character reference")

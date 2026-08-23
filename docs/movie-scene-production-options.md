@@ -63,3 +63,33 @@ This is review preparation, not a review decision. It does not rank, score,
 recommend, select, approve, schedule, budget, create a plan or workflow, grant
 authority, or execute anything. Human review outcomes and any later selection
 or approval boundary remain separate future milestones.
+
+## M7.3 accountable option-review decisions
+
+`record_scene_option_review_decision/1` and
+`scene_option_review_decision/1` record exactly one accountable human
+assessment—`accept`, `reject`, or `defer`—against an exact M7.2 packet entry.
+The development command requires both authoritative source artifacts:
+
+```text
+vss movie record-option-review-decision --review-packet <review-packet-v1.json> --option-set <option-set-v2.json> --option-id <option-id> --reviewer-id <reviewer-id> --outcome <accept|reject|defer> --rationale <human-rationale> --request-id <request-id> --environment development --correlation-id <correlation-id>
+```
+
+Use one or more `--deferred-condition <condition>` arguments when the outcome
+is `defer`; deferred outcomes require at least one unresolved reason or
+next-review condition, while other outcomes reject deferred conditions. The
+validator independently reconstructs the selected option and inherited
+Knowledge lineage from the validated packet and Option Set. Task, decision,
+payload, packet, source, option-content, and complete-result bindings make
+fully resealed substitution or mutation fail closed.
+
+An `accept` outcome is only a review-stage human assessment. The result
+explicitly grants no production approval, production plan, scheduling,
+workflow activation, capability, or Runtime execution authority. M7.3 adds no
+ranking, recommendation, selection workflow, planning, scheduling, or
+execution behavior.
+
+The caller-supplied reviewer ID is integrity-bound accountability metadata; it
+is not authenticated, identity-verified, authorization-checked, or digitally
+signed by this local milestone. Consumers must not treat the identifier as
+proof of reviewer identity or authority.
