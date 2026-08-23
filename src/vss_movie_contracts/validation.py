@@ -199,6 +199,52 @@ def validate_production_option_set_v2(value, *, context=None, registry=None):
     except Exception as exc: raise MovieContractError("production v2 common result is invalid") from exc
     return result
 
+def validate_scene_option_review_task(value, option_set=None, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "prepare_scene_option_review/1", registry, MAX_STORY_BYTES)
+    registry.resolve_result("prepare_scene_option_review/1", "scene_option_review_packet/1")
+    _require_digest(result.value, "task_content_digest", "scene option review task")
+    if (not isinstance(option_set, ValidatedMovieArtifact)
+            or option_set.value.get("result_family") != "scene_production_option_set"
+            or option_set.value.get("result_version") != "2"):
+        raise MovieContractError("review task requires an independently validated Option Set")
+    expected = (option_set.digest, option_set.value["integrity"]["complete_result_sha256"],
+                option_set.value["project_id"], option_set.value["scene_id"])
+    actual = (result.value["option_set_digest"], result.value["option_set_complete_digest"],
+              result.value["project_id"], result.value["scene_id"])
+    if actual != expected:
+        raise MovieContractError("review task Option Set binding mismatch")
+    return result
+
+def validate_scene_option_review_packet(value, *, task, option_set, registry=None):
+    registry = registry or MovieContractRegistry.built_in()
+    result = _validate(value, "scene_option_review_packet/1", registry, MAX_RESULT_BYTES)
+    if (not isinstance(task, ValidatedMovieArtifact)
+            or task.value.get("task_identity") != "prepare_scene_option_review"
+            or task.value.get("task_version") != "1"
+            or not isinstance(option_set, ValidatedMovieArtifact)
+            or option_set.value.get("result_family") != "scene_production_option_set"
+            or option_set.value.get("result_version") != "2"):
+        raise MovieContractError("review packet requires validated task and Option Set")
+    data, tv, source = result.value, task.value, option_set.value
+    expected = (tv["request_id"], tv["correlation_id"], source["project_id"], source["scene_id"],
+                option_set.digest, source["integrity"]["complete_result_sha256"])
+    actual = (data["request_id"], data["correlation_id"], data["project_id"], data["scene_id"],
+              data["option_set_digest"], data["option_set_complete_digest"])
+    if actual != expected:
+        raise MovieContractError("review packet binding mismatch")
+    payload = data["payload"]
+    if payload["review_packet_digest"] != canonical_digest({**thaw_json(payload), "review_packet_digest": None}):
+        raise MovieContractError("review packet semantic digest mismatch")
+    if data["integrity"]["payload_sha256"] != canonical_digest(payload):
+        raise MovieContractError("review packet payload digest mismatch")
+    if data["integrity"]["complete_result_sha256"] != canonical_digest({**thaw_json(data), "integrity": {"payload_sha256": data["integrity"]["payload_sha256"]}}):
+        raise MovieContractError("review packet complete digest mismatch")
+    from vss_movie_option_review import expected_review_payload
+    if thaw_json(payload) != expected_review_payload(option_set):
+        raise MovieContractError("review packet does not match the source Option Set")
+    return result
+
 def validate_character_reference(value, registry=None):
     result = _validate(value, "character_reference/1", registry or MovieContractRegistry.built_in(), MAX_STORY_BYTES)
     _require_digest(result.value, "content_digest", "character reference")

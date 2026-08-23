@@ -42,3 +42,24 @@ records exact Knowledge and admission/source lineage with the closed
 closed; it is never silently discarded. No Knowledge follows the existing
 fixed, stable-order, non-ranking option path. Runtime remains the sole
 execution authority and no automatic promotion or external learning exists.
+
+## M7.2 deterministic option-review preparation
+
+The development command below independently revalidates an M7.1 v2 Option Set
+and produces `scene_option_review_packet/1`:
+
+```text
+vss movie prepare-option-review --input <option-set-v2.json> --request-id <request-id> --environment development --correlation-id <correlation-id>
+```
+
+The packet binds the complete source Option Set, preserves every option in its
+original stable non-ranking order, carries exact Knowledge lineage and declared
+informational influence, and presents structured considerations, unresolved
+checks, and common human-review prompts. Packet, entry, payload, and complete
+result digests make omission, substitution, and resealing detectable by the
+domain validator.
+
+This is review preparation, not a review decision. It does not rank, score,
+recommend, select, approve, schedule, budget, create a plan or workflow, grant
+authority, or execute anything. Human review outcomes and any later selection
+or approval boundary remain separate future milestones.

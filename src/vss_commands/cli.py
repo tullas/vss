@@ -115,6 +115,8 @@ def _parser() -> argparse.ArgumentParser:
     movie_prod.add_argument("--request", type=Path, required=True); movie_prod.add_argument("--scene-breakdown", type=Path, required=True); movie_prod.add_argument("--environment", required=True); movie_prod.add_argument("--correlation-id", required=True)
     movie_gen = movie_actions.add_parser("generate-scene-production-options")
     movie_gen.add_argument("--request", type=Path, required=True); movie_gen.add_argument("--context", type=Path, required=True); movie_gen.add_argument("--environment", required=True); movie_gen.add_argument("--correlation-id", required=True); movie_gen.add_argument("--dry-run",action="store_true")
+    movie_review = movie_actions.add_parser("prepare-option-review")
+    movie_review.add_argument("--input", type=Path, required=True); movie_review.add_argument("--environment", required=True); movie_review.add_argument("--correlation-id", required=True); movie_review.add_argument("--request-id", required=True)
     for action in ("context-assemble-character-continuity", "analyze-character-continuity"):
         continuity = movie_actions.add_parser(action)
         continuity.add_argument("--input", type=Path, required=True)
@@ -273,11 +275,15 @@ def main(argv: list[str] | None = None) -> int:
             return int(exc.exit_code)
 
     if args.action == "movie":
-        if args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity"}:
+        if args.movie_action == "prepare-option-review":
+            input_data, input_error = _read_context_file(args.input)
+            if input_error is None:
+                input_data = {"option_set": input_data, "request_id": args.request_id}
+        elif args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity"}:
             input_data, input_error = _read_continuity_bundle(args.input)
         else:
             request, input_error = _read_context_file(args.request)
-        if args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity"}:
+        if args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity", "prepare-option-review"}:
             pass
         elif args.movie_action in {"break-down-scenes","generate-scene-production-options"}:
             context, context_error = _read_context_file(args.context)
@@ -341,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.action == "context":
         command_name = f"context.{args.context_action}"
     elif args.action == "movie":
-        command_name = {"break-down-scenes":"movie.break-down-scenes","context-assemble-scene-breakdown":"movie.context-assemble-scene-breakdown","context-assemble-scene-production-options":"movie.context-assemble-scene-production-options","generate-scene-production-options":"movie.generate-scene-production-options","context-assemble-character-continuity":"movie.context-assemble-character-continuity","analyze-character-continuity":"movie.analyze-character-continuity"}[args.movie_action]
+        command_name = {"break-down-scenes":"movie.break-down-scenes","context-assemble-scene-breakdown":"movie.context-assemble-scene-breakdown","context-assemble-scene-production-options":"movie.context-assemble-scene-production-options","generate-scene-production-options":"movie.generate-scene-production-options","prepare-option-review":"movie.prepare-option-review","context-assemble-character-continuity":"movie.context-assemble-character-continuity","analyze-character-continuity":"movie.analyze-character-continuity"}[args.movie_action]
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret
