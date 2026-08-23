@@ -21,6 +21,7 @@ from vss_capabilities import (
 from vss_commands.exit_codes import ExitCode
 from vss_providers import (
     LOCAL_CLOCK_IDENTITY,
+    LOCAL_STORYBOARD_RENDER_IDENTITY,
     ProviderAccess,
     ProviderFailure,
     ProviderRegistry,
@@ -39,6 +40,7 @@ from .host_inspection import HostInspector
 from .models import ExecutionContext
 from .policy import RuntimePolicy
 from .registry import CapabilityRegistry
+from .artifacts import StoryboardArtifactPublisher
 
 
 def repository_root() -> Path:
@@ -64,9 +66,10 @@ class RuntimeController:
         self.loader = CapabilityLoader(builtins_root)
         self.policy = policy or RuntimePolicy(
             allowed_builtin_permissions=("provider_access",),
-            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY,),
+            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY),
             allowed_capability_permissions={
                 "bootstrap.check": ("filesystem_read", "subprocess"),
+                "movie.storyboard-render": ("provider_access", "filesystem_write"),
             },
         )
         self.provider_registry = provider_registry or ProviderRegistry(
@@ -99,6 +102,7 @@ class RuntimeController:
         timeout_seconds: float | None = None,
         verbose: bool = False,
         ask_become_pass: bool = False,
+        admitted_request: object | None = None,
     ) -> tuple[dict[str, Any], int]:
         capability_identity = command
         permissions: tuple[str, ...] = ()
@@ -110,6 +114,7 @@ class RuntimeController:
         output: dict[str, Any] = {}
         errors: list[str] = []
         status = "error"
+        artifact_publisher: StoryboardArtifactPublisher | None = None
         exit_code: ExitCode = ExitCode.INTERNAL_ERROR
         try:
             capability = self.registry.resolve_command(command)
@@ -146,12 +151,22 @@ class RuntimeController:
             for provider_record in provider_audit:
                 provider_record["authorization"] = "approved"
             authorization = "approved"
+            if command == "movie.storyboard-render":
+                from vss_movie_storyboard_render import AdmittedStoryboardRender
+                if type(admitted_request) is not AdmittedStoryboardRender:
+                    raise InvalidCapabilityInput("storyboard render requires authoritative movie admission")
+            elif admitted_request is not None:
+                raise InvalidCapabilityInput("admitted request is not valid for this capability")
             provider_access = ProviderAccess()
             for registration in registrations:
                 if registration.metadata.provider_type == "clock":
                     provider_access = ProviderAccess(
                         clock=self.provider_registry.initialize(registration),
                     )
+                elif registration.metadata.provider_type == "storyboard_render":
+                    provider_access = ProviderAccess(storyboard=self.provider_registry.initialize(registration))
+            if capability.manifest.identity == "movie.storyboard-render" and "filesystem_write" in authorized:
+                artifact_publisher = StoryboardArtifactPublisher(self.root)
             if capability.manifest.sdk_api_version is not None:
                 try:
                     validate_input(input_data, command_record["input_schema"])
@@ -174,6 +189,8 @@ class RuntimeController:
                         and set(authorized) == {"filesystem_read", "subprocess"}
                         else None
                     ),
+                    artifact_publisher=artifact_publisher,
+                    admitted_request=admitted_request,
                 )
             else:
                 context = ExecutionContext(
@@ -278,9 +295,22 @@ class RuntimeController:
         try:
             self.audit.append(audit_record)
         except RuntimeInternalFailure as exc:
+            if artifact_publisher is not None:
+                artifact_publisher.abort()
             response["status"] = "error"
             response["exit_code"] = int(ExitCode.INTERNAL_ERROR)
             response["output"] = {}
             response["errors"] = [str(exc)]
             return response, int(ExitCode.INTERNAL_ERROR)
+        if status == "success" and artifact_publisher is not None and not dry_run:
+            try:
+                artifact_publisher.publish()
+            except RuntimeInternalFailure as exc:
+                response["status"] = "error"
+                response["exit_code"] = int(ExitCode.INTERNAL_ERROR)
+                response["output"] = {}
+                response["errors"] = [str(exc)]
+                return response, int(ExitCode.INTERNAL_ERROR)
+        elif artifact_publisher is not None:
+            artifact_publisher.abort()
         return response, int(exit_code)

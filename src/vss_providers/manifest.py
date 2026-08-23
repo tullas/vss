@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
-from .constants import CLOCK_PROVIDER_TYPE, PROVIDER_API_VERSION, PROVIDER_MANIFEST_SCHEMA_VERSION
+from .constants import CLOCK_PROVIDER_TYPE, PROVIDER_API_VERSION, PROVIDER_MANIFEST_SCHEMA_VERSION, STORYBOARD_RENDER_PROVIDER_TYPE
 from .errors import ProviderIncompatible
 from .models import ProviderIdentity, RegisteredProvider
 
@@ -42,7 +42,7 @@ def load_provider_manifest(path: Path, schema_path: Path, trusted_root: Path) ->
         raise ProviderIncompatible("unsupported provider manifest schema version")
     if value["provider_api_version"] != PROVIDER_API_VERSION:
         raise ProviderIncompatible("unsupported provider API version")
-    if value["provider_type"] != CLOCK_PROVIDER_TYPE:
+    if value["provider_type"] not in {CLOCK_PROVIDER_TYPE, STORYBOARD_RENDER_PROVIDER_TYPE}:
         raise ProviderIncompatible("unknown provider type")
     if not IDENTITY.fullmatch(value["identity"]):
         raise ProviderIncompatible("provider identity is unsafe")

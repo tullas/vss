@@ -32,6 +32,7 @@ MOVIE_REVIEW_COMMAND = "movie.prepare-option-review"
 MOVIE_REVIEW_DECISION_COMMAND = "movie.record-option-review-decision"
 MOVIE_SHOT_PLAN_COMMAND = "movie.create-shot-plan-draft"
 MOVIE_STORYBOARD_COMMAND = "movie.create-storyboard-specification"
+MOVIE_RENDER_COMMAND = "movie.render-storyboard"
 MOVIE_CONTINUITY_CONTEXT_COMMAND = "movie.context-assemble-character-continuity"
 MOVIE_CONTINUITY_COMMAND = "movie.analyze-character-continuity"
 
@@ -94,7 +95,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND, MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND, MOVIE_REVIEW_COMMAND, MOVIE_REVIEW_DECISION_COMMAND, MOVIE_SHOT_PLAN_COMMAND, MOVIE_STORYBOARD_COMMAND, MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND, MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND, MOVIE_REVIEW_COMMAND, MOVIE_REVIEW_DECISION_COMMAND, MOVIE_SHOT_PLAN_COMMAND, MOVIE_STORYBOARD_COMMAND, MOVIE_RENDER_COMMAND, MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -104,7 +105,7 @@ class CommandRunner:
         payload = input_data if input_data is not None else {}
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
-        if command in {MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND, MOVIE_REVIEW_COMMAND, MOVIE_REVIEW_DECISION_COMMAND, MOVIE_SHOT_PLAN_COMMAND, MOVIE_STORYBOARD_COMMAND, MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
+        if command in {MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND, MOVIE_REVIEW_COMMAND, MOVIE_REVIEW_DECISION_COMMAND, MOVIE_SHOT_PLAN_COMMAND, MOVIE_STORYBOARD_COMMAND, MOVIE_RENDER_COMMAND, MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
             try:
                 if command in {MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
                     required = {"task","scene_breakdown","continuity_sequence","character_references","character_identities","character_observations"}
@@ -202,6 +203,25 @@ class CommandRunner:
                         environment=environment, correlation_id=correlation, dry_run=dry_run,
                     )
                     return finish("success", ExitCode.SUCCESS, result, [])
+                if command == MOVIE_RENDER_COMMAND:
+                    required = {"decision", "review_packet", "option_set", "scene_breakdown", "shot_plan", "storyboard"}
+                    if frozenset(payload) != required:
+                        return finish("error", ExitCode.INVALID_INPUT, {}, ["storyboard render input is invalid"])
+                    from vss_movie_storyboard_render import admit_storyboard_render
+                    admitted = admit_storyboard_render(
+                        payload["decision"], payload["review_packet"], payload["option_set"],
+                        payload["scene_breakdown"], payload["shot_plan"], payload["storyboard"],
+                        environment=environment,
+                    )
+                    from vss_runtime import RuntimeController
+                    runtime_controller = self._runtime_controller or RuntimeController()
+                    return runtime_controller.run(
+                        command="movie.storyboard-render", environment=environment,
+                        configuration=configuration, input_data={"admission_id": admitted.admission_id},
+                        correlation_id=correlation, started_at=started_at, started_clock=started_clock,
+                        dry_run=dry_run, timeout_seconds=timeout_seconds,
+                        verbose=verbose, ask_become_pass=ask_become_pass, admitted_request=admitted,
+                    )
                 if frozenset(payload) != {"request", "context"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie breakdown input is invalid"])
                 req, context = payload["request"], payload["context"]
                 gateway = self._reasoning_gateway
