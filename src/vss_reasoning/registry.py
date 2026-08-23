@@ -16,6 +16,10 @@ from vss_reasoning_providers import DeterministicShotCinematographyPatternProvid
 from vss_reasoning_strategies import DeterministicShotCinematographyPatternStrategy
 from vss_reasoning_providers import DeterministicShotCinematographyLessonCandidateProvider
 from vss_reasoning_strategies import DeterministicShotCinematographyLessonCandidateStrategy
+from vss_reasoning_providers import DeterministicSceneShotPlanProvider
+from vss_reasoning_strategies import DeterministicSceneShotPlanStrategy
+from vss_reasoning_providers import DeterministicSceneStoryboardProvider
+from vss_reasoning_strategies import DeterministicSceneStoryboardStrategy
 
 STRATEGY_IDENTITY = ImplementationIdentity(
     "vss.generate-options.deterministic", "1.0.0", "1", "active", "trusted_builtin"
@@ -89,6 +93,62 @@ class SceneProductionOptionsImplementationRegistry:
     @property
     def digest(self):
         return canonical_digest({"strategy":[self.strategy.identity,self.strategy.version],"provider":[self.provider.identity,self.provider.version,self.provider.api_version],"calls":1,"iterations":1,"retry":False,"fallback":False,"ranking":False})
+
+@dataclass(frozen=True, slots=True)
+class SceneShotPlanImplementationRegistry:
+    strategy: DeterministicSceneShotPlanStrategy
+    provider: DeterministicSceneShotPlanProvider
+
+    @classmethod
+    def built_in(cls):
+        return cls(DeterministicSceneShotPlanStrategy(), DeterministicSceneShotPlanProvider())
+
+    def resolve(self):
+        expected = ("vss.create-scene-shot-plan-draft.deterministic", "1.0.0",
+                    "vss.reasoning.deterministic-scene-shot-plan", "1.0.0", "1")
+        actual = (self.strategy.identity, self.strategy.version, self.provider.identity,
+                  self.provider.version, self.provider.api_version)
+        if (type(self.strategy) is not DeterministicSceneShotPlanStrategy
+                or type(self.provider) is not DeterministicSceneShotPlanProvider
+                or actual != expected):
+            raise ReasoningUnavailable("shot-plan implementation substitution rejected")
+        return self.strategy, self.provider
+
+    @property
+    def digest(self):
+        return canonical_digest({"strategy": [self.strategy.identity, self.strategy.version],
+                                 "provider": [self.provider.identity, self.provider.version,
+                                              self.provider.api_version],
+                                 "calls": 1, "iterations": 1, "retry": False,
+                                 "fallback": False, "ranking": False})
+
+@dataclass(frozen=True, slots=True)
+class SceneStoryboardImplementationRegistry:
+    strategy: DeterministicSceneStoryboardStrategy
+    provider: DeterministicSceneStoryboardProvider
+
+    @classmethod
+    def built_in(cls):
+        return cls(DeterministicSceneStoryboardStrategy(), DeterministicSceneStoryboardProvider())
+
+    def resolve(self):
+        expected = ("vss.create-scene-storyboard-specification.deterministic", "1.0.0",
+                    "vss.reasoning.deterministic-scene-storyboard", "1.0.0", "1")
+        actual = (self.strategy.identity, self.strategy.version, self.provider.identity,
+                  self.provider.version, self.provider.api_version)
+        if (type(self.strategy) is not DeterministicSceneStoryboardStrategy
+                or type(self.provider) is not DeterministicSceneStoryboardProvider
+                or actual != expected):
+            raise ReasoningUnavailable("storyboard implementation substitution rejected")
+        return self.strategy, self.provider
+
+    @property
+    def digest(self):
+        return canonical_digest({"strategy": [self.strategy.identity, self.strategy.version],
+                                 "provider": [self.provider.identity, self.provider.version,
+                                              self.provider.api_version],
+                                 "calls": 1, "iterations": 1, "retry": False,
+                                 "fallback": False, "external_image_provider": False})
 
 @dataclass(frozen=True, slots=True)
 class CharacterContinuityImplementationRegistry:

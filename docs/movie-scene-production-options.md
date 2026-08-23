@@ -42,3 +42,141 @@ records exact Knowledge and admission/source lineage with the closed
 closed; it is never silently discarded. No Knowledge follows the existing
 fixed, stable-order, non-ranking option path. Runtime remains the sole
 execution authority and no automatic promotion or external learning exists.
+
+## M7.2 deterministic option-review preparation
+
+The development command below independently revalidates an M7.1 v2 Option Set
+and produces `scene_option_review_packet/1`:
+
+```text
+vss movie prepare-option-review --input <option-set-v2.json> --request-id <request-id> --environment development --correlation-id <correlation-id>
+```
+
+The packet binds the complete source Option Set, preserves every option in its
+original stable non-ranking order, carries exact Knowledge lineage and declared
+informational influence, and presents structured considerations, unresolved
+checks, and common human-review prompts. Packet, entry, payload, and complete
+result digests make omission, substitution, and resealing detectable by the
+domain validator.
+
+This is review preparation, not a review decision. It does not rank, score,
+recommend, select, approve, schedule, budget, create a plan or workflow, grant
+authority, or execute anything. Human review outcomes and any later selection
+or approval boundary remain separate future milestones.
+
+## M7.3 accountable option-review decisions
+
+`record_scene_option_review_decision/1` and
+`scene_option_review_decision/1` record exactly one accountable human
+assessment—`accept`, `reject`, or `defer`—against an exact M7.2 packet entry.
+The development command requires both authoritative source artifacts:
+
+```text
+vss movie record-option-review-decision --review-packet <review-packet-v1.json> --option-set <option-set-v2.json> --option-id <option-id> --reviewer-id <reviewer-id> --outcome <accept|reject|defer> --rationale <human-rationale> --request-id <request-id> --environment development --correlation-id <correlation-id>
+```
+
+Use one or more `--deferred-condition <condition>` arguments when the outcome
+is `defer`; deferred outcomes require at least one unresolved reason or
+next-review condition, while other outcomes reject deferred conditions. The
+validator independently reconstructs the selected option and inherited
+Knowledge lineage from the validated packet and Option Set. Task, decision,
+payload, packet, source, option-content, and complete-result bindings make
+fully resealed substitution or mutation fail closed.
+
+An `accept` outcome is only a review-stage human assessment. The result
+explicitly grants no production approval, production plan, scheduling,
+workflow activation, capability, or Runtime execution authority. M7.3 adds no
+ranking, recommendation, selection workflow, planning, scheduling, or
+execution behavior.
+
+The caller-supplied reviewer ID is integrity-bound accountability metadata; it
+is not authenticated, identity-verified, authorization-checked, or digitally
+signed by this local milestone. Consumers must not treat the identifier as
+proof of reviewer identity or authority.
+
+## M7.4 deterministic shot-plan draft POC
+
+### Local terminal demo
+
+Run the complete existing POC from one story file with no intermediate-file
+management:
+
+```text
+vss movie demo --story tests/fixtures/movie/story-fragment-valid.json --reviewer-id local.reviewer
+```
+
+The command performs the real scene-breakdown, v2 production-option, review,
+accepted-decision, and shot-plan services. It prints the four production
+options, asks the user to choose one, and writes one JSON bundle with the
+validated intermediate artifacts, review decision, and `draft_only` shot plan
+to standard output. `--option-id` provides the same
+path non-interactively. The reviewer ID remains caller-supplied accountability
+metadata, not authenticated identity or production authority.
+
+The demo intentionally continues with the first scene in the deterministic
+breakdown. It does not provide scene selection or multi-scene shot planning.
+
+`create_scene_shot_plan_draft/1` consumes an independently validated accepted
+M7.3 decision together with its exact review packet, v2 Option Set, and scene
+breakdown. Through the Reasoning Gateway it makes exactly one call to the local
+deterministic shot-plan provider and emits `scene_shot_plan_draft/1`. Reject and
+defer assessments fail closed. Dry-run completes admission and binding but
+calls no provider and emits no draft.
+
+The draft contains three stable structural cards: scene orientation, primary
+action, and detail or transition. Their order describes narrative structure;
+it is not ranking or recommendation. Each card preserves source evidence,
+assumptions, unknowns, limitations, and exact cinematography Knowledge
+influence when present. Composition qualifications use declared scene
+locations, characters, time indicators, events, and unknowns; missing angle,
+elevation, movement, or screen-direction evidence is reported as unspecified
+rather than invented.
+The validator independently reconstructs every card from the authoritative
+upstream artifacts, so resealing cannot legitimize substitution, omission,
+addition, reordering, or content mutation.
+
+```text
+vss movie create-shot-plan-draft --decision <decision-v1.json> --review-packet <review-packet-v1.json> --option-set <option-set-v2.json> --scene-breakdown <scene-breakdown-v1.json> --request-id <request-id> --environment development --correlation-id <correlation-id>
+vss movie create-shot-plan-draft --decision <decision-v1.json> --review-packet <review-packet-v1.json> --option-set <option-set-v2.json> --scene-breakdown <scene-breakdown-v1.json> --request-id <request-id> --environment development --correlation-id <correlation-id> --dry-run
+```
+
+The artifact is structurally `draft_only`. It provides no production
+approval, final shot selection, production-plan authority, scheduling,
+workflow activation, capability grant, provider execution authority, or
+Runtime execution authority. It does not establish feasibility and performs
+no media generation, external model call, storage, orchestration, or Runtime
+operation.
+
+## M8.0 provider-neutral storyboard specifications
+
+`create_scene_storyboard_specification/1` consumes the exact accepted review
+decision, review packet, production option set, scene breakdown, and validated
+`scene_shot_plan_draft/1`. Admission reconstructs the complete upstream chain,
+including the selected option and inherited informational Knowledge lineage.
+`scene_storyboard_specification/1` contains exactly one deterministically ordered
+frame specification for each shot card.
+
+Each frame carries its source shot identity and digest, supported subject, action,
+environment, and time cues, qualified framing and camera fields, accepted-option
+style direction, continuity constraints, explicit assumptions and unknowns, a
+provider-neutral prompt, negative constraints, and its own semantic digest. Literal
+time cues use only a closed set found in validated source observations when the
+scene contract has no declared time indicator. Other missing facts remain explicit
+unknowns; the derivation does not invent appearance, blocking, lens, palette, set
+dressing, weather, or architecture.
+
+The artifact is `specification_only`. It grants no production approval, final frame
+selection, scheduling, workflow activation, capability, provider execution,
+Runtime execution, or media-generation authority. The built-in deterministic
+provider is an internal governed transformation only; no external image provider
+is configured or called. Dry-run validates the authoritative chain with zero
+provider calls.
+
+```text
+vss movie create-storyboard-specification --decision <decision-v1.json> --review-packet <review-packet-v1.json> --option-set <option-set-v2.json> --scene-breakdown <scene-breakdown-v1.json> --shot-plan <shot-plan-v1.json> --request-id <request-id> --environment development --correlation-id <correlation-id>
+vss movie demo --story tests/fixtures/movie/story-fragment-valid.json --reviewer-id local.reviewer --storyboard-specification
+```
+
+Add `--dry-run` to the standalone command for readiness only. Without
+`--storyboard-specification`, the demo retains its M7.4 behavior and stops after
+the shot-plan draft.

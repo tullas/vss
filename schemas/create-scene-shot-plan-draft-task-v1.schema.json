@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vss.movie.create_scene_shot_plan_draft/1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "task_identity", "task_version", "request_id", "correlation_id", "project_id", "scene_id", "environment", "purpose", "expected_result_family", "expected_result_version", "decision_digest", "decision_complete_digest", "review_packet_digest", "review_packet_complete_digest", "option_set_digest", "option_set_complete_digest", "selected_option_id", "selected_option_content_digest", "scene_breakdown_digest", "scene_breakdown_payload_digest", "bounds", "lifecycle", "task_content_digest"],
+  "properties": {
+    "schema_version": {"const": "1"}, "task_identity": {"const": "create_scene_shot_plan_draft"}, "task_version": {"const": "1"},
+    "request_id": {"$ref": "#/$defs/id"}, "correlation_id": {"$ref": "#/$defs/id"}, "project_id": {"$ref": "#/$defs/id"}, "scene_id": {"$ref": "#/$defs/id"},
+    "environment": {"const": "development"}, "purpose": {"const": "scene_shot_plan_draft_local_development"},
+    "expected_result_family": {"const": "scene_shot_plan_draft"}, "expected_result_version": {"const": "1"},
+    "decision_digest": {"$ref": "#/$defs/digest"}, "decision_complete_digest": {"$ref": "#/$defs/digest"},
+    "review_packet_digest": {"$ref": "#/$defs/digest"}, "review_packet_complete_digest": {"$ref": "#/$defs/digest"},
+    "option_set_digest": {"$ref": "#/$defs/digest"}, "option_set_complete_digest": {"$ref": "#/$defs/digest"},
+    "selected_option_id": {"$ref": "#/$defs/id"}, "selected_option_content_digest": {"$ref": "#/$defs/digest"},
+    "scene_breakdown_digest": {"$ref": "#/$defs/digest"}, "scene_breakdown_payload_digest": {"$ref": "#/$defs/digest"},
+    "bounds": {"type": "object", "additionalProperties": false, "required": ["maximum_shots", "maximum_result_bytes"], "properties": {"maximum_shots": {"const": 3}, "maximum_result_bytes": {"const": 65536}}},
+    "lifecycle": {"const": "active"}, "task_content_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {"id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"}, "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

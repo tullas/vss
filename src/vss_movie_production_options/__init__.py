@@ -1,6 +1,6 @@
 from .service import (
     ProductionProfile, ProductionProfileCatalogue, SceneProductionOptionsContext, SceneProductionOptionsProviderView,
-    assemble_production_options_context, validate_production_options_context, validate_production_options_context_v2,
+    assemble_production_options_context, assemble_production_options_context_v2, validate_production_options_context, validate_production_options_context_v2,
     generate_production_options, production_provider_view, production_provider_view_v2, production_context_report, create_production_option_candidates, create_production_option_set, create_production_option_set_v2,
 )
-__all__=["ProductionProfile","ProductionProfileCatalogue","SceneProductionOptionsContext","SceneProductionOptionsProviderView","assemble_production_options_context","validate_production_options_context","validate_production_options_context_v2","generate_production_options","production_provider_view","production_provider_view_v2","production_context_report","create_production_option_candidates","create_production_option_set","create_production_option_set_v2"]
+__all__=["ProductionProfile","ProductionProfileCatalogue","SceneProductionOptionsContext","SceneProductionOptionsProviderView","assemble_production_options_context","assemble_production_options_context_v2","validate_production_options_context","validate_production_options_context_v2","generate_production_options","production_provider_view","production_provider_view_v2","production_context_report","create_production_option_candidates","create_production_option_set","create_production_option_set_v2"]

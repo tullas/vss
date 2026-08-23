@@ -100,6 +100,13 @@ def _parser() -> argparse.ArgumentParser:
     context_validate.add_argument("--correlation-id")
     movie = subparsers.add_parser("movie")
     movie_actions = movie.add_subparsers(dest="movie_action", required=True)
+    movie_demo = movie_actions.add_parser("demo")
+    movie_demo.add_argument("--story", type=Path, required=True)
+    movie_demo.add_argument("--reviewer-id", required=True)
+    movie_demo.add_argument("--correlation-id", default="local-movie-demo")
+    movie_demo.add_argument("--option-id")
+    movie_demo.add_argument("--rationale", default="Accepted at human review for a local shot-plan draft demo.")
+    movie_demo.add_argument("--storyboard-specification", action="store_true")
     movie_break = movie_actions.add_parser("break-down-scenes")
     movie_break.add_argument("--request", type=Path, required=True)
     movie_break.add_argument("--context", type=Path, required=True)
@@ -115,6 +122,28 @@ def _parser() -> argparse.ArgumentParser:
     movie_prod.add_argument("--request", type=Path, required=True); movie_prod.add_argument("--scene-breakdown", type=Path, required=True); movie_prod.add_argument("--environment", required=True); movie_prod.add_argument("--correlation-id", required=True)
     movie_gen = movie_actions.add_parser("generate-scene-production-options")
     movie_gen.add_argument("--request", type=Path, required=True); movie_gen.add_argument("--context", type=Path, required=True); movie_gen.add_argument("--environment", required=True); movie_gen.add_argument("--correlation-id", required=True); movie_gen.add_argument("--dry-run",action="store_true")
+    movie_review = movie_actions.add_parser("prepare-option-review")
+    movie_review.add_argument("--input", type=Path, required=True); movie_review.add_argument("--environment", required=True); movie_review.add_argument("--correlation-id", required=True); movie_review.add_argument("--request-id", required=True)
+    movie_decision = movie_actions.add_parser("record-option-review-decision")
+    movie_decision.add_argument("--review-packet", type=Path, required=True)
+    movie_decision.add_argument("--option-set", type=Path, required=True)
+    movie_decision.add_argument("--option-id", required=True); movie_decision.add_argument("--reviewer-id", required=True)
+    movie_decision.add_argument("--outcome", required=True); movie_decision.add_argument("--rationale", required=True)
+    movie_decision.add_argument("--deferred-condition", action="append", default=[])
+    movie_decision.add_argument("--request-id", required=True); movie_decision.add_argument("--environment", required=True); movie_decision.add_argument("--correlation-id", required=True)
+    movie_shots = movie_actions.add_parser("create-shot-plan-draft")
+    movie_shots.add_argument("--decision", type=Path, required=True)
+    movie_shots.add_argument("--review-packet", type=Path, required=True)
+    movie_shots.add_argument("--option-set", type=Path, required=True)
+    movie_shots.add_argument("--scene-breakdown", type=Path, required=True)
+    movie_shots.add_argument("--request-id", required=True); movie_shots.add_argument("--environment", required=True); movie_shots.add_argument("--correlation-id", required=True); movie_shots.add_argument("--dry-run", action="store_true")
+    movie_storyboard = movie_actions.add_parser("create-storyboard-specification")
+    movie_storyboard.add_argument("--decision", type=Path, required=True)
+    movie_storyboard.add_argument("--review-packet", type=Path, required=True)
+    movie_storyboard.add_argument("--option-set", type=Path, required=True)
+    movie_storyboard.add_argument("--scene-breakdown", type=Path, required=True)
+    movie_storyboard.add_argument("--shot-plan", type=Path, required=True)
+    movie_storyboard.add_argument("--request-id", required=True); movie_storyboard.add_argument("--environment", required=True); movie_storyboard.add_argument("--correlation-id", required=True); movie_storyboard.add_argument("--dry-run", action="store_true")
     for action in ("context-assemble-character-continuity", "analyze-character-continuity"):
         continuity = movie_actions.add_parser(action)
         continuity.add_argument("--input", type=Path, required=True)
@@ -273,11 +302,76 @@ def main(argv: list[str] | None = None) -> int:
             return int(exc.exit_code)
 
     if args.action == "movie":
-        if args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity"}:
+        if args.movie_action == "demo":
+            story, input_error = _read_context_file(args.story)
+            if input_error is not None:
+                print(json.dumps({"error": "story must be a valid JSON object"}, sort_keys=True, separators=(",", ":")))
+                return int(input_error)
+            try:
+                from vss_movie_demo import finish_demo, prepare_demo
+
+                prepared = prepare_demo(story, correlation_id=args.correlation_id)
+                entries = prepared.review_packet["payload"]["review_entries"]
+                option_ids = [entry["option_id"] for entry in entries]
+                option_id = args.option_id
+                if option_id is None:
+                    print("Production options:", file=sys.stderr)
+                    for index, (entry, option) in enumerate(zip(entries, prepared.option_set["payload"]["options"]), 1):
+                        print(f"  {index}. {option['profile_identity']} ({entry['option_id']})", file=sys.stderr)
+                        print(f"     {option['qualified_rationale']}", file=sys.stderr)
+                    print(f"Choose an option [1-{len(entries)}]: ", end="", file=sys.stderr, flush=True)
+                    choice = input().strip()
+                    if not choice.isdigit() or not 1 <= int(choice) <= len(entries):
+                        raise ValueError("option choice is invalid")
+                    option_id = option_ids[int(choice) - 1]
+                if option_id not in option_ids:
+                    raise ValueError("option choice is invalid")
+                result = finish_demo(
+                    prepared, option_id=option_id, reviewer_id=args.reviewer_id,
+                    rationale=args.rationale, correlation_id=args.correlation_id,
+                    include_storyboard=args.storyboard_specification,
+                )
+                print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+                return int(ExitCode.SUCCESS)
+            except (EOFError, KeyboardInterrupt):
+                print(json.dumps({"error": "movie demo input or selection is invalid"}, sort_keys=True, separators=(",", ":")))
+                return int(ExitCode.INVALID_INPUT)
+            except Exception:
+                print(json.dumps({"error": "movie demo input or selection is invalid"}, sort_keys=True, separators=(",", ":")))
+                return int(ExitCode.INVALID_INPUT)
+        if args.movie_action == "prepare-option-review":
+            input_data, input_error = _read_context_file(args.input)
+            if input_error is None:
+                input_data = {"option_set": input_data, "request_id": args.request_id}
+        elif args.movie_action == "record-option-review-decision":
+            review_packet, input_error = _read_context_file(args.review_packet)
+            option_set, option_error = _read_context_file(args.option_set)
+            input_error = input_error or option_error
+            if input_error is None:
+                input_data = {
+                    "review_packet": review_packet, "option_set": option_set, "option_id": args.option_id,
+                    "reviewer_id": args.reviewer_id, "outcome": args.outcome, "rationale": args.rationale,
+                    "deferred_review_conditions": args.deferred_condition, "request_id": args.request_id,
+                }
+        elif args.movie_action in {"create-shot-plan-draft", "create-storyboard-specification"}:
+            decision, input_error = _read_context_file(args.decision)
+            packet, packet_error = _read_context_file(args.review_packet)
+            option_set, option_error = _read_context_file(args.option_set)
+            breakdown, breakdown_error = _read_context_file(args.scene_breakdown)
+            input_error = input_error or packet_error or option_error or breakdown_error
+            shot_plan = None
+            if args.movie_action == "create-storyboard-specification":
+                shot_plan, shot_error = _read_context_file(args.shot_plan)
+                input_error = input_error or shot_error
+            if input_error is None:
+                input_data = {"decision": decision, "review_packet": packet, "option_set": option_set,
+                              "scene_breakdown": breakdown, "request_id": args.request_id}
+                if shot_plan is not None: input_data["shot_plan"] = shot_plan
+        elif args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity"}:
             input_data, input_error = _read_continuity_bundle(args.input)
         else:
             request, input_error = _read_context_file(args.request)
-        if args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity"}:
+        if args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity", "prepare-option-review", "record-option-review-decision", "create-shot-plan-draft", "create-storyboard-specification"}:
             pass
         elif args.movie_action in {"break-down-scenes","generate-scene-production-options"}:
             context, context_error = _read_context_file(args.context)
@@ -341,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.action == "context":
         command_name = f"context.{args.context_action}"
     elif args.action == "movie":
-        command_name = {"break-down-scenes":"movie.break-down-scenes","context-assemble-scene-breakdown":"movie.context-assemble-scene-breakdown","context-assemble-scene-production-options":"movie.context-assemble-scene-production-options","generate-scene-production-options":"movie.generate-scene-production-options","context-assemble-character-continuity":"movie.context-assemble-character-continuity","analyze-character-continuity":"movie.analyze-character-continuity"}[args.movie_action]
+        command_name = {"break-down-scenes":"movie.break-down-scenes","context-assemble-scene-breakdown":"movie.context-assemble-scene-breakdown","context-assemble-scene-production-options":"movie.context-assemble-scene-production-options","generate-scene-production-options":"movie.generate-scene-production-options","prepare-option-review":"movie.prepare-option-review","record-option-review-decision":"movie.record-option-review-decision","create-shot-plan-draft":"movie.create-shot-plan-draft","create-storyboard-specification":"movie.create-storyboard-specification","context-assemble-character-continuity":"movie.context-assemble-character-continuity","analyze-character-continuity":"movie.analyze-character-continuity"}[args.movie_action]
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret
