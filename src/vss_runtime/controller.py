@@ -32,10 +32,12 @@ from .audit import AuditLogger
 from .errors import (
     CapabilityExecutionFailure,
     InvalidCapabilityInput,
+    PermissionDenied,
     RuntimeFailure,
     RuntimeInternalFailure,
     RuntimeTimeout,
 )
+from .external_preflight import ExternalExecutionPreflight, ExternalExecutionPreflightSpec
 from .loader import CapabilityLoader
 from .host_inspection import HostInspector
 from .models import ExecutionContext
@@ -60,6 +62,9 @@ class RuntimeController:
         audit_logger: AuditLogger | None = None,
         provider_registry: ProviderRegistry | None = None,
         host_inspector: HostInspector | None = None,
+        creative_smoke_transport=None,
+        creative_smoke_secret_reader=None,
+        external_execution_preflight: ExternalExecutionPreflight | None = None,
     ) -> None:
         self.root = (root or repository_root()).resolve()
         builtins_root = self.root / "capabilities"
@@ -72,6 +77,7 @@ class RuntimeController:
                 "bootstrap.check": ("filesystem_read", "subprocess"),
                 "movie.storyboard-render": ("provider_access", "filesystem_write"),
                 "movie.pictorial-frame-generation": ("provider_access", "filesystem_write"),
+                "movie.m8-3-real-provider-smoke-2": ("filesystem_write", "network", "secrets"),
             },
         )
         self.provider_registry = provider_registry or ProviderRegistry(
@@ -80,6 +86,9 @@ class RuntimeController:
         self.provider_selector = ProviderSelector(self.provider_registry)
         self.host_inspector = host_inspector or HostInspector()
         self.audit = audit_logger or AuditLogger(self.root / ".local/runtime/audit", trusted_root=self.root)
+        self.creative_smoke_transport = creative_smoke_transport
+        self.creative_smoke_secret_reader = creative_smoke_secret_reader
+        self.external_execution_preflight = external_execution_preflight or ExternalExecutionPreflight()
 
     def _source_commit(self) -> str | None:
         try:
@@ -118,6 +127,9 @@ class RuntimeController:
         status = "error"
         artifact_publisher: StoryboardArtifactPublisher | None = None
         pictorial_artifact_publisher: PictorialArtifactPublisher | None = None
+        creative_smoke_artifact_publisher = None
+        provider_diagnostic: dict[str, Any] | None = None
+        preflight_diagnostic: dict[str, Any] | None = None
         exit_code: ExitCode = ExitCode.INTERNAL_ERROR
         try:
             capability = self.registry.resolve_command(command)
@@ -162,6 +174,10 @@ class RuntimeController:
                 from vss_movie_pictorial import AdmittedPictorialFrame
                 if environment != "development" or type(admitted_request) is not AdmittedPictorialFrame:
                     raise InvalidCapabilityInput("pictorial frame generation requires authoritative movie admission")
+            elif command == "movie.m8-3-real-provider-smoke-2-generate":
+                from vss_movie_creative_smoke import AdmittedCreativeSmoke
+                if environment != "development" or type(admitted_request) is not AdmittedCreativeSmoke:
+                    raise InvalidCapabilityInput("creative smoke generation requires authoritative movie admission")
             elif admitted_request is not None:
                 raise InvalidCapabilityInput("admitted request is not valid for this capability")
             provider_access = ProviderAccess()
@@ -178,6 +194,52 @@ class RuntimeController:
                 artifact_publisher = StoryboardArtifactPublisher(self.root)
             if capability.manifest.identity == "movie.pictorial-frame-generation" and "filesystem_write" in authorized:
                 pictorial_artifact_publisher = PictorialArtifactPublisher(self.root)
+            creative_smoke_access = None
+            if capability.manifest.identity == "movie.m8-3-real-provider-smoke-2":
+                if set(authorized) != {"filesystem_write", "network", "secrets"}:
+                    raise PermissionDenied("creative smoke requires exact Runtime permissions")
+                from vss_movie_creative_smoke import (
+                    AUTHORIZED_COST_CEILING_USD,
+                    ENDPOINT,
+                    MAXIMUM_ESTIMATED_COST_USD,
+                    MODEL_IDENTITY,
+                    OpenAIImageSmokeAccess,
+                    SECRET_NAME,
+                    SmokeExperimentArtifactPublisher,
+                    SmokeProviderRequest,
+                )
+                from vss_movie_creative_smoke.provider import _https_post
+                import os
+
+                provider_audit.append({
+                    "type": "experimental_image_generation",
+                    "identity": "openai",
+                    "version": MODEL_IDENTITY,
+                    "authorization": "approved",
+                })
+                creative_smoke_access = OpenAIImageSmokeAccess(
+                    transport=self.creative_smoke_transport or _https_post,
+                    secret_reader=self.creative_smoke_secret_reader or os.environ.get,
+                )
+                smoke_request = SmokeProviderRequest(
+                    prompt=admitted_request.prompt,
+                    provider_request_digest=admitted_request.provider_request_digest,
+                    depiction_projection_digest=admitted_request.depiction_projection_digest,
+                )
+                authoritative_request_digest = creative_smoke_access.prepare(smoke_request)
+                if "filesystem_write" in authorized:
+                    creative_smoke_artifact_publisher = SmokeExperimentArtifactPublisher(self.root)
+                    if not dry_run:
+                        creative_smoke_artifact_publisher.check_readiness(admitted_request)
+                        self.external_execution_preflight.run(ExternalExecutionPreflightSpec(
+                            endpoint=ENDPOINT,
+                            credential_environment_variable=SECRET_NAME,
+                            provider_request_digest=admitted_request.provider_request_digest,
+                            authoritative_provider_request_digest=authoritative_request_digest,
+                            maximum_provider_attempts=1,
+                            maximum_estimated_cost_usd=MAXIMUM_ESTIMATED_COST_USD,
+                            authorized_cost_ceiling_usd=AUTHORIZED_COST_CEILING_USD,
+                        ))
             if capability.manifest.sdk_api_version is not None:
                 try:
                     validate_input(input_data, command_record["input_schema"])
@@ -202,6 +264,8 @@ class RuntimeController:
                     ),
                     artifact_publisher=artifact_publisher,
                     pictorial_artifact_publisher=pictorial_artifact_publisher,
+                    creative_smoke_access=creative_smoke_access,
+                    creative_smoke_artifact_publisher=creative_smoke_artifact_publisher,
                     admitted_request=admitted_request,
                 )
             else:
@@ -216,6 +280,8 @@ class RuntimeController:
                     ask_become_pass=ask_become_pass,
                 )
             handler = self.loader.load(capability)
+            if creative_smoke_artifact_publisher is not None and not dry_run:
+                creative_smoke_artifact_publisher.reserve(admitted_request, execution_id)
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             future = executor.submit(handler, context, input_data, dry_run)
             try:
@@ -265,6 +331,12 @@ class RuntimeController:
         except (RuntimeFailure, ProviderFailure) as exc:
             exit_code = exc.exit_code
             errors = [str(exc)]
+            diagnostic = getattr(exc, "diagnostic", None)
+            if capability_identity == "movie.m8-3-real-provider-smoke-2" and diagnostic is not None:
+                provider_diagnostic = diagnostic.as_dict()
+            bounded_preflight = getattr(exc, "preflight_diagnostic", None)
+            if isinstance(bounded_preflight, dict):
+                preflight_diagnostic = dict(bounded_preflight)
             if exc.category in ("permission_denied", "provider_access_denied"):
                 authorization = "denied"
                 for provider_record in provider_audit:
@@ -304,10 +376,14 @@ class RuntimeController:
         }
         if provider_audit:
             audit_record["providers"] = provider_audit
+        if provider_diagnostic is not None:
+            audit_record["provider_diagnostic"] = provider_diagnostic
+        if preflight_diagnostic is not None:
+            audit_record["external_execution_preflight"] = preflight_diagnostic
         try:
             self.audit.append(audit_record)
         except RuntimeInternalFailure as exc:
-            publisher = artifact_publisher or pictorial_artifact_publisher
+            publisher = artifact_publisher or pictorial_artifact_publisher or creative_smoke_artifact_publisher
             if publisher is not None:
                 publisher.abort()
             response["status"] = "error"
@@ -315,7 +391,7 @@ class RuntimeController:
             response["output"] = {}
             response["errors"] = [str(exc)]
             return response, int(ExitCode.INTERNAL_ERROR)
-        publisher = artifact_publisher or pictorial_artifact_publisher
+        publisher = artifact_publisher or pictorial_artifact_publisher or creative_smoke_artifact_publisher
         if status == "success" and publisher is not None and not dry_run:
             try:
                 publisher.publish()
