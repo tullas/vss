@@ -144,6 +144,9 @@ Current product direction prioritizes demonstrable movie-production value. M7.4 
 establishes story → scene breakdown → production options → human review → accepted review
 decision → deterministic shot-plan draft.
 
+The canonical local entry point for that complete path is `vss movie demo`; keep
+it backed by the real stage services rather than fixture-only or parallel demo logic.
+
 Prefer extending this executable path toward tangible user-visible outputs
 over governance layers that do not improve demonstrability.
 

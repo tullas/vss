@@ -96,6 +96,26 @@ proof of reviewer identity or authority.
 
 ## M7.4 deterministic shot-plan draft POC
 
+### Local terminal demo
+
+Run the complete existing POC from one story file with no intermediate-file
+management:
+
+```text
+vss movie demo --story tests/fixtures/movie/story-fragment-valid.json --reviewer-id local.reviewer
+```
+
+The command performs the real scene-breakdown, v2 production-option, review,
+accepted-decision, and shot-plan services. It prints the four production
+options, asks the user to choose one, and writes one JSON bundle with the
+validated intermediate artifacts, review decision, and `draft_only` shot plan
+to standard output. `--option-id` provides the same
+path non-interactively. The reviewer ID remains caller-supplied accountability
+metadata, not authenticated identity or production authority.
+
+The demo intentionally continues with the first scene in the deterministic
+breakdown. It does not provide scene selection or multi-scene shot planning.
+
 `create_scene_shot_plan_draft/1` consumes an independently validated accepted
 M7.3 decision together with its exact review packet, v2 Option Set, and scene
 breakdown. Through the Reasoning Gateway it makes exactly one call to the local

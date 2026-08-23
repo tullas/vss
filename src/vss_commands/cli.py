@@ -100,6 +100,12 @@ def _parser() -> argparse.ArgumentParser:
     context_validate.add_argument("--correlation-id")
     movie = subparsers.add_parser("movie")
     movie_actions = movie.add_subparsers(dest="movie_action", required=True)
+    movie_demo = movie_actions.add_parser("demo")
+    movie_demo.add_argument("--story", type=Path, required=True)
+    movie_demo.add_argument("--reviewer-id", required=True)
+    movie_demo.add_argument("--correlation-id", default="local-movie-demo")
+    movie_demo.add_argument("--option-id")
+    movie_demo.add_argument("--rationale", default="Accepted at human review for a local shot-plan draft demo.")
     movie_break = movie_actions.add_parser("break-down-scenes")
     movie_break.add_argument("--request", type=Path, required=True)
     movie_break.add_argument("--context", type=Path, required=True)
@@ -288,6 +294,42 @@ def main(argv: list[str] | None = None) -> int:
             return int(exc.exit_code)
 
     if args.action == "movie":
+        if args.movie_action == "demo":
+            story, input_error = _read_context_file(args.story)
+            if input_error is not None:
+                print(json.dumps({"error": "story must be a valid JSON object"}, sort_keys=True, separators=(",", ":")))
+                return int(input_error)
+            try:
+                from vss_movie_demo import finish_demo, prepare_demo
+
+                prepared = prepare_demo(story, correlation_id=args.correlation_id)
+                entries = prepared.review_packet["payload"]["review_entries"]
+                option_ids = [entry["option_id"] for entry in entries]
+                option_id = args.option_id
+                if option_id is None:
+                    print("Production options:", file=sys.stderr)
+                    for index, (entry, option) in enumerate(zip(entries, prepared.option_set["payload"]["options"]), 1):
+                        print(f"  {index}. {option['profile_identity']} ({entry['option_id']})", file=sys.stderr)
+                        print(f"     {option['qualified_rationale']}", file=sys.stderr)
+                    print(f"Choose an option [1-{len(entries)}]: ", end="", file=sys.stderr, flush=True)
+                    choice = input().strip()
+                    if not choice.isdigit() or not 1 <= int(choice) <= len(entries):
+                        raise ValueError("option choice is invalid")
+                    option_id = option_ids[int(choice) - 1]
+                if option_id not in option_ids:
+                    raise ValueError("option choice is invalid")
+                result = finish_demo(
+                    prepared, option_id=option_id, reviewer_id=args.reviewer_id,
+                    rationale=args.rationale, correlation_id=args.correlation_id,
+                )
+                print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+                return int(ExitCode.SUCCESS)
+            except (EOFError, KeyboardInterrupt):
+                print(json.dumps({"error": "movie demo input or selection is invalid"}, sort_keys=True, separators=(",", ":")))
+                return int(ExitCode.INVALID_INPUT)
+            except Exception:
+                print(json.dumps({"error": "movie demo input or selection is invalid"}, sort_keys=True, separators=(",", ":")))
+                return int(ExitCode.INVALID_INPUT)
         if args.movie_action == "prepare-option-review":
             input_data, input_error = _read_context_file(args.input)
             if input_error is None:
