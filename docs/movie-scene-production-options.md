@@ -24,3 +24,21 @@ vss movie generate-scene-production-options --request <task.json> --context <con
 ```
 
 M4.3 introduces no Plan IR, ranking, recommendation, automatic selection, approval, execution, scheduling, budgeting, external AI, prompt, connector, retrieval, search, embedding, database, cache, media generation, rendering, distributed infrastructure, production audit, process isolation, or autonomous behavior. Local JSONL audit remains development-only.
+
+## M7.1 governed Knowledge-informed options
+
+`scene_production_options_context/2`, `generate_scene_production_options/2`,
+and `scene_production_option_set/2` are the exact v2 boundary for optional
+M6.5 Shot/Cinematography Knowledge. The v1 contracts and behavior remain
+unchanged. At most two supplied Knowledge artifacts are independently
+revalidated immediately before the deterministic provider call, including
+project/domain, local manual or synthetic provenance, admission lineage, and
+active lifecycle eligibility.
+
+Knowledge is used only as bounded informational context. It cannot select,
+rank, score, recommend, approve, authorize, or establish truth. The v2 result
+records exact Knowledge and admission/source lineage with the closed
+`informational_context_only` designation. Invalid supplied Knowledge fails
+closed; it is never silently discarded. No Knowledge follows the existing
+fixed, stable-order, non-ranking option path. Runtime remains the sole
+execution authority and no automatic promotion or external learning exists.
