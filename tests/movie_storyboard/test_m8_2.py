@@ -79,9 +79,9 @@ class M82PictorialFrameTests(unittest.TestCase):
         two = admit_pictorial_frame(*self.values, self.storyboard, frame_id=self.frame["frame_id"], environment="development")
         self.assertEqual((one.semantic_request_digest, one.provider_visible_digest),
                          (two.semantic_request_digest, two.provider_visible_digest))
-        self.assertEqual(set(one.projection), {"subject_focus", "action", "environment", "time_and_lighting",
-            "camera", "visual_style", "assumptions", "explicit_unknowns", "generation_prompt",
-            "negative_constraints", "appearance_policy", "output"})
+        self.assertEqual(set(one.projection), {"depictable_facts", "required_narrative_emphasis",
+            "narrative_context", "deliberate_ambiguities", "creative_degrees_of_freedom", "shot",
+            "prohibited_contradictions", "depiction_instructions", "output"})
         self.assertNotIn("review_packet", one.projection); self.assertNotIn("knowledge_influence", one.projection)
         with self.assertRaises(TypeError): AdmittedPictorialFrame(object())
         response, code = self.controller().run("movie.pictorial-frame-generate", "development", {},
