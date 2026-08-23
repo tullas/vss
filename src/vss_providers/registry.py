@@ -7,6 +7,9 @@ from pathlib import Path
 
 from .constants import (
     CLOCK_PROVIDER_TYPE,
+    CREATIVE_EXPERIMENT_PROVIDER_TYPE,
+    CREATIVE_EXPERIMENT_PROVIDER_IDENTITY,
+    CREATIVE_EXPERIMENT_IMPLEMENTATION_IDENTITY,
     LOCAL_CLOCK_IDENTITY,
     LOCAL_CLOCK_IMPLEMENTATION_IDENTITY,
     LOCAL_STORYBOARD_RENDER_IDENTITY,
@@ -72,7 +75,7 @@ class ProviderRegistry:
         if manifest_digest != provider.manifest_sha256 or implementation_digest != provider.implementation_sha256:
             raise ProviderIncompatible("provider changed before initialization")
 
-    def initialize(self, provider: RegisteredProvider) -> ClockProvider | StoryboardRenderProvider | PictorialFrameProvider:
+    def initialize(self, provider: RegisteredProvider, experimental_access=None) -> ClockProvider | StoryboardRenderProvider | PictorialFrameProvider:
         self._verify_integrity(provider)
         module_name = f"_vss_provider_{provider.metadata.identity.replace('.', '_')}_{provider.implementation_sha256[:12]}"
         spec = importlib.util.spec_from_file_location(module_name, provider.implementation_path)
@@ -84,7 +87,7 @@ class ProviderRegistry:
             factory = getattr(module, provider.factory_name, None)
             if not callable(factory):
                 raise ProviderUnavailable("provider factory is unavailable")
-            implementation = factory()
+            implementation = factory(experimental_access) if provider.metadata.provider_type == CREATIVE_EXPERIMENT_PROVIDER_TYPE else factory()
         except ProviderUnavailable:
             raise
         except Exception as exc:
@@ -94,7 +97,7 @@ class ProviderRegistry:
                 raise ProviderIncompatible("provider does not implement the clock contract")
         elif provider.metadata.provider_type == STORYBOARD_RENDER_PROVIDER_TYPE and not callable(getattr(implementation, "render", None)):
             raise ProviderIncompatible("provider does not implement the storyboard render contract")
-        elif provider.metadata.provider_type == PICTORIAL_FRAME_PROVIDER_TYPE and not callable(getattr(implementation, "generate", None)):
+        elif provider.metadata.provider_type in {PICTORIAL_FRAME_PROVIDER_TYPE, CREATIVE_EXPERIMENT_PROVIDER_TYPE} and not callable(getattr(implementation, "generate", None)):
             raise ProviderIncompatible("provider does not implement the pictorial frame contract")
         return implementation
 
@@ -106,11 +109,12 @@ class ProviderSelector:
     registry: ProviderRegistry
 
     def registration(self, requirement: dict) -> RegisteredProvider:
-        if requirement["type"] not in {CLOCK_PROVIDER_TYPE, STORYBOARD_RENDER_PROVIDER_TYPE, PICTORIAL_FRAME_PROVIDER_TYPE}:
+        if requirement["type"] not in {CLOCK_PROVIDER_TYPE, STORYBOARD_RENDER_PROVIDER_TYPE, PICTORIAL_FRAME_PROVIDER_TYPE, CREATIVE_EXPERIMENT_PROVIDER_TYPE}:
             raise ProviderIncompatible("unknown provider type")
         expected_identity = (LOCAL_CLOCK_IDENTITY if requirement["type"] == CLOCK_PROVIDER_TYPE else
                              LOCAL_STORYBOARD_RENDER_IDENTITY if requirement["type"] == STORYBOARD_RENDER_PROVIDER_TYPE else
-                             LOCAL_PICTORIAL_FRAME_IDENTITY)
+                             LOCAL_PICTORIAL_FRAME_IDENTITY if requirement["type"] == PICTORIAL_FRAME_PROVIDER_TYPE else
+                             CREATIVE_EXPERIMENT_PROVIDER_IDENTITY)
         if requirement["identity"] != expected_identity:
             # Resolve first so an absent identity is reported distinctly from
             # a future known-but-not-statically-selected implementation.
@@ -124,10 +128,12 @@ class ProviderSelector:
         if (
             provider.metadata.implementation_identity != (LOCAL_CLOCK_IMPLEMENTATION_IDENTITY if requirement["type"] == CLOCK_PROVIDER_TYPE else
                                                           LOCAL_STORYBOARD_RENDER_IMPLEMENTATION_IDENTITY if requirement["type"] == STORYBOARD_RENDER_PROVIDER_TYPE else
-                                                          LOCAL_PICTORIAL_FRAME_IMPLEMENTATION_IDENTITY)
+                                                          LOCAL_PICTORIAL_FRAME_IMPLEMENTATION_IDENTITY if requirement["type"] == PICTORIAL_FRAME_PROVIDER_TYPE else
+                                                          CREATIVE_EXPERIMENT_IMPLEMENTATION_IDENTITY)
             or provider.metadata.source != "trusted_builtin"
         ):
             raise ProviderIncompatible("selected provider implementation identity is not approved")
-        if provider.metadata.lifecycle_status != "active":
+        expected_lifecycle = "experimental" if requirement["type"] == CREATIVE_EXPERIMENT_PROVIDER_TYPE else "active"
+        if provider.metadata.lifecycle_status != expected_lifecycle:
             raise ProviderUnavailable("selected provider is unavailable")
         return provider

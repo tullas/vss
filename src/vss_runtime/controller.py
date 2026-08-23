@@ -23,6 +23,7 @@ from vss_providers import (
     LOCAL_CLOCK_IDENTITY,
     LOCAL_PICTORIAL_FRAME_IDENTITY,
     LOCAL_STORYBOARD_RENDER_IDENTITY,
+    CREATIVE_EXPERIMENT_PROVIDER_IDENTITY,
     ProviderAccess,
     ProviderFailure,
     ProviderRegistry,
@@ -41,7 +42,7 @@ from .host_inspection import HostInspector
 from .models import ExecutionContext
 from .policy import RuntimePolicy
 from .registry import CapabilityRegistry
-from .artifacts import PictorialArtifactPublisher, StoryboardArtifactPublisher
+from .artifacts import CreativeExperimentArtifactPublisher, PictorialArtifactPublisher, StoryboardArtifactPublisher
 
 
 def repository_root() -> Path:
@@ -60,6 +61,8 @@ class RuntimeController:
         audit_logger: AuditLogger | None = None,
         provider_registry: ProviderRegistry | None = None,
         host_inspector: HostInspector | None = None,
+        experiment_transport=None,
+        experiment_secret_reader=None,
     ) -> None:
         self.root = (root or repository_root()).resolve()
         builtins_root = self.root / "capabilities"
@@ -67,11 +70,12 @@ class RuntimeController:
         self.loader = CapabilityLoader(builtins_root)
         self.policy = policy or RuntimePolicy(
             allowed_builtin_permissions=("provider_access",),
-            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY),
+            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, CREATIVE_EXPERIMENT_PROVIDER_IDENTITY),
             allowed_capability_permissions={
                 "bootstrap.check": ("filesystem_read", "subprocess"),
                 "movie.storyboard-render": ("provider_access", "filesystem_write"),
                 "movie.pictorial-frame-generation": ("provider_access", "filesystem_write"),
+                "movie.creative-reality-check-1": ("provider_access", "network", "secrets", "filesystem_write"),
             },
         )
         self.provider_registry = provider_registry or ProviderRegistry(
@@ -80,6 +84,8 @@ class RuntimeController:
         self.provider_selector = ProviderSelector(self.provider_registry)
         self.host_inspector = host_inspector or HostInspector()
         self.audit = audit_logger or AuditLogger(self.root / ".local/runtime/audit", trusted_root=self.root)
+        self.experiment_transport = experiment_transport
+        self.experiment_secret_reader = experiment_secret_reader
 
     def _source_commit(self) -> str | None:
         try:
@@ -112,12 +118,14 @@ class RuntimeController:
         manifest_digest: str | None = None
         source_commit = self._source_commit()
         provider_audit: list[dict[str, Any]] = []
+        provider_diagnostic: dict[str, object] | None = None
         execution_id = uuid.uuid4().hex
         output: dict[str, Any] = {}
         errors: list[str] = []
         status = "error"
         artifact_publisher: StoryboardArtifactPublisher | None = None
         pictorial_artifact_publisher: PictorialArtifactPublisher | None = None
+        creative_experiment_artifact_publisher: CreativeExperimentArtifactPublisher | None = None
         exit_code: ExitCode = ExitCode.INTERNAL_ERROR
         try:
             capability = self.registry.resolve_command(command)
@@ -162,6 +170,10 @@ class RuntimeController:
                 from vss_movie_pictorial import AdmittedPictorialFrame
                 if environment != "development" or type(admitted_request) is not AdmittedPictorialFrame:
                     raise InvalidCapabilityInput("pictorial frame generation requires authoritative movie admission")
+            elif command == "movie.creative-reality-check-1-generate":
+                from vss_movie_creative_experiment import AdmittedCreativeExperimentPlan
+                if environment != "development" or type(admitted_request) is not AdmittedCreativeExperimentPlan:
+                    raise InvalidCapabilityInput("creative experiment requires authoritative movie admission")
             elif admitted_request is not None:
                 raise InvalidCapabilityInput("admitted request is not valid for this capability")
             provider_access = ProviderAccess()
@@ -174,10 +186,23 @@ class RuntimeController:
                     provider_access = ProviderAccess(storyboard=self.provider_registry.initialize(registration))
                 elif registration.metadata.provider_type == "storyboard_image_generation":
                     provider_access = ProviderAccess(pictorial=self.provider_registry.initialize(registration))
+                elif registration.metadata.provider_type == "experimental_storyboard_image_generation":
+                    from vss_providers.experimental import ExperimentalOpenAIExecutionAccess, _https_post
+                    access = ExperimentalOpenAIExecutionAccess(
+                        transport=self.experiment_transport or _https_post,
+                        secret_reader=self.experiment_secret_reader or __import__("os").environ.get,
+                    )
+                    provider_access = ProviderAccess(experiment=self.provider_registry.initialize(registration, access))
             if capability.manifest.identity == "movie.storyboard-render" and "filesystem_write" in authorized:
                 artifact_publisher = StoryboardArtifactPublisher(self.root)
             if capability.manifest.identity == "movie.pictorial-frame-generation" and "filesystem_write" in authorized:
                 pictorial_artifact_publisher = PictorialArtifactPublisher(self.root)
+            if capability.manifest.identity == "movie.creative-reality-check-1" and "filesystem_write" in authorized:
+                creative_experiment_artifact_publisher = CreativeExperimentArtifactPublisher(self.root)
+                admitted_request, planned_slot = creative_experiment_artifact_publisher.next_candidate(
+                    admitted_request, execution_id, reserve=not dry_run,
+                )
+                input_data = {"admission_id": admitted_request.admission_id}
             if capability.manifest.sdk_api_version is not None:
                 try:
                     validate_input(input_data, command_record["input_schema"])
@@ -202,6 +227,9 @@ class RuntimeController:
                     ),
                     artifact_publisher=artifact_publisher,
                     pictorial_artifact_publisher=pictorial_artifact_publisher,
+                    creative_experiment_artifact_publisher=creative_experiment_artifact_publisher,
+                    creative_experiment_candidate_label=(planned_slot["candidate_label"] if creative_experiment_artifact_publisher else None),
+                    creative_experiment_ordinal=(planned_slot["ordinal"] if creative_experiment_artifact_publisher else None),
                     admitted_request=admitted_request,
                 )
             else:
@@ -265,6 +293,9 @@ class RuntimeController:
         except (RuntimeFailure, ProviderFailure) as exc:
             exit_code = exc.exit_code
             errors = [str(exc)]
+            diagnostic = getattr(exc, "diagnostic", None)
+            if capability_identity == "movie.creative-reality-check-1" and diagnostic is not None:
+                provider_diagnostic = diagnostic.as_dict()
             if exc.category in ("permission_denied", "provider_access_denied"):
                 authorization = "denied"
                 for provider_record in provider_audit:
@@ -304,10 +335,12 @@ class RuntimeController:
         }
         if provider_audit:
             audit_record["providers"] = provider_audit
+        if provider_diagnostic is not None:
+            audit_record["provider_diagnostic"] = provider_diagnostic
         try:
             self.audit.append(audit_record)
         except RuntimeInternalFailure as exc:
-            publisher = artifact_publisher or pictorial_artifact_publisher
+            publisher = artifact_publisher or pictorial_artifact_publisher or creative_experiment_artifact_publisher
             if publisher is not None:
                 publisher.abort()
             response["status"] = "error"
@@ -315,7 +348,7 @@ class RuntimeController:
             response["output"] = {}
             response["errors"] = [str(exc)]
             return response, int(ExitCode.INTERNAL_ERROR)
-        publisher = artifact_publisher or pictorial_artifact_publisher
+        publisher = artifact_publisher or pictorial_artifact_publisher or creative_experiment_artifact_publisher
         if status == "success" and publisher is not None and not dry_run:
             try:
                 publisher.publish()

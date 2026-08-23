@@ -51,6 +51,9 @@ class CapabilityExecutionContext:
     host_inspection: HostInspectionAccessor | None = None
     artifact_publisher: ArtifactPublisherAccessor | None = None
     pictorial_artifact_publisher: PictorialArtifactPublisherAccessor | None = None
+    creative_experiment_artifact_publisher: Any | None = None
+    creative_experiment_candidate_label: str | None = None
+    creative_experiment_ordinal: int | None = None
     admitted_request: object | None = None
 
     def __post_init__(self) -> None:

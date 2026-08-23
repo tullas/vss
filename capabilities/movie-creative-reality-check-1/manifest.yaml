@@ -1,0 +1,62 @@
+schema_version: "1"
+namespace: movie
+name: creative-reality-check-1
+version: 1.0.0
+description: Execute the next fixed-plan development-only external candidate for Creative Reality Check 1.
+runtime_api_version: "1"
+sdk_api_version: "1"
+required_providers:
+  - type: experimental_storyboard_image_generation
+    identity: movie.storyboard-image.openai-crc1
+    api_version: "1"
+entry_point: handler.py:execute
+commands:
+  - name: movie.creative-reality-check-1-generate
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [admission_id]
+      properties:
+        admission_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [experiment_status, candidate_label, plan_ordinal, artifact_path, review_path, media_type, width, height, content_sha256, experiment_identity, execution_attempt_id, provider_identity, provider_version, model_identity, provider_call_count, latency_ms, maximum_estimated_cost_usd, content_credentials_present, content_credentials_chunk_bytes, frame_id, frame_specification_digest, authority_boundary]
+      properties:
+        experiment_status: {enum: [validation_only, development_review_candidate]}
+        candidate_label: {type: string, pattern: "^candidate-[0-9a-f]{16}$"}
+        plan_ordinal: {type: integer, minimum: 1, maximum: 6}
+        artifact_path: {type: [string, "null"]}
+        review_path: {type: [string, "null"]}
+        media_type: {enum: [image/png, null]}
+        width: {enum: [1536, null]}
+        height: {enum: [1024, null]}
+        content_sha256: {type: [string, "null"], pattern: "^[0-9a-f]{64}$"}
+        experiment_identity: {const: creative-reality-check-1}
+        execution_attempt_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+        provider_identity: {const: movie.storyboard-image.openai-crc1}
+        provider_version: {const: 1.0.0}
+        model_identity: {const: gpt-image-2-2026-04-21}
+        provider_call_count: {type: integer, minimum: 0, maximum: 1}
+        latency_ms: {type: [integer, "null"], minimum: 0}
+        maximum_estimated_cost_usd: {const: "0.07"}
+        content_credentials_present: {type: [boolean, "null"]}
+        content_credentials_chunk_bytes: {type: [integer, "null"], minimum: 1, maximum: 4194304}
+        frame_id: {const: frame-55a9d7015fdf1f72571b74c5}
+        frame_specification_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        authority_boundary:
+          type: object
+          additionalProperties: false
+          required: [production_approval, production_asset_admission, final_frame_selection, publication_authority, workflow_authority, autonomous_authority]
+          properties:
+            production_approval: {const: false}
+            production_asset_admission: {const: false}
+            final_frame_selection: {const: false}
+            publication_authority: {const: false}
+            workflow_authority: {const: false}
+            autonomous_authority: {const: false}
+    supports_dry_run: true
+permissions: [provider_access, network, secrets, filesystem_write]
+compatibility:
+  python: ">=3.11,<3.15"
+lifecycle_status: experimental

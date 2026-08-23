@@ -5,9 +5,10 @@ import re
 import hashlib
 import xml.etree.ElementTree as ET
 
-from .contracts import ClockProvider, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
-from .errors import ProviderAccessDenied, ProviderExecutionFailure
+from .contracts import ClockProvider, CreativeExperimentProvider, CreativeExperimentRequest, CreativeExperimentResult, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
+from .errors import ExperimentalProviderDiagnostic, ProviderAccessDenied, ProviderExecutionFailure
 from .png import validate_pictorial_png
+from .experimental_png import inspect_experimental_png, validate_experimental_openai_png
 
 UTC_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
@@ -48,17 +49,19 @@ class SafeClockHandle:
 class ProviderAccess:
     """A non-enumerable set of provider handles authorized for one execution."""
 
-    __slots__ = ("__clock", "__storyboard", "__pictorial")
+    __slots__ = ("__clock", "__storyboard", "__pictorial", "__experiment")
 
     def __init__(
         self,
         clock: ClockProvider | None = None,
         storyboard: StoryboardRenderProvider | None = None,
         pictorial: PictorialFrameProvider | None = None,
+        experiment: CreativeExperimentProvider | None = None,
     ) -> None:
         object.__setattr__(self, "_ProviderAccess__clock", SafeClockHandle(clock) if clock is not None else None)
         object.__setattr__(self, "_ProviderAccess__storyboard", SafeStoryboardRenderHandle(storyboard) if storyboard is not None else None)
         object.__setattr__(self, "_ProviderAccess__pictorial", SafePictorialFrameHandle(pictorial) if pictorial is not None else None)
+        object.__setattr__(self, "_ProviderAccess__experiment", SafeCreativeExperimentHandle(experiment) if experiment is not None else None)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("provider access is immutable")
@@ -77,6 +80,11 @@ class ProviderAccess:
         if self.__pictorial is None:
             raise ProviderAccessDenied("pictorial frame provider access was not declared and authorized")
         return self.__pictorial
+
+    def get_creative_experiment_generator(self) -> "SafeCreativeExperimentHandle":
+        if self.__experiment is None:
+            raise ProviderAccessDenied("creative experiment provider access was not declared and authorized")
+        return self.__experiment
 
 
 class SafeStoryboardRenderHandle:
@@ -150,4 +158,58 @@ class SafePictorialFrameHandle:
         width, height = validate_pictorial_png(result.content)
         if (result.width, result.height) != (width, height):
             raise ProviderExecutionFailure("pictorial frame provider returned inconsistent dimensions")
+        return result
+
+
+class SafeCreativeExperimentHandle:
+    __slots__ = ("__provider", "__calls")
+
+    def __init__(self, provider: CreativeExperimentProvider) -> None:
+        object.__setattr__(self, "_SafeCreativeExperimentHandle__provider", provider)
+        object.__setattr__(self, "_SafeCreativeExperimentHandle__calls", 0)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("creative experiment provider handle is immutable")
+
+    def generate(self, request: CreativeExperimentRequest) -> CreativeExperimentResult:
+        if self.__calls:
+            raise ProviderAccessDenied("creative experiment provider call ceiling exceeded")
+        object.__setattr__(self, "_SafeCreativeExperimentHandle__calls", 1)
+        try:
+            result = self.__provider.generate(request)
+        except ProviderExecutionFailure as exc:
+            raise ProviderExecutionFailure("creative experiment provider execution failed", diagnostic=exc.diagnostic) from exc
+        except Exception as exc:
+            raise ProviderExecutionFailure("creative experiment provider execution failed") from exc
+        if (not isinstance(result, CreativeExperimentResult) or result.provider_call_count != 1
+                or not isinstance(result.latency_ms, int) or result.latency_ms < 0
+                or not isinstance(result.usage, dict)
+                or set(result.usage) - {"input_tokens", "output_tokens", "total_tokens"}
+                or any(not isinstance(value, int) or value < 0 or value > 10000000 for value in result.usage.values())
+                or type(result.content_credentials_present) is not bool
+                or not (result.content_credentials_chunk_bytes is None
+                        or type(result.content_credentials_chunk_bytes) is int
+                        and 0 <= result.content_credentials_chunk_bytes <= 4 * 1024 * 1024)
+                or (result.content_credentials_present != (result.content_credentials_chunk_bytes is not None))):
+            raise ProviderExecutionFailure("creative experiment provider returned invalid evidence", diagnostic=
+                ExperimentalProviderDiagnostic(True, "provider_result_invalid", 200,
+                    message="provider response failed bounded validation"))
+        media = result.media
+        if (not isinstance(media, GeneratedMedia) or media.media_type != "image/png"
+                or media.content_sha256 != hashlib.sha256(media.content).hexdigest()):
+            raise ProviderExecutionFailure("creative experiment provider returned invalid media", diagnostic=
+                ExperimentalProviderDiagnostic(True, "provider_result_invalid", 200,
+                    message="provider response failed bounded validation"))
+        if validate_experimental_openai_png(media.content) != (media.width, media.height):
+            raise ProviderExecutionFailure("creative experiment provider returned inconsistent media", diagnostic=
+                ExperimentalProviderDiagnostic(True, "provider_result_invalid", 200,
+                    message="provider response failed bounded validation", decoded_media_bytes=len(media.content),
+                    media_sha256=hashlib.sha256(media.content).hexdigest()))
+        png_evidence = inspect_experimental_png(media.content)
+        if ((result.content_credentials_present, result.content_credentials_chunk_bytes)
+                != (png_evidence.content_credentials_present, png_evidence.content_credentials_chunk_bytes)):
+            raise ProviderExecutionFailure("creative experiment provider returned inconsistent provenance evidence",
+                diagnostic=ExperimentalProviderDiagnostic(True, "provider_result_invalid", 200,
+                    message="provider response failed bounded validation", decoded_media_bytes=len(media.content),
+                    media_sha256=hashlib.sha256(media.content).hexdigest(), png=png_evidence))
         return result

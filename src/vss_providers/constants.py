@@ -12,3 +12,7 @@ LOCAL_STORYBOARD_RENDER_IMPLEMENTATION_IDENTITY = "vss.local-deterministic-story
 PICTORIAL_FRAME_PROVIDER_TYPE = "storyboard_image_generation"
 LOCAL_PICTORIAL_FRAME_IDENTITY = "movie.storyboard-image.local"
 LOCAL_PICTORIAL_FRAME_IMPLEMENTATION_IDENTITY = "vss.local-deterministic-pictorial-png"
+
+CREATIVE_EXPERIMENT_PROVIDER_TYPE = "experimental_storyboard_image_generation"
+CREATIVE_EXPERIMENT_PROVIDER_IDENTITY = "movie.storyboard-image.openai-crc1"
+CREATIVE_EXPERIMENT_IMPLEMENTATION_IDENTITY = "vss.experimental-openai-creative-reality-check-1"

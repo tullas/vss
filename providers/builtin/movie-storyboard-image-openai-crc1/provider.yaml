@@ -1,0 +1,10 @@
+schema_version: "1"
+provider_api_version: "1"
+provider_type: experimental_storyboard_image_generation
+name: openai-crc1
+version: 1.0.0
+identity: movie.storyboard-image.openai-crc1
+implementation: implementation.py:create_provider
+implementation_identity: vss.experimental-openai-creative-reality-check-1
+lifecycle_status: experimental
+source: trusted_builtin

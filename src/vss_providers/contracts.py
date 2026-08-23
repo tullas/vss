@@ -55,3 +55,30 @@ class PictorialFrameRequest:
 
 class PictorialFrameProvider(Protocol):
     def generate(self, request: PictorialFrameRequest) -> GeneratedMedia: ...
+
+
+@dataclass(frozen=True, slots=True)
+class CreativeExperimentRequest:
+    project_id: str
+    scene_id: str
+    storyboard_specification_digest: str
+    frame_id: str
+    frame_specification_digest: str
+    condition: str
+    prompt: str
+    prompt_digest: str
+    semantic_request_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class CreativeExperimentResult:
+    media: GeneratedMedia
+    latency_ms: int
+    provider_call_count: int
+    usage: Mapping[str, int]
+    content_credentials_present: bool = False
+    content_credentials_chunk_bytes: int | None = None
+
+
+class CreativeExperimentProvider(Protocol):
+    def generate(self, request: CreativeExperimentRequest) -> CreativeExperimentResult: ...
