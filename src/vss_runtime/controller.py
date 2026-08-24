@@ -78,6 +78,7 @@ class RuntimeController:
                 "movie.storyboard-render": ("provider_access", "filesystem_write"),
                 "movie.pictorial-frame-generation": ("provider_access", "filesystem_write"),
                 "movie.m8-3-real-provider-smoke-2": ("filesystem_write", "network", "secrets"),
+                "movie.m8-3-real-provider-smoke-3": ("filesystem_write", "network", "secrets"),
             },
         )
         self.provider_registry = provider_registry or ProviderRegistry(
@@ -130,6 +131,7 @@ class RuntimeController:
         creative_smoke_artifact_publisher = None
         provider_diagnostic: dict[str, Any] | None = None
         preflight_diagnostic: dict[str, Any] | None = None
+        reservation_preflight_spec: ExternalExecutionPreflightSpec | None = None
         exit_code: ExitCode = ExitCode.INTERNAL_ERROR
         try:
             capability = self.registry.resolve_command(command)
@@ -174,10 +176,23 @@ class RuntimeController:
                 from vss_movie_pictorial import AdmittedPictorialFrame
                 if environment != "development" or type(admitted_request) is not AdmittedPictorialFrame:
                     raise InvalidCapabilityInput("pictorial frame generation requires authoritative movie admission")
-            elif command == "movie.m8-3-real-provider-smoke-2-generate":
-                from vss_movie_creative_smoke import AdmittedCreativeSmoke
+            elif command in {
+                "movie.m8-3-real-provider-smoke-2-generate",
+                "movie.m8-3-real-provider-smoke-3-generate",
+            }:
+                from vss_movie_creative_smoke import (
+                    EXPERIMENT_IDENTITY, SMOKE_3_EXPERIMENT_IDENTITY, AdmittedCreativeSmoke,
+                )
                 if environment != "development" or type(admitted_request) is not AdmittedCreativeSmoke:
                     raise InvalidCapabilityInput("creative smoke generation requires authoritative movie admission")
+                expected_experiment = (SMOKE_3_EXPERIMENT_IDENTITY
+                                       if command == "movie.m8-3-real-provider-smoke-3-generate"
+                                       else EXPERIMENT_IDENTITY)
+                if admitted_request.experiment_identity != expected_experiment:
+                    raise InvalidCapabilityInput("creative smoke experiment admission mismatch")
+                if command == "movie.m8-3-real-provider-smoke-3-generate" and input_data.get("mode") != (
+                        "preflight" if dry_run else "generate"):
+                    raise InvalidCapabilityInput("creative smoke mode mismatch")
             elif admitted_request is not None:
                 raise InvalidCapabilityInput("admitted request is not valid for this capability")
             provider_access = ProviderAccess()
@@ -195,7 +210,10 @@ class RuntimeController:
             if capability.manifest.identity == "movie.pictorial-frame-generation" and "filesystem_write" in authorized:
                 pictorial_artifact_publisher = PictorialArtifactPublisher(self.root)
             creative_smoke_access = None
-            if capability.manifest.identity == "movie.m8-3-real-provider-smoke-2":
+            if capability.manifest.identity in {
+                "movie.m8-3-real-provider-smoke-2",
+                "movie.m8-3-real-provider-smoke-3",
+            }:
                 if set(authorized) != {"filesystem_write", "network", "secrets"}:
                     raise PermissionDenied("creative smoke requires exact Runtime permissions")
                 from vss_movie_creative_smoke import (
@@ -228,10 +246,12 @@ class RuntimeController:
                 )
                 authoritative_request_digest = creative_smoke_access.prepare(smoke_request)
                 if "filesystem_write" in authorized:
-                    creative_smoke_artifact_publisher = SmokeExperimentArtifactPublisher(self.root)
-                    if not dry_run:
+                    creative_smoke_artifact_publisher = SmokeExperimentArtifactPublisher(
+                        self.root, admitted_request.experiment_identity,
+                    )
+                    if not dry_run or capability.manifest.identity == "movie.m8-3-real-provider-smoke-3":
                         creative_smoke_artifact_publisher.check_readiness(admitted_request)
-                        self.external_execution_preflight.run(ExternalExecutionPreflightSpec(
+                        preflight_spec = ExternalExecutionPreflightSpec(
                             endpoint=ENDPOINT,
                             credential_environment_variable=SECRET_NAME,
                             provider_request_digest=admitted_request.provider_request_digest,
@@ -239,7 +259,11 @@ class RuntimeController:
                             maximum_provider_attempts=1,
                             maximum_estimated_cost_usd=MAXIMUM_ESTIMATED_COST_USD,
                             authorized_cost_ceiling_usd=AUTHORIZED_COST_CEILING_USD,
-                        ))
+                        )
+                        if capability.manifest.identity == "movie.m8-3-real-provider-smoke-3" and not dry_run:
+                            reservation_preflight_spec = preflight_spec
+                        else:
+                            self.external_execution_preflight.run(preflight_spec)
             if capability.manifest.sdk_api_version is not None:
                 try:
                     validate_input(input_data, command_record["input_schema"])
@@ -281,6 +305,8 @@ class RuntimeController:
                 )
             handler = self.loader.load(capability)
             if creative_smoke_artifact_publisher is not None and not dry_run:
+                if reservation_preflight_spec is not None:
+                    self.external_execution_preflight.run(reservation_preflight_spec)
                 creative_smoke_artifact_publisher.reserve(admitted_request, execution_id)
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             future = executor.submit(handler, context, input_data, dry_run)
@@ -332,7 +358,10 @@ class RuntimeController:
             exit_code = exc.exit_code
             errors = [str(exc)]
             diagnostic = getattr(exc, "diagnostic", None)
-            if capability_identity == "movie.m8-3-real-provider-smoke-2" and diagnostic is not None:
+            if capability_identity in {
+                "movie.m8-3-real-provider-smoke-2",
+                "movie.m8-3-real-provider-smoke-3",
+            } and diagnostic is not None:
                 provider_diagnostic = diagnostic.as_dict()
             bounded_preflight = getattr(exc, "preflight_diagnostic", None)
             if isinstance(bounded_preflight, dict):

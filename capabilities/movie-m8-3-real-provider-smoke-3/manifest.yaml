@@ -1,0 +1,98 @@
+schema_version: "1"
+namespace: movie
+name: m8-3-real-provider-smoke-3
+version: 1.0.0
+description: Preflight or generate the fixed M8.3 Mira detail frame once in disposable smoke-3 state.
+runtime_api_version: "1"
+sdk_api_version: "1"
+required_providers: []
+entry_point: handler.py:execute
+commands:
+  - name: movie.m8-3-real-provider-smoke-3-generate
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [admission_id, mode]
+      properties:
+        admission_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+        mode: {enum: [preflight, generate]}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [experiment_status, artifact_path, evidence_path, review_path, media_type, width, height, byte_count, content_sha256, attempt_identity, project_id, scene_id, storyboard_specification_digest, frame_id, frame_specification_digest, knowledge_lineage_digest, base_semantic_request_digest, depiction_projection_digest, provider_request_digest, provider_identity, model_identity, provider_call_count, maximum_provider_attempts, latency_ms, sanitized_usage, estimated_cost_usd, maximum_estimated_cost_usd, readiness, png, authority_boundary]
+      properties:
+        experiment_status: {enum: [ready_for_paid_authorization, generated_awaiting_human_review]}
+        artifact_path: {type: [string, "null"], pattern: "^\\.local/movie/storyboard-images/[0-9a-f]{64}/frame-[0-9a-f]{24}/[0-9a-f]{64}\\.png$"}
+        evidence_path: {enum: [.local/movie/m8-3-real-provider-smoke-3/evidence/result.json, null]}
+        review_path: {enum: [.local/movie/m8-3-real-provider-smoke-3/review/reviewer.json, null]}
+        media_type: {enum: [image/png, null]}
+        width: {enum: [1280, null]}
+        height: {enum: [720, null]}
+        byte_count: {type: [integer, "null"], minimum: 1, maximum: 10485760}
+        content_sha256: {type: [string, "null"], pattern: "^[0-9a-f]{64}$"}
+        attempt_identity: {type: string, pattern: "^[0-9a-f]{32}$"}
+        project_id: {type: string, minLength: 1, maxLength: 64, pattern: "^[a-z0-9][a-z0-9-]*$"}
+        scene_id: {type: string, pattern: "^scene-[a-z0-9][a-z0-9-]{0,62}$"}
+        storyboard_specification_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        frame_id: {const: frame-55a9d7015fdf1f72571b74c5}
+        frame_specification_digest: {const: 019052d98e3db5862a8199993e29c5199b5df44c466aecda02f3128fa0867d7b} # pragma: allowlist secret
+        knowledge_lineage_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        base_semantic_request_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        depiction_projection_digest: {const: 3aa69cfccff612188bfd8d5820be1e691891d583074aff1e5205be986ed4c554} # pragma: allowlist secret
+        provider_request_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        provider_identity: {const: openai}
+        model_identity: {const: gpt-image-2-2026-04-21}
+        provider_call_count: {type: integer, minimum: 0, maximum: 1}
+        maximum_provider_attempts: {const: 1}
+        latency_ms: {type: [integer, "null"], minimum: 0, maximum: 300000}
+        sanitized_usage:
+          type: object
+          additionalProperties: false
+          properties:
+            input_tokens: {type: integer, minimum: 0, maximum: 10000000}
+            output_tokens: {type: integer, minimum: 0, maximum: 10000000}
+            total_tokens: {type: integer, minimum: 0, maximum: 10000000}
+        estimated_cost_usd: {type: [string, "null"], pattern: "^[0-9]+\\.[0-9]{6}$"}
+        maximum_estimated_cost_usd: {const: "0.07"}
+        readiness:
+          type: object
+          additionalProperties: false
+          required: [credential_available, direct_egress_environment, dns_ready, provider_call_count, attempt_reserved]
+          properties:
+            credential_available: {const: true}
+            direct_egress_environment: {const: true}
+            dns_ready: {const: true}
+            provider_call_count: {type: integer, minimum: 0, maximum: 1}
+            attempt_reserved: {type: boolean}
+        png:
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [width, height, bit_depth, color_type, interlace, chunk_types, rejection_reason, content_credentials_present, content_credentials_chunk_bytes]
+              properties:
+                width: {const: 1280}
+                height: {const: 720}
+                bit_depth: {const: 8}
+                color_type: {enum: [2, 6]}
+                interlace: {const: 0}
+                chunk_types: {type: array, minItems: 3, maxItems: 32, items: {enum: [IHDR, caBX, IDAT, IEND]}}
+                rejection_reason: {const: null}
+                content_credentials_present: {type: boolean}
+                content_credentials_chunk_bytes: {type: [integer, "null"], minimum: 1, maximum: 4194304}
+        authority_boundary:
+          type: object
+          additionalProperties: false
+          required: [production_approval, production_asset_admission, final_frame_selection, publication_authority, workflow_authority, autonomous_authority, reusable_execution_authority]
+          properties:
+            production_approval: {const: false}
+            production_asset_admission: {const: false}
+            final_frame_selection: {const: false}
+            publication_authority: {const: false}
+            workflow_authority: {const: false}
+            autonomous_authority: {const: false}
+            reusable_execution_authority: {const: false}
+    supports_dry_run: true
+permissions: [filesystem_write, network, secrets]
+compatibility: {python: ">=3.11,<3.15"}
+lifecycle_status: experimental

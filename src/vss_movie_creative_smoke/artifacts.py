@@ -14,16 +14,19 @@ from .provider import SmokeProviderResult
 from .service import (
     AUTHORIZED_COST_CEILING_USD, ENDPOINT, EXPERIMENT_IDENTITY, MAXIMUM_ESTIMATED_COST_USD, MODEL_IDENTITY,
     OUTPUT_FORMAT, OUTPUT_HEIGHT, OUTPUT_QUALITY, OUTPUT_WIDTH, PROVIDER_IDENTITY,
-    AdmittedCreativeSmoke,
+    SMOKE_3_EXPERIMENT_IDENTITY, AdmittedCreativeSmoke,
 )
 
 
 class SmokeExperimentArtifactPublisher:
     """Create-once experiment state and audit-gated media/evidence publication."""
 
-    def __init__(self, repository_root: Path) -> None:
+    def __init__(self, repository_root: Path, experiment_identity: str = EXPERIMENT_IDENTITY) -> None:
         self.repository_root = repository_root.resolve(strict=True)
-        self.root = self.repository_root / ".local/movie" / EXPERIMENT_IDENTITY
+        if experiment_identity not in {EXPERIMENT_IDENTITY, SMOKE_3_EXPERIMENT_IDENTITY}:
+            raise CapabilityExecutionFailure("creative smoke experiment identity is unsupported")
+        self.experiment_identity = experiment_identity
+        self.root = self.repository_root / ".local/movie" / experiment_identity
         self.image_publisher = PictorialArtifactPublisher(repository_root)
         self._staged: list[tuple[Path, Path]] = []
         self._ready = False
@@ -36,7 +39,7 @@ class SmokeExperimentArtifactPublisher:
 
     def _validate_root(self, *, create: bool) -> None:
         current = self.repository_root
-        for name in (".local", "movie", EXPERIMENT_IDENTITY):
+        for name in (".local", "movie", self.experiment_identity):
             current = current / name
             try:
                 info = current.lstat()
@@ -76,7 +79,9 @@ class SmokeExperimentArtifactPublisher:
         """Validate create-once state and output roots without mutating either."""
         if self._reserved or self._cancelled or type(admitted) is not AdmittedCreativeSmoke:
             raise CapabilityExecutionFailure("creative smoke preflight state is invalid")
-        expected = self.repository_root / ".local/movie" / EXPERIMENT_IDENTITY
+        if admitted.experiment_identity != self.experiment_identity:
+            raise CapabilityExecutionFailure("creative smoke experiment boundary mismatch")
+        expected = self.repository_root / ".local/movie" / self.experiment_identity
         if self.root != expected:
             raise CapabilityExecutionFailure("creative smoke evidence root is not isolated")
         self._validate_root(create=False)
@@ -101,7 +106,7 @@ class SmokeExperimentArtifactPublisher:
     def _binding_value(self, admitted: AdmittedCreativeSmoke, attempt_id: str) -> dict[str, Any]:
         return {
             "schema_version": "1",
-            "experiment": EXPERIMENT_IDENTITY,
+            "experiment": self.experiment_identity,
             "attempt_identity": attempt_id,
             "maximum_provider_attempts": 1,
             "maximum_estimated_cost_usd": MAXIMUM_ESTIMATED_COST_USD,
@@ -208,7 +213,7 @@ class SmokeExperimentArtifactPublisher:
         self._artifact_path = image_path
         internal_path = self._stage_json("evidence", "result.json", {
             "schema_version": "1",
-            "experiment": EXPERIMENT_IDENTITY,
+            "experiment": self.experiment_identity,
             "status": "generated_awaiting_human_review",
             "attempt_identity": attempt_id,
             "authoritative_frame": self._binding["authoritative_frame"],
@@ -243,7 +248,7 @@ class SmokeExperimentArtifactPublisher:
         })
         review_path = self._stage_json("review", "reviewer.json", {
             "schema_version": "1",
-            "experiment": EXPERIMENT_IDENTITY,
+            "experiment": self.experiment_identity,
             "image_path": image_path,
             "media_sha256": media.content_sha256,
             "questions": {
