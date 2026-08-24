@@ -16,6 +16,11 @@ MARKER_PREFIX = "<!-- vss-agent-checkpoint:v1 sha256="
 MAX_COMMENT_BYTES = 16_384
 MAX_GH_BYTES = 1_048_576
 PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
+HARNESS_MAP = Path("config/agent-harness-v2.json")
+LEVELS = {"L0": 0, "L1": 1, "L2": 2, "L3": 3}
+RISKS = {"docs": 0, "isolated": 1, "shared": 2, "external-effect": 3, "paid-authority": 4}
+HARNESS_AUTHORITY = {"runtime_execution": False, "provider_execution": False, "merge": False, "push": False}
+MAX_CHANGE_BYTES = 16 * 1024 * 1024
 CHECKPOINT_TYPES = {"design", "implementation", "review", "blocked", "complete", "approval_record"}
 CHECK_STATUSES = {"passed", "failed", "not_run"}
 APPROVAL_SCOPES = {"paid_provider_attempt", "effectful_operation", "merge", "push"}
@@ -196,6 +201,281 @@ def parse_checks(values: list[str]) -> list[dict[str, str]]:
     if len(checks) > 32:
         fail("too many checks were supplied")
     return sorted(checks, key=lambda item: item["name"])
+
+
+def repository_path(value: Any, *, pattern: bool = False) -> str:
+    if type(value) is not str or not 1 <= len(value) <= (243 if pattern else 240):
+        fail("repository path is invalid")
+    suffix = pattern and value.endswith("/**")
+    candidate = value[:-3] if suffix else value
+    if (not candidate or candidate.startswith("/") or "//" in candidate
+            or any(part in {"", ".", ".."} for part in candidate.split("/"))
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+            or ("*" in candidate or "?" in candidate or "[" in candidate)):
+        fail("repository path is invalid")
+    return value
+
+
+def sorted_strings(value: Any, *, maximum: int, name: str) -> list[str]:
+    if type(value) is not list or len(value) > maximum or any(type(item) is not str for item in value):
+        fail(f"{name} is malformed")
+    if value != sorted(set(value)):
+        fail(f"{name} is not uniquely sorted")
+    return value
+
+
+def fixed_profile_argv(value: Any) -> bool:
+    if value in (["./scripts/validate-change.sh"], ["./scripts/validate-change.sh", "--level", "L0"]):
+        return True
+    return (type(value) is list and len(value) == 8 and value[:5] == ["python", "-m", "unittest", "discover", "-s"]
+            and type(value[5]) is str and value[5].startswith("tests/")
+            and repository_path(value[5]) == value[5] and value[6:] == ["-p", "test_*.py"])
+
+
+def harness_map() -> tuple[dict[str, Any], str]:
+    try:
+        raw = HARNESS_MAP.read_bytes()
+    except OSError as exc:
+        raise AgentFailure("harness map is unavailable") from exc
+    if len(raw) > 262_144:
+        fail("harness map exceeded its bound")
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AgentFailure("harness map is malformed") from exc
+    root = exact_keys(value, {"schema_version", "domains", "profiles", "impact_rules", "authority"}, "harness map")
+    if root["schema_version"] != "2" or exact_keys(root["authority"], set(HARNESS_AUTHORITY), "harness authority") != HARNESS_AUTHORITY:
+        fail("harness map identity is invalid")
+    domains = root["domains"]
+    if type(domains) is not list or not 1 <= len(domains) <= 64:
+        fail("harness domains are malformed")
+    domain_ids: list[str] = []
+    for domain in domains:
+        item = exact_keys(domain, {"id", "docs", "code", "tests"}, "harness domain")
+        if type(item["id"]) is not str or NAME.fullmatch(item["id"]) is None:
+            fail("harness domain id is invalid")
+        domain_ids.append(item["id"])
+        for category in ("docs", "code", "tests"):
+            paths = sorted_strings(item[category], maximum=64, name="domain paths")
+            for path in paths:
+                repository_path(path)
+    if domain_ids != sorted(set(domain_ids)):
+        fail("harness domains are not uniquely sorted")
+    profiles = root["profiles"]
+    if type(profiles) is not list or not 1 <= len(profiles) <= 64:
+        fail("validation profiles are malformed")
+    profile_ids: list[str] = []
+    for profile in profiles:
+        item = exact_keys(profile, {"id", "level", "argv"}, "validation profile")
+        if (type(item["id"]) is not str or NAME.fullmatch(item["id"]) is None
+                or item["level"] not in LEVELS or type(item["argv"]) is not list
+                or not 1 <= len(item["argv"]) <= 16
+                or any(type(argument) is not str or not 1 <= len(argument) <= 240
+                       or any(ord(character) < 32 or ord(character) == 127 for character in argument)
+                       for argument in item["argv"]) or not fixed_profile_argv(item["argv"])):
+            fail("validation profile is invalid")
+        profile_ids.append(item["id"])
+    if profile_ids != sorted(set(profile_ids)):
+        fail("validation profiles are not uniquely sorted")
+    rules = root["impact_rules"]
+    if type(rules) is not list or not 1 <= len(rules) <= 256:
+        fail("impact rules are malformed")
+    patterns: list[str] = []
+    for rule in rules:
+        item = exact_keys(rule, {"pattern", "domain", "minimum_level", "risk", "profiles"}, "impact rule")
+        pattern = repository_path(item["pattern"], pattern=True)
+        patterns.append(pattern)
+        selected_profiles = sorted_strings(item["profiles"], maximum=16, name="impact profiles")
+        if (item["domain"] not in domain_ids or item["minimum_level"] not in LEVELS
+                or item["risk"] not in RISKS or not selected_profiles
+                or any(profile not in profile_ids for profile in selected_profiles)):
+            fail("impact rule is invalid")
+    if patterns != sorted(set(patterns)):
+        fail("impact rules are not uniquely sorted")
+    encoded = canonical(root)
+    return root, hashlib.sha256(encoded).hexdigest()
+
+
+def changed_paths(base: str) -> list[str]:
+    _, head = current_identity()
+    verify_base(base, head)
+    tracked = [text(item, maximum=4096) for item in git("diff", "--name-only", "-z", base, "--").split(b"\0") if item]
+    untracked = [text(item, maximum=4096) for item in git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0") if item]
+    paths = sorted(set(tracked + untracked))
+    if len(paths) > 1024:
+        fail("changed path count exceeded its bound")
+    for path in paths:
+        repository_path(path)
+        if sensitive_path(path) and path != PROTECTED_RESIDUE:
+            fail("unexpected sensitive changed path")
+    return [path for path in paths if path != PROTECTED_RESIDUE]
+
+
+def rule_matches(pattern: str, path: str) -> bool:
+    return path.startswith(pattern[:-2]) if pattern.endswith("/**") else path == pattern
+
+
+def impact_plan(base: str, mapping: dict[str, Any]) -> dict[str, Any]:
+    paths = changed_paths(base)
+    domains: set[str] = set()
+    profiles: set[str] = set()
+    unknown: list[str] = []
+    level = "L0"
+    risk = "docs"
+    for path in paths:
+        matched = [rule for rule in mapping["impact_rules"] if rule_matches(rule["pattern"], path)]
+        if not matched:
+            unknown.append(path)
+            level = "L3"
+            risk = "shared" if RISKS[risk] < RISKS["shared"] else risk
+            profiles.add("canonical")
+            continue
+        for rule in matched:
+            domains.add(rule["domain"])
+            profiles.update(rule["profiles"])
+            if LEVELS[rule["minimum_level"]] > LEVELS[level]:
+                level = rule["minimum_level"]
+            if RISKS[rule["risk"]] > RISKS[risk]:
+                risk = rule["risk"]
+    if level == "L3":
+        profiles.add("canonical")
+    return {
+        "changed_paths": paths,
+        "domains": sorted(domains),
+        "minimum_level": level,
+        "risk": risk,
+        "profiles": sorted(profiles),
+        "human_gate_required": risk in {"external-effect", "paid-authority"},
+        "unknown_paths": unknown,
+        "authority": dict(HARNESS_AUTHORITY),
+    }
+
+
+def change_identity(base: str) -> str:
+    paths = changed_paths(base)
+    patch = run(["git", "diff", "--binary", base, "--"], maximum=MAX_CHANGE_BYTES)
+    if len(patch) > MAX_CHANGE_BYTES:
+        fail("tracked change identity exceeded its bound")
+    untracked = set(text(item, maximum=4096) for item in git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0") if item)
+    manifest: list[dict[str, str]] = []
+    for path in paths:
+        if path not in untracked:
+            continue
+        candidate = Path(path)
+        if candidate.is_symlink() or not candidate.is_file():
+            fail("untracked change identity is unsupported")
+        try:
+            content = candidate.read_bytes()
+        except OSError as exc:
+            raise AgentFailure("untracked change identity could not be read") from exc
+        if len(content) > MAX_CHANGE_BYTES:
+            fail("untracked change identity exceeded its bound")
+        manifest.append({"path": path, "mode": f"{candidate.stat().st_mode & 0o777:04o}",
+                         "sha256": hashlib.sha256(content).hexdigest()})
+    identity = hashlib.sha256()
+    identity.update(b"vss-agent-change-v1\0")
+    identity.update(hashlib.sha256(patch).digest())
+    identity.update(canonical({"untracked": manifest}))
+    return identity.hexdigest()
+
+
+def validate_evidence(value: Any) -> dict[str, Any]:
+    root = exact_keys(value, {"schema_version", "protocol", "repository", "map", "change_identity", "plan", "results", "passed", "authority"}, "validation evidence")
+    if root["schema_version"] != "1" or root["protocol"] != "vss.agent-validation-evidence" or root["passed"] is not True:
+        fail("validation evidence identity is invalid")
+    repository = exact_keys(root["repository"], {"name_with_owner", "branch", "base_sha", "head_sha"}, "evidence repository")
+    if (type(repository["name_with_owner"]) is not str or REPOSITORY.fullmatch(repository["name_with_owner"]) is None
+            or type(repository["branch"]) is not str or BRANCH.fullmatch(repository["branch"]) is None
+            or type(repository["base_sha"]) is not str or SHA1.fullmatch(repository["base_sha"]) is None
+            or type(repository["head_sha"]) is not str or SHA1.fullmatch(repository["head_sha"]) is None):
+        fail("evidence repository is invalid")
+    map_value = exact_keys(root["map"], {"schema_version", "sha256"}, "evidence map")
+    if map_value["schema_version"] != "2" or type(map_value["sha256"]) is not str or SHA256.fullmatch(map_value["sha256"]) is None:
+        fail("evidence map is invalid")
+    if type(root["change_identity"]) is not str or SHA256.fullmatch(root["change_identity"]) is None:
+        fail("evidence change identity is invalid")
+    plan = exact_keys(root["plan"], {"domains", "risk", "minimum_level", "executed_level", "profiles", "human_gate_required", "unknown_paths"}, "evidence plan")
+    for name in ("domains", "profiles", "unknown_paths"):
+        sorted_strings(plan[name], maximum=64, name=f"evidence {name}")
+    if (plan["risk"] not in RISKS or plan["minimum_level"] not in LEVELS or plan["executed_level"] not in LEVELS
+            or LEVELS[plan["executed_level"]] < LEVELS[plan["minimum_level"]]
+            or plan["human_gate_required"] is not (plan["risk"] in {"external-effect", "paid-authority"})
+            or any(NAME.fullmatch(item) is None for item in plan["domains"] + plan["profiles"])
+            or any(repository_path(path) != path for path in plan["unknown_paths"])):
+        fail("evidence plan is invalid")
+    results = root["results"]
+    if type(results) is not list or len(results) > 64:
+        fail("evidence results are malformed")
+    result_names: list[str] = []
+    for result in results:
+        item = exact_keys(result, {"profile", "status", "exit_code"}, "evidence result")
+        if type(item["profile"]) is not str or NAME.fullmatch(item["profile"]) is None or item["status"] != "passed" or item["exit_code"] != 0:
+            fail("evidence result is invalid")
+        result_names.append(item["profile"])
+    if (result_names != sorted(set(result_names)) or result_names != plan["profiles"]
+            or (plan["executed_level"] == "L3" and plan["profiles"] != ["canonical"])
+            or exact_keys(root["authority"], set(HARNESS_AUTHORITY), "evidence authority") != HARNESS_AUTHORITY):
+        fail("validation evidence is invalid")
+    if len(canonical(root)) > MAX_COMMENT_BYTES:
+        fail("validation evidence exceeded its bound")
+    return root
+
+
+def run_validation(base: str, selected_level: str, output: str | None) -> None:
+    mapping, map_digest = harness_map()
+    plan = impact_plan(base, mapping)
+    if LEVELS[selected_level] < LEVELS[plan["minimum_level"]]:
+        fail("selected validation level is below the impact minimum")
+    profiles = {profile["id"]: profile for profile in mapping["profiles"]}
+    selected = ["canonical"] if selected_level == "L3" else sorted(set(plan["profiles"] + ["harness-l0"]))
+    selected = [profile for profile in selected if LEVELS[profiles[profile]["level"]] <= LEVELS[selected_level]]
+    initial_branch, initial_head = current_identity()
+    before = change_identity(base)
+    results = []
+    for profile_id in selected:
+        profile = profiles[profile_id]
+        try:
+            result = subprocess.run(profile["argv"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    check=False, timeout=3600)
+        except subprocess.TimeoutExpired as exc:
+            if exc.stdout:
+                sys.stderr.buffer.write(exc.stdout[-65_536:])
+            fail(f"validation profile timed out: {profile_id}")
+        if result.returncode != 0:
+            sys.stderr.buffer.write(result.stdout[-65_536:])
+            fail(f"validation profile failed: {profile_id}")
+        results.append({"profile": profile_id, "status": "passed", "exit_code": 0})
+    branch, head = current_identity()
+    mapping_after, digest_after = harness_map()
+    after = change_identity(base)
+    if ((branch, head) != (initial_branch, initial_head) or mapping_after != mapping
+            or digest_after != map_digest or after != before):
+        fail("repository changed during validation")
+    evidence = validate_evidence({
+        "schema_version": "1", "protocol": "vss.agent-validation-evidence",
+        "repository": {"name_with_owner": repository_name(), "branch": branch, "base_sha": base, "head_sha": head},
+        "map": {"schema_version": "2", "sha256": map_digest}, "change_identity": before,
+        "plan": {"domains": plan["domains"], "risk": plan["risk"], "minimum_level": plan["minimum_level"],
+                 "executed_level": selected_level, "profiles": selected, "human_gate_required": plan["human_gate_required"],
+                 "unknown_paths": plan["unknown_paths"]},
+        "results": results, "passed": True, "authority": dict(HARNESS_AUTHORITY),
+    })
+    encoded = canonical(evidence).decode("utf-8") + "\n"
+    if output is None:
+        print(encoded, end="")
+    else:
+        destination = Path(output)
+        try:
+            resolved = destination.resolve()
+        except OSError as exc:
+            raise AgentFailure("evidence output path is invalid") from exc
+        if not destination.is_absolute() or resolved.is_relative_to(Path.cwd().resolve()):
+            fail("evidence output must be an absolute path outside the repository")
+        try:
+            destination.write_text(encoded, encoding="utf-8")
+        except OSError as exc:
+            raise AgentFailure("evidence output could not be written") from exc
+        print(json.dumps({"status": "passed", "evidence_sha256": hashlib.sha256(canonical(evidence)).hexdigest()}, sort_keys=True, separators=(",", ":")))
 
 
 def collect(
@@ -409,11 +689,62 @@ def parser() -> argparse.ArgumentParser:
     validate_parser = commands.add_parser("validate")
     validate_parser.add_argument("--input", required=True)
     validate_parser.add_argument("--require-current-head", action="store_true")
+    context_parser = commands.add_parser("context")
+    context_parser.add_argument("--domain", action="append", required=True)
+    impact_parser = commands.add_parser("impact")
+    impact_parser.add_argument("--base", required=True)
+    validation_parser = commands.add_parser("validate-change")
+    validation_parser.add_argument("--base", required=True)
+    validation_parser.add_argument("--level", required=True, choices=sorted(LEVELS))
+    validation_parser.add_argument("--output")
+    evidence_parser = commands.add_parser("evidence")
+    evidence_parser.add_argument("--input", required=True)
+    evidence_parser.add_argument("--require-current-change", action="store_true")
     return root
 
 
 def main(arguments: list[str] | None = None) -> int:
     args = parser().parse_args(arguments)
+    if args.command == "context":
+        mapping, digest = harness_map()
+        domains = {domain["id"]: domain for domain in mapping["domains"]}
+        requested = sorted(set(args.domain))
+        if any(domain not in domains for domain in requested):
+            fail("requested domain is not registered")
+        routes = {category: sorted(set(path for domain in requested for path in domains[domain][category]))
+                  for category in ("docs", "code", "tests")}
+        print(json.dumps({"schema_version": "2", "map_sha256": digest, "domains": requested, "paths": routes}, sort_keys=True, separators=(",", ":")))
+        return 0
+    if args.command == "impact":
+        mapping, digest = harness_map()
+        plan = impact_plan(args.base, mapping)
+        print(json.dumps({"schema_version": "2", "map_sha256": digest, **plan}, sort_keys=True, separators=(",", ":")))
+        return 0
+    if args.command == "validate-change":
+        run_validation(args.base, args.level, args.output)
+        return 0
+    if args.command == "evidence":
+        try:
+            raw = Path(args.input).read_bytes()
+            if len(raw) > MAX_COMMENT_BYTES:
+                fail("validation evidence input exceeded its bound")
+            value = json.loads(raw)
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise AgentFailure("validation evidence input is malformed") from exc
+        evidence = validate_evidence(value)
+        fresh = True
+        if args.require_current_change:
+            branch, head = current_identity()
+            _, map_digest = harness_map()
+            repository = evidence["repository"]
+            fresh = (repository["branch"] == branch and repository["head_sha"] == head
+                     and repository["name_with_owner"] == repository_name()
+                     and evidence["map"]["sha256"] == map_digest
+                     and evidence["change_identity"] == change_identity(repository["base_sha"]))
+            if not fresh:
+                fail("validation evidence is stale for current change")
+        print(json.dumps({"status": "valid", "fresh": fresh, "evidence_sha256": hashlib.sha256(canonical(evidence)).hexdigest()}, sort_keys=True, separators=(",", ":")))
+        return 0
     if args.command == "validate":
         if args.input == "-":
             content = sys.stdin.read(MAX_COMMENT_BYTES + 1)

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/agent-validation-evidence-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol", "repository", "map", "change_identity", "plan", "results", "passed", "authority"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "protocol": {"const": "vss.agent-validation-evidence"},
+    "repository": {"type": "object", "additionalProperties": false, "required": ["name_with_owner", "branch", "base_sha", "head_sha"], "properties": {"name_with_owner": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}, "branch": {"type": "string", "minLength": 1, "maxLength": 200}, "base_sha": {"$ref": "#/$defs/sha1"}, "head_sha": {"$ref": "#/$defs/sha1"}}},
+    "map": {"type": "object", "additionalProperties": false, "required": ["schema_version", "sha256"], "properties": {"schema_version": {"const": "2"}, "sha256": {"$ref": "#/$defs/sha256"}}},
+    "change_identity": {"$ref": "#/$defs/sha256"},
+    "plan": {"type": "object", "additionalProperties": false, "required": ["domains", "risk", "minimum_level", "executed_level", "profiles", "human_gate_required", "unknown_paths"], "properties": {"domains": {"$ref": "#/$defs/ids"}, "risk": {"enum": ["docs", "isolated", "shared", "external-effect", "paid-authority"]}, "minimum_level": {"enum": ["L0", "L1", "L2", "L3"]}, "executed_level": {"enum": ["L0", "L1", "L2", "L3"]}, "profiles": {"$ref": "#/$defs/ids"}, "human_gate_required": {"type": "boolean"}, "unknown_paths": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 240}}}},
+    "results": {"type": "array", "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["profile", "status", "exit_code"], "properties": {"profile": {"$ref": "#/$defs/id"}, "status": {"const": "passed"}, "exit_code": {"const": 0}}}},
+    "passed": {"const": true},
+    "authority": {"type": "object", "additionalProperties": false, "required": ["runtime_execution", "provider_execution", "merge", "push"], "properties": {"runtime_execution": {"const": false}, "provider_execution": {"const": false}, "merge": {"const": false}, "push": {"const": false}}}
+  },
+  "$defs": {"id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}, "ids": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}, "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

@@ -1,0 +1,107 @@
+{
+  "schema_version": "2",
+  "domains": [
+    {
+      "id": "agent-coordination",
+      "docs": ["AGENTS.md", "docs/agent-coordination.md", "docs/security/threat-model.md"],
+      "code": ["config/agent-harness-v2.json", "scripts/validate-change.sh", "scripts/vss-agent"],
+      "tests": ["tests/agent_coordination"]
+    },
+    {
+      "id": "architecture",
+      "docs": ["docs/adr", "docs/reasoning-contracts.md"],
+      "code": ["schemas"],
+      "tests": ["tests/architecture", "tests/reasoning_contracts"]
+    },
+    {
+      "id": "configuration",
+      "docs": ["config", "docs/adr/ADR-0003-configuration-management-strategy.md"],
+      "code": ["src/vss_config"],
+      "tests": ["tests/config_engine"]
+    },
+    {
+      "id": "infrastructure",
+      "docs": ["infrastructure/contracts"],
+      "code": ["ansible", "infrastructure"],
+      "tests": ["tests/iac_contract"]
+    },
+    {
+      "id": "movie",
+      "docs": ["docs/movie-scene-breakdown.md", "docs/movie-scene-contracts.md", "docs/movie-scene-production-options.md"],
+      "code": ["src/vss_movie_contracts", "src/vss_movie_demo", "src/vss_movie_scene_breakdown", "src/vss_movie_shot_plan", "src/vss_movie_storyboard"],
+      "tests": ["tests/movie_contracts", "tests/movie_scene_breakdown", "tests/movie_shot_plan", "tests/movie_storyboard"]
+    },
+    {
+      "id": "reasoning",
+      "docs": ["docs/reasoning-contracts.md"],
+      "code": ["src/vss_reasoning", "src/vss_reasoning_contracts", "src/vss_reasoning_providers", "src/vss_reasoning_strategies"],
+      "tests": ["tests/reasoning", "tests/reasoning_contracts"]
+    },
+    {
+      "id": "runtime",
+      "docs": ["docs/adr/ADR-0010-capability-oriented-runtime-kernel.md", "docs/adr/ADR-0016-autonomy-approval-execution-authority.md"],
+      "code": ["capabilities/runtime", "src/vss_capabilities", "src/vss_runtime"],
+      "tests": ["tests/runtime"]
+    },
+    {
+      "id": "security",
+      "docs": ["DEPENDENCY-POLICY.md", "OSS-POLICY.md", "SECURITY.md", "docs/security"],
+      "code": ["scripts/security", "security"],
+      "tests": ["tests/security"]
+    }
+  ],
+  "profiles": [
+    {"id": "agent-coordination-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/agent_coordination", "-p", "test_*.py"]},
+    {"id": "architecture-tests", "level": "L2", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/architecture", "-p", "test_*.py"]},
+    {"id": "canonical", "level": "L3", "argv": ["./scripts/validate-change.sh"]},
+    {"id": "configuration-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/config_engine", "-p", "test_*.py"]},
+    {"id": "harness-l0", "level": "L0", "argv": ["./scripts/validate-change.sh", "--level", "L0"]},
+    {"id": "movie-contract-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/movie_contracts", "-p", "test_*.py"]},
+    {"id": "movie-scene-breakdown-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/movie_scene_breakdown", "-p", "test_*.py"]},
+    {"id": "movie-shot-plan-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/movie_shot_plan", "-p", "test_*.py"]},
+    {"id": "movie-storyboard-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/movie_storyboard", "-p", "test_*.py"]},
+    {"id": "reasoning-contract-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/reasoning_contracts", "-p", "test_*.py"]},
+    {"id": "reasoning-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/reasoning", "-p", "test_*.py"]},
+    {"id": "runtime-tests", "level": "L1", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/runtime", "-p", "test_*.py"]},
+    {"id": "security-tests", "level": "L2", "argv": ["python", "-m", "unittest", "discover", "-s", "tests/security", "-p", "test_*.py"]}
+  ],
+  "impact_rules": [
+    {"pattern": ".github/**", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
+    {"pattern": "AGENTS.md", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
+    {"pattern": "config/agent-harness-v2.json", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
+    {"pattern": "docs/**", "domain": "architecture", "minimum_level": "L0", "risk": "docs", "profiles": ["harness-l0"]},
+    {"pattern": "schemas/**", "domain": "architecture", "minimum_level": "L2", "risk": "shared", "profiles": ["architecture-tests", "security-tests"]},
+    {"pattern": "schemas/agent-harness-v2.schema.json", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
+    {"pattern": "schemas/agent-validation-evidence-v1.schema.json", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
+    {"pattern": "scripts/validate-change.sh", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
+    {"pattern": "scripts/vss-agent", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
+    {"pattern": "security/**", "domain": "security", "minimum_level": "L2", "risk": "shared", "profiles": ["security-tests"]},
+    {"pattern": "src/vss_config/**", "domain": "configuration", "minimum_level": "L1", "risk": "isolated", "profiles": ["configuration-tests"]},
+    {"pattern": "src/vss_movie_contracts/**", "domain": "movie", "minimum_level": "L2", "risk": "shared", "profiles": ["movie-contract-tests", "reasoning-contract-tests"]},
+    {"pattern": "src/vss_movie_demo/**", "domain": "movie", "minimum_level": "L2", "risk": "shared", "profiles": ["movie-shot-plan-tests", "movie-storyboard-tests"]},
+    {"pattern": "src/vss_movie_scene_breakdown/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-scene-breakdown-tests"]},
+    {"pattern": "src/vss_movie_shot_plan/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-shot-plan-tests"]},
+    {"pattern": "src/vss_movie_storyboard/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-storyboard-tests"]},
+    {"pattern": "src/vss_providers/**", "domain": "runtime", "minimum_level": "L3", "risk": "external-effect", "profiles": ["canonical"]},
+    {"pattern": "src/vss_reasoning/**", "domain": "reasoning", "minimum_level": "L2", "risk": "shared", "profiles": ["reasoning-contract-tests", "reasoning-tests"]},
+    {"pattern": "src/vss_reasoning_contracts/**", "domain": "reasoning", "minimum_level": "L2", "risk": "shared", "profiles": ["reasoning-contract-tests", "reasoning-tests"]},
+    {"pattern": "src/vss_reasoning_providers/**", "domain": "reasoning", "minimum_level": "L1", "risk": "isolated", "profiles": ["reasoning-tests"]},
+    {"pattern": "src/vss_reasoning_strategies/**", "domain": "reasoning", "minimum_level": "L1", "risk": "isolated", "profiles": ["reasoning-tests"]},
+    {"pattern": "src/vss_runtime/**", "domain": "runtime", "minimum_level": "L3", "risk": "external-effect", "profiles": ["canonical"]},
+    {"pattern": "tests/agent_coordination/**", "domain": "agent-coordination", "minimum_level": "L1", "risk": "isolated", "profiles": ["agent-coordination-tests"]},
+    {"pattern": "tests/config_engine/**", "domain": "configuration", "minimum_level": "L1", "risk": "isolated", "profiles": ["configuration-tests"]},
+    {"pattern": "tests/movie_contracts/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-contract-tests"]},
+    {"pattern": "tests/movie_scene_breakdown/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-scene-breakdown-tests"]},
+    {"pattern": "tests/movie_shot_plan/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-shot-plan-tests"]},
+    {"pattern": "tests/movie_storyboard/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-storyboard-tests"]},
+    {"pattern": "tests/reasoning/**", "domain": "reasoning", "minimum_level": "L1", "risk": "isolated", "profiles": ["reasoning-tests"]},
+    {"pattern": "tests/reasoning_contracts/**", "domain": "reasoning", "minimum_level": "L1", "risk": "isolated", "profiles": ["reasoning-contract-tests"]},
+    {"pattern": "tests/runtime/**", "domain": "runtime", "minimum_level": "L1", "risk": "isolated", "profiles": ["runtime-tests"]}
+  ],
+  "authority": {
+    "runtime_execution": false,
+    "provider_execution": false,
+    "merge": false,
+    "push": false
+  }
+}

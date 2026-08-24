@@ -15,6 +15,8 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[2]
 HELPER = ROOT / "scripts/vss-agent"
 SCHEMA = json.loads((ROOT / "schemas/agent-checkpoint-v1.schema.json").read_text(encoding="utf-8"))
+HARNESS_SCHEMA = json.loads((ROOT / "schemas/agent-harness-v2.schema.json").read_text(encoding="utf-8"))
+EVIDENCE_SCHEMA = json.loads((ROOT / "schemas/agent-validation-evidence-v1.schema.json").read_text(encoding="utf-8"))
 
 
 class AgentCoordinationTests(unittest.TestCase):
@@ -24,15 +26,22 @@ class AgentCoordinationTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / "scripts").mkdir()
         (self.root / "schemas").mkdir()
+        (self.root / "config").mkdir()
         shutil.copy2(HELPER, self.root / "scripts/vss-agent")
+        (self.root / "scripts/validate-change.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        (self.root / "scripts/validate-change.sh").chmod(0o755)
         shutil.copy2(ROOT / "schemas/agent-checkpoint-v1.schema.json",
                      self.root / "schemas/agent-checkpoint-v1.schema.json")
+        shutil.copy2(ROOT / "config/agent-harness-v2.json", self.root / "config/agent-harness-v2.json")
+        shutil.copy2(ROOT / "schemas/agent-harness-v2.schema.json", self.root / "schemas/agent-harness-v2.schema.json")
+        shutil.copy2(ROOT / "schemas/agent-validation-evidence-v1.schema.json",
+                     self.root / "schemas/agent-validation-evidence-v1.schema.json")
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.name", "Test")
         self.git("config", "user.email", "test@example.invalid")
         self.git("remote", "add", "origin", "https://github.com/example/vss.git")
         (self.root / "README.md").write_text("fixture\n", encoding="utf-8")
-        self.git("add", "README.md", "scripts/vss-agent", "schemas/agent-checkpoint-v1.schema.json")
+        self.git("add", "README.md", "scripts", "schemas", "config/agent-harness-v2.json")
         self.git("commit", "-qm", "fixture")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
         residue = self.root / ".local/secrets/development.auto.tfvars.example"
@@ -338,9 +347,157 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stderr, "vss-agent: GitHub response is malformed\n")
 
+    def test_harness_contracts_and_context_routes_are_strict_and_deterministic(self) -> None:
+        mapping = json.loads((self.root / "config/agent-harness-v2.json").read_text(encoding="utf-8"))
+        self.assertEqual(list(Draft202012Validator(HARNESS_SCHEMA).iter_errors(mapping)), [])
+        first = self.agent("context", "--domain", "security", "--domain", "agent-coordination")
+        second = self.agent("context", "--domain", "agent-coordination", "--domain", "security")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(first.stdout, second.stdout)
+        routed = json.loads(first.stdout)
+        self.assertEqual(routed["domains"], ["agent-coordination", "security"])
+        self.assertEqual(set(routed["paths"]), {"docs", "code", "tests"})
+        self.assertNotIn("contents", routed)
+
+        mapping["unexpected"] = True
+        (self.root / "config/agent-harness-v2.json").write_text(json.dumps(mapping), encoding="utf-8")
+        rejected = self.agent("context", "--domain", "security")
+        self.assertEqual(rejected.returncode, 2)
+        self.assertEqual(rejected.stderr, "vss-agent: harness map is malformed\n")
+
+    def test_impact_unions_overlaps_and_unknown_paths_fail_closed(self) -> None:
+        schema = self.root / "schemas/agent-harness-v2.schema.json"
+        schema.write_text(schema.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+        overlap = self.agent("impact", "--base", self.base)
+        self.assertEqual(overlap.returncode, 0, overlap.stderr)
+        plan = json.loads(overlap.stdout)
+        self.assertEqual(plan["minimum_level"], "L3")
+        self.assertEqual(plan["risk"], "shared")
+        self.assertIn("architecture", plan["domains"])
+        self.assertIn("agent-coordination", plan["domains"])
+        self.assertEqual(plan["unknown_paths"], [])
+
+        schema.write_text(schema.read_text(encoding="utf-8").rstrip() + "\n", encoding="utf-8")
+        (self.root / "unknown.txt").write_text("unknown\n", encoding="utf-8")
+        unknown = self.agent("impact", "--base", self.base)
+        plan = json.loads(unknown.stdout)
+        self.assertEqual(plan["minimum_level"], "L3")
+        self.assertEqual(plan["risk"], "shared")
+        self.assertEqual(plan["unknown_paths"], ["unknown.txt"])
+        self.assertIn("canonical", plan["profiles"])
+
+    def test_representative_domain_impacts_select_focused_profiles_and_preserve_risk(self) -> None:
+        cases = [
+            ("src/vss_movie_scene_breakdown/new_service.py", "movie", "L1", "isolated",
+             ["movie-scene-breakdown-tests"], False),
+            ("src/vss_config/new_loader.py", "configuration", "L1", "isolated",
+             ["configuration-tests"], False),
+            ("src/vss_reasoning/new_gateway.py", "reasoning", "L2", "shared",
+             ["reasoning-contract-tests", "reasoning-tests"], False),
+            ("src/vss_runtime/new_transport.py", "runtime", "L3", "external-effect",
+             ["canonical"], True),
+        ]
+        for path, domain, level, risk, profiles, human_gate in cases:
+            with self.subTest(path=path):
+                candidate = self.root / path
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                candidate.write_text("pass\n", encoding="utf-8")
+                result = self.agent("impact", "--base", self.base)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                plan = json.loads(result.stdout)
+                self.assertEqual(plan["domains"], [domain])
+                self.assertEqual(plan["minimum_level"], level)
+                self.assertEqual(plan["risk"], risk)
+                self.assertEqual(plan["profiles"], profiles)
+                self.assertEqual(plan["human_gate_required"], human_gate)
+                self.assertEqual(plan["unknown_paths"], [])
+                candidate.unlink()
+
+    def test_sensitive_unexpected_change_fails_closed_without_path_disclosure(self) -> None:
+        path = self.root / ".local/credentials.json"
+        path.write_text("{}", encoding="utf-8")
+        result = self.agent("impact", "--base", self.base)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, "vss-agent: unexpected sensitive changed path\n")
+        self.assertNotIn("credentials", result.stdout + result.stderr)
+
+    def test_map_rejects_traversal_shell_and_executable_configuration(self) -> None:
+        mapping_path = self.root / "config/agent-harness-v2.json"
+        original = mapping_path.read_text(encoding="utf-8")
+        mapping = json.loads(original)
+        cases = []
+        traversal = json.loads(original)
+        traversal["domains"][0]["code"][0] = "../outside"
+        cases.append(traversal)
+        shell = json.loads(original)
+        shell["profiles"][0]["argv"] = ["sh", "-c", "echo unsafe"]
+        cases.append(shell)
+        dynamic = json.loads(original)
+        dynamic["profiles"][0]["argv"] = ["python", "-c", "print('unsafe')"]
+        cases.append(dynamic)
+        for candidate in cases:
+            with self.subTest(candidate=candidate["profiles"][0]["argv"]):
+                mapping_path.write_text(json.dumps(candidate), encoding="utf-8")
+                result = self.agent("context", "--domain", "agent-coordination")
+                self.assertEqual(result.returncode, 2)
+        mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+
+    def test_route_impact_validation_evidence_flow_and_staleness(self) -> None:
+        (self.root / "README.md").write_text("changed\n", encoding="utf-8")
+
+        routed = self.agent("context", "--domain", "agent-coordination")
+        impacted = self.agent("impact", "--base", self.base)
+        self.assertEqual(routed.returncode, 0, routed.stderr)
+        self.assertEqual(json.loads(impacted.stdout)["minimum_level"], "L3")
+        external = Path(tempfile.mkdtemp(prefix="vss-agent-evidence-"))
+        self.external_directories.append(external)
+        evidence_path = external / "evidence.json"
+        validated = self.agent(
+            "validate-change", "--base", self.base, "--level", "L3", "--output", str(evidence_path),
+        )
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        self.assertEqual(list(Draft202012Validator(EVIDENCE_SCHEMA).iter_errors(evidence)), [])
+        self.assertEqual(evidence["plan"]["profiles"], ["canonical"])
+        self.assertTrue(all(value is False for value in evidence["authority"].values()))
+        self.assertNotIn("stdout", evidence)
+        fresh = self.agent("evidence", "--input", str(evidence_path), "--require-current-change")
+        self.assertEqual(fresh.returncode, 0, fresh.stderr)
+        self.assertTrue(json.loads(fresh.stdout)["fresh"])
+
+        forged = dict(evidence)
+        forged["plan"] = {**evidence["plan"], "human_gate_required": True}
+        forged_path = external / "forged.json"
+        forged_path.write_text(json.dumps(forged), encoding="utf-8")
+        rejected = self.agent("evidence", "--input", str(forged_path))
+        self.assertEqual(rejected.returncode, 2)
+        inside = self.agent(
+            "validate-change", "--base", self.base, "--level", "L3", "--output", str(self.root / "evidence.json"),
+        )
+        self.assertEqual(inside.returncode, 2)
+        self.assertEqual(inside.stderr, "vss-agent: evidence output must be an absolute path outside the repository\n")
+
+        (self.root / "README.md").write_text("changed again\n", encoding="utf-8")
+        stale = self.agent("evidence", "--input", str(evidence_path), "--require-current-change")
+        self.assertEqual(stale.returncode, 2)
+        self.assertEqual(stale.stderr, "vss-agent: validation evidence is stale for current change\n")
+
+    def test_validation_rejects_level_downgrade_and_emits_failure_logs_only(self) -> None:
+        (self.root / "unknown.txt").write_text("unknown\n", encoding="utf-8")
+        downgrade = self.agent("validate-change", "--base", self.base, "--level", "L2")
+        self.assertEqual(downgrade.returncode, 2)
+        self.assertEqual(downgrade.stderr, "vss-agent: selected validation level is below the impact minimum\n")
+
+        validator = self.root / "scripts/validate-change.sh"
+        validator.write_text("#!/usr/bin/env bash\necho 'bounded failure'\nexit 7\n", encoding="utf-8")
+        failed = self.agent("validate-change", "--base", self.base, "--level", "L3")
+        self.assertEqual(failed.returncode, 2)
+        self.assertIn("bounded failure", failed.stderr)
+        self.assertIn("validation profile failed: canonical", failed.stderr)
+
     def test_helper_has_no_runtime_provider_or_effectful_command_path(self) -> None:
         source = HELPER.read_text(encoding="utf-8")
-        for forbidden in ("vss_runtime", "vss_providers", "--generate", "git push", "git merge"):
+        for forbidden in ("import vss_runtime", "import vss_providers", "--generate", "git push", "git merge", "shell=True"):
             self.assertNotIn(forbidden, source)
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertEqual(ci.count("unittest discover -s tests/agent_coordination"), 1)
