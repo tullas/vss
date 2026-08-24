@@ -222,9 +222,10 @@ class AgentCoordinationTests(unittest.TestCase):
             " body=next(value[5:] for value in sys.argv if value.startswith('body='))\n"
             " open(state,'w',encoding='utf-8').write(json.dumps([{'body':body}]))\n"
             " print('{}')\n"
-            "elif '--slurp' in sys.argv:\n"
+            "elif '--paginate' in sys.argv:\n"
             " comments=json.loads(open(state,encoding='utf-8').read()) if os.path.exists(state) else []\n"
-            " print(json.dumps([comments]))\n"
+            " print(json.dumps([]),end='')\n"
+            " print(json.dumps(comments))\n"
             "else:\n"
             " print(json.dumps({'pull_request':{}}))\n",
             encoding="utf-8",
@@ -253,6 +254,8 @@ class AgentCoordinationTests(unittest.TestCase):
         calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(sum("POST" in call for call in calls), 1)
         self.assertTrue(all(call[0] == "api" for call in calls))
+        self.assertTrue(any("--paginate" in call for call in calls))
+        self.assertTrue(all("--slurp" not in call for call in calls))
         self.assertTrue(all(any(value.startswith("repos/example/vss/issues/123") for value in call) for call in calls))
         self.assertNotIn("shell", json.dumps(calls))
         self.assertTrue(state.exists())

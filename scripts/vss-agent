@@ -354,12 +354,22 @@ def post(payload: dict[str, Any], comment: str) -> None:
     actual_kind = "pull_request" if "pull_request" in subject else "issue"
     if actual_kind != payload["subject"]["kind"]:
         fail("GitHub target kind does not match")
-    raw = run(["gh", "api", "--paginate", "--slurp", endpoint])
+    raw = run(["gh", "api", "--paginate", endpoint])
     try:
-        pages = json.loads(raw)
-    except json.JSONDecodeError as exc:
+        decoded = raw.decode("utf-8")
+        decoder = json.JSONDecoder()
+        pages = []
+        position = 0
+        while position < len(decoded):
+            while position < len(decoded) and decoded[position].isspace():
+                position += 1
+            if position == len(decoded):
+                break
+            page, position = decoder.raw_decode(decoded, position)
+            pages.append(page)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise AgentFailure("GitHub response is malformed") from exc
-    if type(pages) is not list or any(type(page) is not list for page in pages):
+    if not pages or any(type(page) is not list for page in pages):
         fail("GitHub response is malformed")
     for page in pages:
         for item in page:
