@@ -6,6 +6,10 @@ production's parent universe. It is intentionally not an asset catalog,
 resolver, rights registry, legal engine, storage abstraction, or execution
 path.
 
+M9.2 adds one exact deterministic resolution path that lets a named production
+consume that already-admitted universe visual reference as an inert resolution
+artifact. It does not add lookup, discovery, storage, or execution.
+
 ## Contracts
 
 `production_resource_artifact/1` records an immutable PNG output with exact
@@ -26,7 +30,15 @@ It retains exact production/activity/ancestor lineage, the admission binding,
 the one admitted permission, all surviving restrictions, and explicit inert
 authority limitations.
 
-All three contracts are bounded Draft 2020-12 schemas with closed nested
+`resource_resolution_request/1` binds an exact consumer tenant, universe, and
+production; the sole visual-reference purpose and permission; the exact asset
+identity, revision, seal, and content digest; the exact upstream production
+resource and admission identities; and the admitted rights reference and
+restrictions. `resource_resolution_result/1` preserves that request binding,
+the resolved asset identity, full source activity and ancestor lineage,
+admission policy evidence, rights facts, and explicit inert limitations.
+
+All five contracts are bounded Draft 2020-12 schemas with closed nested
 objects, exact versions, closed enums, and no `latest` input identity.
 Canonical SHA-256 digests reuse the existing VSS canonical JSON convention.
 Digests are integrity evidence, not ownership, access, promotion, or execution
@@ -99,9 +111,30 @@ Rejected adjudications return a closed deterministic code and no asset. The
 contracts and service grant no Runtime, provider, production approval,
 publication, redistribution, training, ownership, or workflow authority.
 
+## Exact production resolution
+
+`create_resource_resolution_request` and
+`resolve_universe_visual_reference` operate only on explicitly supplied,
+validated M9.1 source, admission, and asset artifacts. The resolver
+independently reconstructs that entire chain and the source content digest,
+then requires the request to match the caller-supplied consumer tenant,
+universe, production, and purpose. A validly resealed request cannot substitute
+another asset, resource revision, admission, rights reference, or restriction.
+The consumer production identifier is an exact scope label, not authenticated
+identity or production approval.
+
+Success returns a deterministic `resource_resolution_result/1`; failure
+returns a closed code and no resource. Resolution invokes no provider or
+Runtime, reads no path or mutable catalog, persists nothing, and activates no
+workflow. The result grants no storage, publication, redistribution, training,
+ownership, provider, Runtime, scheduling, or cross-scope authority.
+
 ## Limitations
 
-Only one PNG review-frame to universe visual-reference path exists. Other
+Only one PNG review-frame to universe visual-reference admission and exact
+production resolution path exists. Callers must already possess and explicitly
+supply the authoritative artifact chain and bytes; there is no lookup.
+Other
 resource types, production-only admissions, cross-tenant transactions,
 revocation propagation, catalogs, persistence, lookup, authentication, legal
 interpretation, canon/BOM export, storage, publication, and effectful execution
