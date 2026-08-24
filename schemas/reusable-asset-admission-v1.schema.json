@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"vss.resource.reusable_asset_admission/1",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","contract_identity","contract_version","admission_id","operation_identity","operation_version","decision","source","destination","purpose","requested_permissions","carried_restrictions","rights_reference","rights_status","policy_identity","policy_version","admission_sha256"],
+  "properties":{
+    "schema_version":{"const":"1"},"contract_identity":{"const":"reusable_asset_admission"},"contract_version":{"const":"1"},
+    "admission_id":{"type":"string","pattern":"^asset-admission-[0-9a-f]{32}$"},"operation_identity":{"const":"admit_storyboard_review_frame_as_universe_visual_reference"},"operation_version":{"const":"1"},"decision":{"const":"admit"},
+    "source":{"$ref":"#/$defs/source"},"destination":{"$ref":"#/$defs/destination"},"purpose":{"const":"storyboard_visual_reference"},
+    "requested_permissions":{"type":"array","const":["reuse_as_universe_visual_reference"]},
+    "carried_restrictions":{"type":"array","minItems":0,"maxItems":4,"uniqueItems":true,"items":{"enum":["no_reuse","no_training","no_redistribution","no_publication"]}},
+    "rights_reference":{"$ref":"#/$defs/id"},"rights_status":{"enum":["confirmed","unknown","conflicting"]},
+    "policy_identity":{"const":"vss.universe-visual-reference-admission"},"policy_version":{"const":"1.0.0"},"admission_sha256":{"$ref":"#/$defs/digest"}
+  },
+  "$defs":{
+    "id":{"type":"string","minLength":3,"maxLength":128,"pattern":"^[a-z][a-z0-9._:-]*$"},"digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "source":{"type":"object","additionalProperties":false,"required":["artifact_id","artifact_sha256","resource_id","resource_revision","content_sha256","tenant_id","universe_id","production_id"],"properties":{"artifact_id":{"type":"string","pattern":"^artifact-[0-9a-f]{32}$"},"artifact_sha256":{"$ref":"#/$defs/digest"},"resource_id":{"type":"string","pattern":"^resource-[0-9a-f]{32}$"},"resource_revision":{"type":"integer","minimum":1,"maximum":2147483647},"content_sha256":{"$ref":"#/$defs/digest"},"tenant_id":{"$ref":"#/$defs/id"},"universe_id":{"$ref":"#/$defs/id"},"production_id":{"$ref":"#/$defs/id"}}},
+    "destination":{"type":"object","additionalProperties":false,"required":["tenant_id","universe_id","scope_kind"],"properties":{"tenant_id":{"$ref":"#/$defs/id"},"universe_id":{"$ref":"#/$defs/id"},"scope_kind":{"const":"universe"}}}
+  }
+}

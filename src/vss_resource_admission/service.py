@@ -1,0 +1,204 @@
+from dataclasses import dataclass
+import hashlib
+from typing import Any
+
+from vss_reasoning_contracts import canonical_digest
+from vss_reasoning_contracts.canonicalization import thaw_json
+from vss_resource_contracts import (
+    ResourceContractError,
+    ValidatedResourceArtifact,
+    admission_identity_material,
+    admission_seal_material,
+    artifact_identity_material,
+    artifact_seal_material,
+    asset_identity_material,
+    asset_seal_material,
+    resource_identity_material,
+    validate_production_resource_artifact,
+    validate_reusable_asset,
+    validate_reusable_asset_admission,
+)
+
+
+PERMISSION = "reuse_as_universe_visual_reference"
+BLOCKING_RESTRICTION = "no_reuse"
+LIMITATIONS = [
+    "inert_semantic_asset", "not_production_approval", "not_publication_authority",
+    "not_runtime_authority", "not_training_permission", "exact_source_revision_only",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceAdmissionResult:
+    admitted: bool
+    code: str
+    asset: ValidatedResourceArtifact | None
+
+
+def _identifier(prefix: str, material: Any) -> str:
+    return prefix + canonical_digest(material)[:32]
+
+
+def create_production_artifact(*, resource_revision: int,
+                               tenant_id: str, production_id: str,
+                               universe_id: str | None, activity_id: str,
+                               content: bytes, ownership_class: str,
+                               rights_status: str, permissions: list[str],
+                               restrictions: list[str], rights_reference: str,
+                               ancestors: list[dict[str, Any]] | None = None
+                               ) -> ValidatedResourceArtifact:
+    if type(content) is not bytes:
+        raise ResourceContractError("resource content must be bytes")
+    scope = {"tenant_id": tenant_id, "universe_id": universe_id,
+             "production_id": production_id}
+    activity = {"activity_id": activity_id,
+                "operation_identity": "vss.movie.storyboard.local-pictorial-render",
+                "operation_version": "1", "output_name": "review_frame"}
+    content_digest = hashlib.sha256(content).hexdigest()
+    rights = {
+        "ownership_class": ownership_class, "status": rights_status,
+        "permissions": sorted(permissions), "restrictions": sorted(restrictions),
+        "rights_reference": rights_reference, "rights_policy_identity": "vss.resource-rights",
+        "rights_policy_version": "1.0.0",
+    }
+    lineage = {"kind": "exact_production_output",
+               "ancestors": sorted(ancestors or [], key=lambda item: (item["resource_id"], item["resource_revision"]))}
+    value = {
+        "schema_version": "1", "contract_identity": "production_resource_artifact",
+        "contract_version": "1", "artifact_id": "artifact-" + "0" * 32,
+        "resource_id": "resource-" + "0" * 32, "resource_revision": resource_revision,
+        "resource_kind": "storyboard_review_frame", "scope": scope, "activity": activity,
+        "content_sha256": content_digest, "media_type": "image/png", "rights": rights,
+        "lineage": lineage, "artifact_sha256": "0" * 64,
+    }
+    value["resource_id"] = _identifier("resource-", resource_identity_material(value))
+    value["artifact_id"] = _identifier("artifact-", artifact_identity_material(value))
+    value["artifact_sha256"] = canonical_digest(artifact_seal_material(value))
+    return validate_production_resource_artifact(value, content=content)
+
+
+def create_universe_admission(*, source_artifact: ValidatedResourceArtifact,
+                              destination_tenant_id: str, destination_universe_id: str,
+                              requested_permissions: list[str] | None = None,
+                              carried_restrictions: list[str] | None = None,
+                              rights_reference: str | None = None,
+                              rights_status: str | None = None) -> ValidatedResourceArtifact:
+    if not isinstance(source_artifact, ValidatedResourceArtifact):
+        raise ResourceContractError("admission requires a validated source artifact")
+    source = source_artifact.value
+    universe_id = source["scope"]["universe_id"]
+    source_binding = {
+        "artifact_id": source["artifact_id"], "artifact_sha256": source["artifact_sha256"],
+        "resource_id": source["resource_id"], "resource_revision": source["resource_revision"],
+        "content_sha256": source["content_sha256"], "tenant_id": source["scope"]["tenant_id"],
+        "universe_id": universe_id or destination_universe_id,
+        "production_id": source["scope"]["production_id"],
+    }
+    destination = {"tenant_id": destination_tenant_id, "universe_id": destination_universe_id,
+                   "scope_kind": "universe"}
+    value = {
+        "schema_version": "1", "contract_identity": "reusable_asset_admission",
+        "contract_version": "1", "admission_id": "asset-admission-" + "0" * 32,
+        "operation_identity": "admit_storyboard_review_frame_as_universe_visual_reference",
+        "operation_version": "1", "decision": "admit", "source": source_binding,
+        "destination": destination, "purpose": "storyboard_visual_reference",
+        "requested_permissions": requested_permissions or [PERMISSION],
+        "carried_restrictions": sorted(carried_restrictions if carried_restrictions is not None else thaw_json(source["rights"]["restrictions"])),
+        "rights_reference": rights_reference or source["rights"]["rights_reference"],
+        "rights_status": rights_status or source["rights"]["status"],
+        "policy_identity": "vss.universe-visual-reference-admission", "policy_version": "1.0.0",
+        "admission_sha256": "0" * 64,
+    }
+    value["admission_id"] = _identifier("asset-admission-", admission_identity_material(value))
+    value["admission_sha256"] = canonical_digest(admission_seal_material(value))
+    return validate_reusable_asset_admission(value)
+
+
+def _reject(code: str) -> ResourceAdmissionResult:
+    return ResourceAdmissionResult(False, code, None)
+
+
+def admit_storyboard_frame_to_universe(source_artifact: Any, *, source_content: bytes,
+                                       admission_request: Any) -> ResourceAdmissionResult:
+    if not isinstance(source_artifact, ValidatedResourceArtifact):
+        return _reject("invalid_source_artifact")
+    try:
+        source = validate_production_resource_artifact(
+            source_artifact.to_json_value(), content=source_content)
+    except ResourceContractError:
+        return _reject("invalid_source_artifact")
+    try:
+        request = validate_reusable_asset_admission(
+            admission_request.to_json_value() if isinstance(admission_request, ValidatedResourceArtifact)
+            else admission_request)
+    except (ResourceContractError, AttributeError, TypeError):
+        return _reject("invalid_admission")
+    artifact = source.value
+    admission = request.value
+    scope = artifact["scope"]
+    if scope["universe_id"] is None:
+        return _reject("source_has_no_universe")
+    expected_source = {
+        "artifact_id": artifact["artifact_id"], "artifact_sha256": artifact["artifact_sha256"],
+        "resource_id": artifact["resource_id"], "resource_revision": artifact["resource_revision"],
+        "content_sha256": artifact["content_sha256"], "tenant_id": scope["tenant_id"],
+        "universe_id": scope["universe_id"], "production_id": scope["production_id"],
+    }
+    if thaw_json(admission["source"]) != expected_source:
+        return _reject("source_binding_mismatch")
+    destination = admission["destination"]
+    if destination["tenant_id"] != scope["tenant_id"]:
+        return _reject("tenant_mismatch")
+    if destination["universe_id"] != scope["universe_id"]:
+        return _reject("universe_mismatch")
+    rights = artifact["rights"]
+    if rights["status"] != "confirmed" or admission["rights_status"] != "confirmed":
+        return _reject("rights_not_confirmed")
+    if admission["rights_reference"] != rights["rights_reference"]:
+        return _reject("rights_reference_mismatch")
+    if PERMISSION not in rights["permissions"]:
+        return _reject("permission_not_granted")
+    if list(admission["requested_permissions"]) != [PERMISSION]:
+        return _reject("permission_expansion")
+    if BLOCKING_RESTRICTION in rights["restrictions"]:
+        return _reject("reuse_restricted")
+    if list(admission["carried_restrictions"]) != list(rights["restrictions"]):
+        return _reject("restriction_mismatch")
+    source_lineage = {
+        "artifact_id": artifact["artifact_id"], "artifact_sha256": artifact["artifact_sha256"],
+        "resource_id": artifact["resource_id"], "resource_revision": artifact["resource_revision"],
+        "content_sha256": artifact["content_sha256"], "production_id": scope["production_id"],
+        "activity_id": artifact["activity"]["activity_id"],
+        "operation_identity": artifact["activity"]["operation_identity"],
+        "operation_version": artifact["activity"]["operation_version"],
+        "ancestors": thaw_json(artifact["lineage"]["ancestors"]),
+    }
+    admission_binding = {
+        "admission_id": admission["admission_id"], "admission_sha256": admission["admission_sha256"],
+        "operation_identity": admission["operation_identity"],
+        "operation_version": admission["operation_version"],
+        "policy_identity": admission["policy_identity"], "policy_version": admission["policy_version"],
+    }
+    asset_rights = {
+        "ownership_class": rights["ownership_class"], "status": "confirmed",
+        "permissions": [PERMISSION], "restrictions": thaw_json(rights["restrictions"]),
+        "rights_reference": rights["rights_reference"],
+        "rights_policy_identity": rights["rights_policy_identity"],
+        "rights_policy_version": rights["rights_policy_version"],
+    }
+    value = {
+        "schema_version": "1", "contract_identity": "reusable_asset", "contract_version": "1",
+        "asset_id": "asset-" + "0" * 32, "asset_revision": 1,
+        "asset_kind": "storyboard_visual_reference", "scope": thaw_json(destination),
+        "purpose": admission["purpose"], "content_sha256": artifact["content_sha256"],
+        "media_type": artifact["media_type"], "source": source_lineage,
+        "admission": admission_binding, "rights": asset_rights, "limitations": LIMITATIONS,
+        "asset_sha256": "0" * 64,
+    }
+    value["asset_id"] = _identifier("asset-", asset_identity_material(value))
+    value["asset_sha256"] = canonical_digest(asset_seal_material(value))
+    try:
+        asset = validate_reusable_asset(value)
+    except ResourceContractError:
+        return _reject("invalid_derived_asset")
+    return ResourceAdmissionResult(True, "admitted", asset)
