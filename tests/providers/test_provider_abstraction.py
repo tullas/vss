@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from vss_commands import ExitCode
-from vss_providers import ProviderAccess, ProviderIncompatible, ProviderRegistry
+from vss_providers import CONTROLLED_FRAME_PROVIDER_IDENTITY, ProviderAccess, ProviderIncompatible, ProviderRegistry, ProviderSelector
 from vss_runtime import RuntimeController, RuntimePolicy
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -102,6 +102,25 @@ class ProviderAbstractionTests(unittest.TestCase):
             metadata.version = "changed"
         with self.assertRaises(FrozenInstanceError):
             registry.builtins_root = self.root
+
+    def test_controlled_external_provider_is_exactly_registered_without_fallback(self) -> None:
+        shutil.copytree(
+            ROOT / "providers/builtin/movie-storyboard-image-openai",
+            self.root / "providers/builtin/movie-storyboard-image-openai",
+        )
+        registry = ProviderRegistry(
+            self.root / "providers/builtin", self.root / "schemas/provider-v1.schema.json")
+        registration = ProviderSelector(registry).registration({
+            "type": "controlled_storyboard_image_generation",
+            "identity": CONTROLLED_FRAME_PROVIDER_IDENTITY, "api_version": "1",
+        })
+        self.assertEqual(registration.metadata.version, "1.0.0")
+        self.assertEqual(registration.metadata.implementation_identity, "vss.openai-gpt-image-2")
+        with self.assertRaises(Exception):
+            ProviderSelector(registry).registration({
+                "type": "controlled_storyboard_image_generation",
+                "identity": "movie.storyboard-image.other", "api_version": "1",
+            })
 
     def test_deterministic_fake_provider_uses_production_controller_path(self) -> None:
         self.use_fake_clock()

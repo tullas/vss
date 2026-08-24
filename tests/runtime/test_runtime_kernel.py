@@ -12,7 +12,7 @@ import yaml
 from vss_commands import CommandRunner, ExitCode
 from vss_runtime.audit import AuditLogger
 from vss_runtime.controller import RuntimeController
-from vss_runtime.errors import InvalidManifest, RuntimeInternalFailure
+from vss_runtime.errors import InvalidManifest, PermissionDenied, RuntimeInternalFailure
 from vss_runtime.policy import RuntimePolicy
 from vss_runtime.registry import CapabilityRegistry
 
@@ -253,6 +253,12 @@ class RuntimeKernelTests(unittest.TestCase):
         capability.manifest_path.write_text("changed", encoding="utf-8")
         with self.assertRaisesRegex(InvalidManifest, "changed before loading"):
             controller.loader.load(capability)
+
+    def test_controlled_media_kill_switches_fail_closed(self) -> None:
+        RuntimePolicy().authorize_controlled_media()
+        for updates in ({"external_effects_killed": True}, {"controlled_media_killed": True}):
+            with self.subTest(updates=updates), self.assertRaises(PermissionDenied):
+                RuntimePolicy(**updates).authorize_controlled_media()
 
 
 if __name__ == "__main__":

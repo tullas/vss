@@ -20,6 +20,7 @@ from vss_capabilities import (
 )
 from vss_commands.exit_codes import ExitCode
 from vss_providers import (
+    CONTROLLED_FRAME_PROVIDER_IDENTITY,
     LOCAL_CLOCK_IDENTITY,
     LOCAL_PICTORIAL_FRAME_IDENTITY,
     LOCAL_STORYBOARD_RENDER_IDENTITY,
@@ -65,6 +66,10 @@ class RuntimeController:
         creative_smoke_transport=None,
         creative_smoke_secret_reader=None,
         external_execution_preflight: ExternalExecutionPreflight | None = None,
+        controlled_provider_transport=None,
+        controlled_provider_secret_reader=None,
+        controlled_approver_secret_reader=None,
+        controlled_now=None,
     ) -> None:
         self.root = (root or repository_root()).resolve()
         builtins_root = self.root / "capabilities"
@@ -72,13 +77,14 @@ class RuntimeController:
         self.loader = CapabilityLoader(builtins_root)
         self.policy = policy or RuntimePolicy(
             allowed_builtin_permissions=("provider_access",),
-            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY),
+            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, CONTROLLED_FRAME_PROVIDER_IDENTITY),
             allowed_capability_permissions={
                 "bootstrap.check": ("filesystem_read", "subprocess"),
                 "movie.storyboard-render": ("provider_access", "filesystem_write"),
                 "movie.pictorial-frame-generation": ("provider_access", "filesystem_write"),
                 "movie.m8-3-real-provider-smoke-2": ("filesystem_write", "network", "secrets"),
                 "movie.m8-3-real-provider-smoke-3": ("filesystem_write", "network", "secrets"),
+                "movie.controlled-review-frame": ("filesystem_write", "network", "provider_access", "secrets"),
             },
         )
         self.provider_registry = provider_registry or ProviderRegistry(
@@ -90,6 +96,10 @@ class RuntimeController:
         self.creative_smoke_transport = creative_smoke_transport
         self.creative_smoke_secret_reader = creative_smoke_secret_reader
         self.external_execution_preflight = external_execution_preflight or ExternalExecutionPreflight()
+        self.controlled_provider_transport = controlled_provider_transport
+        self.controlled_provider_secret_reader = controlled_provider_secret_reader
+        self.controlled_approver_secret_reader = controlled_approver_secret_reader
+        self.controlled_now = controlled_now
 
     def _source_commit(self) -> str | None:
         try:
@@ -129,9 +139,11 @@ class RuntimeController:
         artifact_publisher: StoryboardArtifactPublisher | None = None
         pictorial_artifact_publisher: PictorialArtifactPublisher | None = None
         creative_smoke_artifact_publisher = None
+        controlled_generation_artifact_publisher = None
         provider_diagnostic: dict[str, Any] | None = None
         preflight_diagnostic: dict[str, Any] | None = None
         reservation_preflight_spec: ExternalExecutionPreflightSpec | None = None
+        controlled_registration = None
         exit_code: ExitCode = ExitCode.INTERNAL_ERROR
         try:
             capability = self.registry.resolve_command(command)
@@ -193,6 +205,12 @@ class RuntimeController:
                 if command == "movie.m8-3-real-provider-smoke-3-generate" and input_data.get("mode") != (
                         "preflight" if dry_run else "generate"):
                     raise InvalidCapabilityInput("creative smoke mode mismatch")
+            elif command == "movie.controlled-review-frame-generate":
+                from vss_movie_controlled_generation import AdmittedControlledGeneration
+                if (environment != "development" or type(admitted_request) is not AdmittedControlledGeneration
+                        or input_data.get("mode") != ("preflight" if dry_run else "generate")):
+                    raise InvalidCapabilityInput("controlled generation requires authoritative admission")
+                self.policy.authorize_controlled_media()
             elif admitted_request is not None:
                 raise InvalidCapabilityInput("admitted request is not valid for this capability")
             provider_access = ProviderAccess()
@@ -205,6 +223,14 @@ class RuntimeController:
                     provider_access = ProviderAccess(storyboard=self.provider_registry.initialize(registration))
                 elif registration.metadata.provider_type == "storyboard_image_generation":
                     provider_access = ProviderAccess(pictorial=self.provider_registry.initialize(registration))
+                elif registration.metadata.provider_type == "controlled_storyboard_image_generation":
+                    import os
+                    controlled_registration = registration
+                    provider_access = ProviderAccess(
+                        controlled=self.provider_registry.initialize(registration),
+                        controlled_secret_reader=self.controlled_provider_secret_reader or os.environ.get,
+                        controlled_transport=self.controlled_provider_transport,
+                    )
             if capability.manifest.identity == "movie.storyboard-render" and "filesystem_write" in authorized:
                 artifact_publisher = StoryboardArtifactPublisher(self.root)
             if capability.manifest.identity == "movie.pictorial-frame-generation" and "filesystem_write" in authorized:
@@ -264,6 +290,43 @@ class RuntimeController:
                             reservation_preflight_spec = preflight_spec
                         else:
                             self.external_execution_preflight.run(preflight_spec)
+            if capability.manifest.identity == "movie.controlled-review-frame":
+                if set(authorized) != {"filesystem_write", "network", "provider_access", "secrets"}:
+                    raise PermissionDenied("controlled generation requires exact Runtime permissions")
+                if controlled_registration is None:
+                    raise RuntimeInternalFailure("controlled generation provider registration is unavailable")
+                from vss_movie_controlled_generation import (
+                    APPROVER_SECRET_NAME, ENDPOINT, MAXIMUM_COST_USD, MAXIMUM_ESTIMATED_COST_USD,
+                    SECRET_NAME, ControlledGenerationArtifactPublisher, provider_request_body,
+                    verify_approval,
+                )
+                from vss_reasoning_contracts import canonical_digest
+                import os
+                authoritative_request_digest = canonical_digest(provider_request_body(admitted_request.prompt))
+                controlled_generation_artifact_publisher = ControlledGenerationArtifactPublisher(
+                    self.root, admitted_request.request, admitted_request.approval,
+                )
+                controlled_generation_artifact_publisher.check_readiness()
+                preflight_spec = ExternalExecutionPreflightSpec(
+                    endpoint=ENDPOINT, credential_environment_variable=SECRET_NAME,
+                    provider_request_digest=admitted_request.request["provider"]["provider_request_sha256"],
+                    authoritative_provider_request_digest=authoritative_request_digest,
+                    maximum_provider_attempts=1, maximum_estimated_cost_usd=MAXIMUM_ESTIMATED_COST_USD,
+                    authorized_cost_ceiling_usd=MAXIMUM_COST_USD,
+                )
+                if dry_run:
+                    self.external_execution_preflight.run(preflight_spec)
+                else:
+                    secret_reader = self.controlled_approver_secret_reader or os.environ.get
+                    secret = secret_reader(APPROVER_SECRET_NAME)
+                    now = self.controlled_now() if self.controlled_now is not None else datetime.now(
+                        timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    try:
+                        verify_approval(admitted_request.approval_json(), admitted_request.request_json(),
+                                        secret=secret, now=now)
+                    except Exception as exc:
+                        raise PermissionDenied("controlled media approval denied") from exc
+                    reservation_preflight_spec = preflight_spec
             if capability.manifest.sdk_api_version is not None:
                 try:
                     validate_input(input_data, command_record["input_schema"])
@@ -290,6 +353,7 @@ class RuntimeController:
                     pictorial_artifact_publisher=pictorial_artifact_publisher,
                     creative_smoke_access=creative_smoke_access,
                     creative_smoke_artifact_publisher=creative_smoke_artifact_publisher,
+                    controlled_generation_artifact_publisher=controlled_generation_artifact_publisher,
                     admitted_request=admitted_request,
                 )
             else:
@@ -308,6 +372,11 @@ class RuntimeController:
                 if reservation_preflight_spec is not None:
                     self.external_execution_preflight.run(reservation_preflight_spec)
                 creative_smoke_artifact_publisher.reserve(admitted_request, execution_id)
+            if controlled_generation_artifact_publisher is not None and not dry_run:
+                if reservation_preflight_spec is None:
+                    raise RuntimeInternalFailure("controlled generation preflight is unavailable")
+                self.external_execution_preflight.run(reservation_preflight_spec)
+                controlled_generation_artifact_publisher.reserve(execution_id)
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             future = executor.submit(handler, context, input_data, dry_run)
             try:
@@ -361,6 +430,7 @@ class RuntimeController:
             if capability_identity in {
                 "movie.m8-3-real-provider-smoke-2",
                 "movie.m8-3-real-provider-smoke-3",
+                "movie.controlled-review-frame",
             } and diagnostic is not None:
                 provider_diagnostic = diagnostic.as_dict()
             bounded_preflight = getattr(exc, "preflight_diagnostic", None)
@@ -412,7 +482,7 @@ class RuntimeController:
         try:
             self.audit.append(audit_record)
         except RuntimeInternalFailure as exc:
-            publisher = artifact_publisher or pictorial_artifact_publisher or creative_smoke_artifact_publisher
+            publisher = artifact_publisher or pictorial_artifact_publisher or creative_smoke_artifact_publisher or controlled_generation_artifact_publisher
             if publisher is not None:
                 publisher.abort()
             response["status"] = "error"
@@ -420,7 +490,7 @@ class RuntimeController:
             response["output"] = {}
             response["errors"] = [str(exc)]
             return response, int(ExitCode.INTERNAL_ERROR)
-        publisher = artifact_publisher or pictorial_artifact_publisher or creative_smoke_artifact_publisher
+        publisher = artifact_publisher or pictorial_artifact_publisher or creative_smoke_artifact_publisher or controlled_generation_artifact_publisher
         if status == "success" and publisher is not None and not dry_run:
             try:
                 publisher.publish()

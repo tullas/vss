@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "vss.resource.generated_review_candidate_review/1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "contract_identity", "contract_version", "candidate_sha256", "inspection_questions", "disposition", "reviewer_accountability_id", "review_sha256"],
+  "properties": {
+    "schema_version": {"const": "1"}, "contract_identity": {"const": "generated_review_candidate_review"}, "contract_version": {"const": "1"},
+    "candidate_sha256": {"$ref": "#/$defs/digest"},
+    "inspection_questions": {"type": "array", "const": ["narrative_relationship_and_action_legible", "no_control_plane_text", "deliberate_ambiguity_preserved", "artistic_interpretation_bounded", "no_canonical_contradiction"]},
+    "disposition": {"type": "null"}, "reviewer_accountability_id": {"type": "null"}, "review_sha256": {"$ref": "#/$defs/digest"}
+  }, "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

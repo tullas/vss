@@ -1,6 +1,6 @@
-from .access import ProviderAccess, SafeClockHandle, SafePictorialFrameHandle, SafeStoryboardRenderHandle
-from .constants import LOCAL_CLOCK_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, PROVIDER_API_VERSION
-from .contracts import ClockProvider, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
+from .access import ProviderAccess, SafeClockHandle, SafeControlledFrameHandle, SafePictorialFrameHandle, SafeStoryboardRenderHandle
+from .constants import CONTROLLED_FRAME_PROVIDER_IDENTITY, LOCAL_CLOCK_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, PROVIDER_API_VERSION
+from .contracts import ClockProvider, ControlledFrameProvider, ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
 from .errors import (
     ProviderAccessDenied,
     ProviderExecutionFailure,
@@ -14,6 +14,10 @@ from .registry import ProviderRegistry, ProviderSelector
 
 __all__ = (
     "ClockProvider",
+    "CONTROLLED_FRAME_PROVIDER_IDENTITY",
+    "ControlledFrameProvider",
+    "ControlledFrameRequest",
+    "ControlledFrameResult",
     "LOCAL_CLOCK_IDENTITY",
     "LOCAL_STORYBOARD_RENDER_IDENTITY",
     "GeneratedMedia",
@@ -38,5 +42,6 @@ __all__ = (
     "ProviderUnavailable",
     "RegisteredProvider",
     "SafeClockHandle",
+    "SafeControlledFrameHandle",
     "UtcTimestamp",
 )

@@ -110,5 +110,15 @@ PNG generator. Both have one exact statically selected repository-owned local
 implementation, are authorized through Runtime, and use no network, credentials,
 vendor parameters, retries, or fallback. The PNG request exposes only the admitted
 selected-frame projection and separates its deterministic semantic identity from
-the execution attempt and output content digest. External AI implementations remain
-deferred.
+the execution attempt and output content digest.
+
+M10.0 adds one deliberately non-general external provider type,
+`controlled_storyboard_image_generation`, with the sole statically selected
+identity `movie.storyboard-image.openai`. It is available only to the controlled
+review-frame capability. Runtime wraps it in a one-use handle that retains the
+credential reader and transport; the capability can neither retrieve the secret
+nor make a second call. Exact model, endpoint, request settings, price policy,
+and data policy are part of the authoritative request and approval. There is no
+alias, fallback, retry, provider choice, or provider enumeration. This does not
+open the local `storyboard_image_generation` contract or create a general vendor
+catalog. See `docs/movie-controlled-generation.md`.

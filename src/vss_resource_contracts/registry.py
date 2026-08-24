@@ -31,8 +31,13 @@ FILES = MappingProxyType({
     "media_provenance_view/1": "media-provenance-view-v1.schema.json",
     "rights_eligibility_reassessment_request/1": "rights-eligibility-reassessment-request-v1.schema.json",
     "rights_eligibility_reassessment_result/1": "rights-eligibility-reassessment-result-v1.schema.json",
+    "controlled_storyboard_frame_generation_request/1": "controlled-storyboard-frame-generation-request-v1.schema.json",
+    "controlled_media_generation_approval/1": "controlled-media-generation-approval-v1.schema.json",
+    "controlled_media_generation_attempt/1": "controlled-media-generation-attempt-v1.schema.json",
+    "generated_review_candidate/1": "generated-review-candidate-v1.schema.json",
+    "generated_review_candidate_review/1": "generated-review-candidate-review-v1.schema.json",
 })
-BUILT_IN_REGISTRY_SHA256 = "fdb3dbb9e9af22ff2a0b5aed7b2af3b1fea0d17fa0fccc888a9bab948d5a9d39"  # pragma: allowlist secret
+BUILT_IN_REGISTRY_SHA256 = "81b4e2315ea878a0ac0689769c57ead719e71ea0a54671b26af91e6515b5110d"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 

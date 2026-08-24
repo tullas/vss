@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "vss.resource.controlled_media_generation_attempt/1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "contract_identity", "contract_version", "request_sha256", "approval_sha256", "attempt_id", "status", "provider_identity", "model_snapshot", "maximum_provider_attempts", "reserved_cost_usd", "attempt_sha256"],
+  "properties": {
+    "schema_version": {"const": "1"}, "contract_identity": {"const": "controlled_media_generation_attempt"}, "contract_version": {"const": "1"},
+    "request_sha256": {"$ref": "#/$defs/digest"}, "approval_sha256": {"$ref": "#/$defs/digest"},
+    "attempt_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}, "status": {"const": "attempted"},
+    "provider_identity": {"const": "movie.storyboard-image.openai"}, "model_snapshot": {"const": "gpt-image-2-2026-04-21"},
+    "maximum_provider_attempts": {"const": 1}, "reserved_cost_usd": {"const": "0.100000"}, "attempt_sha256": {"$ref": "#/$defs/digest"}
+  }, "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

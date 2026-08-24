@@ -5,7 +5,7 @@ import json
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -36,6 +36,7 @@ MOVIE_RENDER_COMMAND = "movie.render-storyboard"
 MOVIE_PICTORIAL_COMMAND = "movie.generate-pictorial-frame"
 MOVIE_M8_3_SMOKE_COMMAND = "movie.m8-3-real-provider-smoke-2"
 MOVIE_M8_3_SMOKE_3_COMMAND = "movie.m8-3-real-provider-smoke-3"
+MOVIE_CONTROLLED_FRAME_COMMAND = "movie.controlled-review-frame"
 MOVIE_CONTINUITY_CONTEXT_COMMAND = "movie.context-assemble-character-continuity"
 MOVIE_CONTINUITY_COMMAND = "movie.analyze-character-continuity"
 
@@ -98,7 +99,7 @@ class CommandRunner:
             registered = get_command(command)
         except Exception:
             return finish("error", ExitCode.INTERNAL_ERROR, {}, ["command registry unavailable"])
-        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND, MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND, MOVIE_REVIEW_COMMAND, MOVIE_REVIEW_DECISION_COMMAND, MOVIE_SHOT_PLAN_COMMAND, MOVIE_STORYBOARD_COMMAND, MOVIE_RENDER_COMMAND, MOVIE_PICTORIAL_COMMAND, MOVIE_M8_3_SMOKE_COMMAND, MOVIE_M8_3_SMOKE_3_COMMAND, MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
+        if registered is None and command not in RUNTIME_CAPABILITY_COMMANDS and command not in {REASONING_COMMAND, PERFORMANCE_COMMAND, KNOWLEDGE_BUILD_COMMAND, KNOWLEDGE_VALIDATE_COMMAND, CONTEXT_ASSEMBLE_COMMAND, CONTEXT_VALIDATE_COMMAND, MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND, MOVIE_REVIEW_COMMAND, MOVIE_REVIEW_DECISION_COMMAND, MOVIE_SHOT_PLAN_COMMAND, MOVIE_STORYBOARD_COMMAND, MOVIE_RENDER_COMMAND, MOVIE_PICTORIAL_COMMAND, MOVIE_M8_3_SMOKE_COMMAND, MOVIE_M8_3_SMOKE_3_COMMAND, MOVIE_CONTROLLED_FRAME_COMMAND, MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
             return finish("error", ExitCode.UNKNOWN_COMMAND, {}, [f"unknown command: {command}"])
         try:
             configuration = load_configuration(environment)
@@ -108,7 +109,7 @@ class CommandRunner:
         payload = input_data if input_data is not None else {}
         if not isinstance(payload, dict):
             return finish("error", ExitCode.INVALID_INPUT, {}, ["input must be a JSON object"])
-        if command in {MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND, MOVIE_REVIEW_COMMAND, MOVIE_REVIEW_DECISION_COMMAND, MOVIE_SHOT_PLAN_COMMAND, MOVIE_STORYBOARD_COMMAND, MOVIE_RENDER_COMMAND, MOVIE_PICTORIAL_COMMAND, MOVIE_M8_3_SMOKE_COMMAND, MOVIE_M8_3_SMOKE_3_COMMAND, MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
+        if command in {MOVIE_BREAKDOWN_COMMAND, MOVIE_CONTEXT_COMMAND, MOVIE_PROD_CONTEXT_COMMAND, MOVIE_PROD_COMMAND, MOVIE_REVIEW_COMMAND, MOVIE_REVIEW_DECISION_COMMAND, MOVIE_SHOT_PLAN_COMMAND, MOVIE_STORYBOARD_COMMAND, MOVIE_RENDER_COMMAND, MOVIE_PICTORIAL_COMMAND, MOVIE_M8_3_SMOKE_COMMAND, MOVIE_M8_3_SMOKE_3_COMMAND, MOVIE_CONTROLLED_FRAME_COMMAND, MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
             try:
                 if command in {MOVIE_CONTINUITY_CONTEXT_COMMAND, MOVIE_CONTINUITY_COMMAND}:
                     required = {"task","scene_breakdown","continuity_sequence","character_references","character_identities","character_observations"}
@@ -282,6 +283,51 @@ class CommandRunner:
                         dry_run=dry_run, timeout_seconds=RUNTIME_TIMEOUT_SECONDS,
                         verbose=verbose, ask_become_pass=ask_become_pass, admitted_request=admitted,
                     )
+                if command == MOVIE_CONTROLLED_FRAME_COMMAND:
+                    base = {"story", "decision", "review_packet", "option_set", "scene_breakdown",
+                            "creative_decision", "canon_snapshot", "canon_binding", "shot_plan",
+                            "storyboard", "frame_id", "mode"}
+                    mode = payload.get("mode")
+                    required = base | ({"recorded_by"} if mode == "approve" else
+                                       {"approval"} if mode == "generate" else set())
+                    if frozenset(payload) != required or mode not in {"preflight", "approve", "generate"}:
+                        return finish("error", ExitCode.INVALID_INPUT, {}, ["controlled frame input is invalid"])
+                    from vss_movie_controlled_generation import (
+                        APPROVER_SECRET_NAME, RUNTIME_TIMEOUT_SECONDS, admit_controlled_generation,
+                        issue_approval,
+                    )
+                    admitted = admit_controlled_generation(
+                        payload["story"], payload["decision"], payload["review_packet"], payload["option_set"],
+                        payload["scene_breakdown"], payload["creative_decision"], payload["canon_snapshot"],
+                        payload["canon_binding"], payload["shot_plan"], payload["storyboard"],
+                        frame_id=payload["frame_id"], environment=environment,
+                        approval=payload.get("approval"),
+                    )
+                    if mode == "approve":
+                        import os
+                        secret = os.environ.get(APPROVER_SECRET_NAME)
+                        now = datetime.now(timezone.utc).replace(microsecond=0)
+                        approval = issue_approval(
+                            admitted.request_json(), recorded_by=payload["recorded_by"], secret=secret,
+                            issued_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            expires_at=(now + timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        )
+                        return finish("success", ExitCode.SUCCESS,
+                                      {"request": admitted.request_json(), "approval": approval,
+                                       "provider_call_count": 0}, [])
+                    from vss_runtime import RuntimeController
+                    runtime_controller = self._runtime_controller or RuntimeController()
+                    response, code = runtime_controller.run(
+                        command="movie.controlled-review-frame-generate", environment=environment,
+                        configuration=configuration,
+                        input_data={"admission_id": admitted.request["request_sha256"], "mode": mode},
+                        correlation_id=correlation, started_at=started_at, started_clock=started_clock,
+                        dry_run=mode == "preflight", timeout_seconds=RUNTIME_TIMEOUT_SECONDS,
+                        verbose=verbose, ask_become_pass=ask_become_pass, admitted_request=admitted,
+                    )
+                    if mode == "preflight" and response["status"] == "success":
+                        response["output"] = {**response["output"], "request": admitted.request_json()}
+                    return response, code
                 if frozenset(payload) != {"request", "context"}: return finish("error", ExitCode.INVALID_INPUT, {}, ["movie breakdown input is invalid"])
                 req, context = payload["request"], payload["context"]
                 gateway = self._reasoning_gateway

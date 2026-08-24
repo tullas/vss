@@ -112,3 +112,13 @@ The runtime does not include autonomous or multi-agent planning, provider
 implementations, SDK scaffolding, remote or third-party plugins,
 package downloads, distributed events, persistent databases, marketplace
 behavior, or media-production functionality.
+
+M10.0 is the narrow exception to the earlier external-provider deferral. Runtime
+is the sole effect boundary for one development storyboard image attempt. It
+checks the exact signed approval, key epoch, kill switches, price ceiling and
+fresh external readiness before atomically creating the attempt record; only
+then can the one-use provider handle read its credential. Untrusted output is
+validated and staged, Runtime audit is committed, and the admission/provenance
+record is published last. Preflight performs none of those effectful actions.
+This is not a general approval service, budget ledger, provider runtime, queue,
+or production execution facility.

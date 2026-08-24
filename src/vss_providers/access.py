@@ -3,9 +3,11 @@ from __future__ import annotations
 import math
 import re
 import hashlib
+from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 
-from .contracts import ClockProvider, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
+from .contracts import ClockProvider, ControlledFrameProvider, ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
 from .errors import ProviderAccessDenied, ProviderExecutionFailure
 from .png import validate_pictorial_png
 
@@ -48,17 +50,22 @@ class SafeClockHandle:
 class ProviderAccess:
     """A non-enumerable set of provider handles authorized for one execution."""
 
-    __slots__ = ("__clock", "__storyboard", "__pictorial")
+    __slots__ = ("__clock", "__storyboard", "__pictorial", "__controlled")
 
     def __init__(
         self,
         clock: ClockProvider | None = None,
         storyboard: StoryboardRenderProvider | None = None,
         pictorial: PictorialFrameProvider | None = None,
+        controlled: ControlledFrameProvider | None = None,
+        controlled_secret_reader=None,
+        controlled_transport=None,
     ) -> None:
         object.__setattr__(self, "_ProviderAccess__clock", SafeClockHandle(clock) if clock is not None else None)
         object.__setattr__(self, "_ProviderAccess__storyboard", SafeStoryboardRenderHandle(storyboard) if storyboard is not None else None)
         object.__setattr__(self, "_ProviderAccess__pictorial", SafePictorialFrameHandle(pictorial) if pictorial is not None else None)
+        object.__setattr__(self, "_ProviderAccess__controlled", SafeControlledFrameHandle(
+            controlled, controlled_secret_reader, controlled_transport) if controlled is not None else None)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("provider access is immutable")
@@ -77,6 +84,11 @@ class ProviderAccess:
         if self.__pictorial is None:
             raise ProviderAccessDenied("pictorial frame provider access was not declared and authorized")
         return self.__pictorial
+
+    def get_controlled_frame_generator(self) -> "SafeControlledFrameHandle":
+        if self.__controlled is None:
+            raise ProviderAccessDenied("controlled frame provider access was not declared and authorized")
+        return self.__controlled
 
 
 class SafeStoryboardRenderHandle:
@@ -150,4 +162,65 @@ class SafePictorialFrameHandle:
         width, height = validate_pictorial_png(result.content)
         if (result.width, result.height) != (width, height):
             raise ProviderExecutionFailure("pictorial frame provider returned inconsistent dimensions")
+        return result
+
+
+class SafeControlledFrameHandle:
+    __slots__ = ("__provider", "__secret_reader", "__transport", "__calls")
+
+    def __init__(self, provider: ControlledFrameProvider, secret_reader, transport) -> None:
+        object.__setattr__(self, "_SafeControlledFrameHandle__provider", provider)
+        object.__setattr__(self, "_SafeControlledFrameHandle__secret_reader", secret_reader)
+        object.__setattr__(self, "_SafeControlledFrameHandle__transport", transport)
+        object.__setattr__(self, "_SafeControlledFrameHandle__calls", 0)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("controlled frame provider handle is immutable")
+
+    def generate(self, request: ControlledFrameRequest) -> ControlledFrameResult:
+        if self.__calls:
+            raise ProviderAccessDenied("controlled frame provider call ceiling exceeded")
+        object.__setattr__(self, "_SafeControlledFrameHandle__calls", 1)
+        from vss_movie_controlled_generation import SECRET_NAME
+        try:
+            secret = self.__secret_reader(SECRET_NAME)
+        except Exception as exc:
+            raise ProviderExecutionFailure("controlled frame provider credential is unavailable") from exc
+        if not isinstance(secret, str) or not secret or len(secret) > 512:
+            raise ProviderExecutionFailure("controlled frame provider credential is unavailable")
+        try:
+            result = self.__provider.generate(request, credential=secret, transport=self.__transport)
+        except (ProviderAccessDenied, ProviderExecutionFailure):
+            raise
+        except Exception as exc:
+            raise ProviderExecutionFailure("controlled frame provider execution failed") from exc
+        if (not isinstance(result, ControlledFrameResult) or not isinstance(result.media, GeneratedMedia)
+                or result.media.media_type != "image/png" or result.media.width != 1280
+                or result.media.height != 720 or len(result.media.content) > 10 * 1024 * 1024
+                or result.media.content_sha256 != hashlib.sha256(result.media.content).hexdigest()
+                or result.content_credentials_present is not False
+                or not isinstance(result.latency_ms, int) or not 0 <= result.latency_ms <= 600000
+                or not isinstance(result.estimated_cost_usd, str)
+                or not re.fullmatch(r"[0-9]+\.[0-9]{6}", result.estimated_cost_usd)
+                or not re.fullmatch(r"[0-9a-f]{64}", result.response_sha256)):
+            raise ProviderExecutionFailure("controlled frame provider returned invalid media")
+        if (not isinstance(result.usage, Mapping)
+                or set(result.usage) != {"input_tokens", "output_tokens", "total_tokens"}
+                or any(type(value) is not int or not 0 <= value <= 10_000_000
+                       for value in result.usage.values())
+                or result.usage["total_tokens"] != result.usage["input_tokens"] + result.usage["output_tokens"]
+                or not (result.provider_created is None
+                        or type(result.provider_created) is int and result.provider_created >= 0)
+                or not (result.request_id is None
+                        or isinstance(result.request_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", result.request_id))):
+            raise ProviderExecutionFailure("controlled frame provider returned invalid provenance")
+        try:
+            if Decimal(result.estimated_cost_usd) > Decimal("0.100000"):
+                raise ProviderExecutionFailure("controlled frame provider exceeded its cost ceiling")
+        except InvalidOperation as exc:
+            raise ProviderExecutionFailure("controlled frame provider returned invalid cost") from exc
+        from vss_movie_creative_smoke.png import validate_openai_png
+        summary = validate_openai_png(result.media.content)
+        if summary.content_credentials_present:
+            raise ProviderExecutionFailure("controlled frame provider output asserted untrusted credentials")
         return result

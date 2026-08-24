@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "vss.resource.controlled_media_generation_approval/1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "contract_identity", "contract_version", "operation_identity", "operation_version", "request_sha256", "environment", "purpose", "provider_identity", "model_snapshot", "maximum_provider_attempts", "maximum_cost_usd", "reusable", "issued_at", "expires_at", "authority_identity", "key_epoch", "recorded_by", "signature"],
+  "properties": {
+    "schema_version": {"const": "1"}, "contract_identity": {"const": "controlled_media_generation_approval"}, "contract_version": {"const": "1"},
+    "operation_identity": {"const": "generate_one_controlled_storyboard_review_frame"}, "operation_version": {"const": "1"},
+    "request_sha256": {"$ref": "#/$defs/digest"}, "environment": {"const": "development"},
+    "purpose": {"const": "development_storyboard_review_candidate"}, "provider_identity": {"const": "movie.storyboard-image.openai"},
+    "model_snapshot": {"const": "gpt-image-2-2026-04-21"}, "maximum_provider_attempts": {"const": 1},
+    "maximum_cost_usd": {"const": "0.100000"}, "reusable": {"const": false},
+    "issued_at": {"$ref": "#/$defs/timestamp"}, "expires_at": {"$ref": "#/$defs/timestamp"},
+    "authority_identity": {"const": "vss.controlled-media.local-human-approver/1"}, "key_epoch": {"const": 1},
+    "recorded_by": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@/-]*$"},
+    "signature": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "timestamp": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"}}
+}
