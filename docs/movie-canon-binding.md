@@ -66,11 +66,30 @@ grant no production approval, Runtime/provider execution, workflow activation,
 scheduling, regeneration, storage, publication, rights, ownership, reuse,
 training, or cross-tenant authority.
 
+## Bounded dependency-impact assessment
+
+M9.4 adds `dependency_impact_request/1`, `dependency_impact_result/1`, and the
+in-process `assess_production_binding_impact` API. A request pins one exact
+historical production binding, its canon snapshot and selected decision, plus
+one explicitly supplied candidate canon/decision state. The API reconstructs
+the historical binding and both real movie review-to-canon chains before it
+compares the exact decision identity/revision/seal and canon
+identity/version/seal.
+
+An exact match is `unaffected`; an in-scope changed pin is
+`affected_reassessment_required`; missing, inconsistent, ambiguous, or
+cross-scope evidence is `incomplete_fail_closed` or a closed malformed-contract
+rejection. Results contain bounded exact evidence and are deterministic and
+immutable. Assessment never changes the historical artifacts. “Affected” is
+only a reassessment signal and grants no authority to invalidate, regenerate,
+delete, schedule, execute, publish, store, or change rights.
+
 ## Limitations
 
 This slice supports one explicitly supplied scene option decision and a bounded
 production-context snapshot. It has no database, registry of decisions, lookup,
-mutable canon service, dependency traversal, impact analysis, regeneration,
+mutable canon service, dependency traversal beyond the one selected binding,
+multi-hop or persistent impact analysis, regeneration,
 multi-production universe canon, authentication, UI, rights adjudication,
 Runtime/provider call, persistence, publication, BOM/export, or cross-tenant
 sharing. The demo uses explicit local scope labels `tenant-local` and

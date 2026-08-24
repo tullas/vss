@@ -287,6 +287,71 @@ def production_canon_binding_seal_material(value):
     return {**value, "result_sha256": "0" * 64}
 
 
+def dependency_impact_request_seal_material(value):
+    return {**value, "request_sha256": "0" * 64}
+
+
+def dependency_impact_result_identity_material(value):
+    return {key: item for key, item in value.items()
+            if key not in {"assessment_id", "result_sha256"}}
+
+
+def dependency_impact_result_seal_material(value):
+    return {**value, "result_sha256": "0" * 64}
+
+
+def validate_dependency_impact_request(value, *, registry=None):
+    try:
+        value = _validate(value, "dependency_impact_request/1", registry)
+        if value["request_sha256"] != canonical_digest(
+                dependency_impact_request_seal_material(value)):
+            raise ResourceContractError("dependency impact request seal mismatch")
+    except ResourceContractError as exc:
+        raise ResourceContractError("impact_request_invalid") from exc
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_dependency_impact_result(value, *, registry=None):
+    try:
+        value = _validate(value, "dependency_impact_result/1", registry)
+        expected_id = "dependency-impact-" + canonical_digest(
+            dependency_impact_result_identity_material(value))[:32]
+        if value["assessment_id"] != expected_id:
+            raise ResourceContractError("dependency impact result identity mismatch")
+        if value["evidence"] != sorted(value["evidence"], key=lambda item: item["dependency_kind"]):
+            raise ResourceContractError("dependency impact evidence is not canonical")
+        classifications = {
+            "exact_dependencies_unchanged": "unaffected",
+            "selected_dependency_changed": "affected_reassessment_required",
+            "prior_authoritative_chain_incomplete": "incomplete_fail_closed",
+            "candidate_authoritative_chain_incomplete": "incomplete_fail_closed",
+            "scope_mismatch": "incomplete_fail_closed",
+            "dependency_identity_ambiguous": "incomplete_fail_closed",
+        }
+        if value["classification"] != classifications[value["reason_code"]]:
+            raise ResourceContractError("dependency impact classification mismatch")
+        evidence = value["evidence"]
+        if value["classification"] == "incomplete_fail_closed":
+            if evidence:
+                raise ResourceContractError("incomplete dependency impact cannot claim evidence")
+        elif (len(evidence) != 2
+              or {item["dependency_kind"] for item in evidence}
+              != {"canon_snapshot", "creative_decision_revision"}):
+            raise ResourceContractError("complete dependency impact requires exact evidence")
+        elif value["classification"] == "unaffected" and any(
+                item["changed"] for item in evidence):
+            raise ResourceContractError("unaffected dependency evidence changed")
+        elif value["classification"] == "affected_reassessment_required" and not any(
+                item["changed"] for item in evidence):
+            raise ResourceContractError("affected dependency evidence is unchanged")
+        if value["result_sha256"] != canonical_digest(
+                dependency_impact_result_seal_material(value)):
+            raise ResourceContractError("dependency impact result seal mismatch")
+    except ResourceContractError as exc:
+        raise ResourceContractError("impact_result_invalid") from exc
+    return ValidatedResourceArtifact._create(value)
+
+
 def validate_creative_decision_revision(value, *, registry=None):
     value = _validate(value, "creative_decision_revision/1", registry)
     expected_id = "decision-" + canonical_digest(creative_decision_identity_material(value))[:32]
