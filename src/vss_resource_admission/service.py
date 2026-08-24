@@ -16,9 +16,15 @@ from vss_resource_contracts import (
     asset_identity_material,
     asset_seal_material,
     resource_identity_material,
+    resolution_request_identity_material,
+    resolution_request_seal_material,
+    resolution_result_identity_material,
+    resolution_result_seal_material,
     validate_production_resource_artifact,
     validate_reusable_asset,
     validate_reusable_asset_admission,
+    validate_resource_resolution_request,
+    validate_resource_resolution_result,
 )
 
 
@@ -35,6 +41,13 @@ class ResourceAdmissionResult:
     admitted: bool
     code: str
     asset: ValidatedResourceArtifact | None
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceResolutionResult:
+    resolved: bool
+    code: str
+    resource: ValidatedResourceArtifact | None
 
 
 def _identifier(prefix: str, material: Any) -> str:
@@ -214,3 +227,117 @@ def admit_storyboard_frame_to_universe(source_artifact: Any, *, source_content: 
     except ResourceContractError:
         return _reject("invalid_derived_asset")
     return ResourceAdmissionResult(True, "admitted", asset)
+
+
+def create_resource_resolution_request(*, source_artifact: ValidatedResourceArtifact,
+                                       admission: ValidatedResourceArtifact,
+                                       asset: ValidatedResourceArtifact,
+                                       source_content: bytes, tenant_id: str,
+                                       universe_id: str, production_id: str,
+                                       purpose: str = "storyboard_visual_reference"
+                                       ) -> ValidatedResourceArtifact:
+    validated_asset = validate_reusable_asset(
+        asset.to_json_value(), source_artifact=source_artifact, admission=admission,
+        source_content=source_content)
+    item = validated_asset.value
+    value = {
+        "schema_version": "1", "contract_identity": "resource_resolution_request",
+        "contract_version": "1", "request_id": "resource-resolution-" + "0" * 32,
+        "operation_identity": "resolve_universe_visual_reference_for_production",
+        "operation_version": "1",
+        "consumer": {"tenant_id": tenant_id, "universe_id": universe_id,
+                     "production_id": production_id, "scope_kind": "production"},
+        "purpose": purpose,
+        "asset": {key: item[key] for key in (
+            "asset_id", "asset_revision", "asset_sha256", "content_sha256")},
+        "source": {key: item["source"][key] for key in (
+            "artifact_id", "artifact_sha256", "resource_id", "resource_revision")},
+        "admission": {key: item["admission"][key]
+                      for key in ("admission_id", "admission_sha256")},
+        "permission": PERMISSION,
+        "restrictions": thaw_json(item["rights"]["restrictions"]),
+        "rights_reference": item["rights"]["rights_reference"],
+        "request_sha256": "0" * 64,
+    }
+    value["request_id"] = _identifier(
+        "resource-resolution-", resolution_request_identity_material(value))
+    value["request_sha256"] = canonical_digest(resolution_request_seal_material(value))
+    return validate_resource_resolution_request(value)
+
+
+def _resolution_reject(code: str) -> ResourceResolutionResult:
+    return ResourceResolutionResult(False, code, None)
+
+
+def resolve_universe_visual_reference(*, source_artifact: Any, admission: Any,
+                                      asset: Any, source_content: bytes, request: Any,
+                                      tenant_id: str, universe_id: str,
+                                      production_id: str,
+                                      purpose: str = "storyboard_visual_reference"
+                                      ) -> ResourceResolutionResult:
+    if not all(isinstance(item, ValidatedResourceArtifact)
+               for item in (source_artifact, admission, asset)):
+        return _resolution_reject("invalid_authoritative_chain")
+    try:
+        validated_asset = validate_reusable_asset(
+            asset.to_json_value(), source_artifact=source_artifact, admission=admission,
+            source_content=source_content)
+    except (ResourceContractError, AttributeError, TypeError):
+        return _resolution_reject("invalid_authoritative_chain")
+    try:
+        validated_request = validate_resource_resolution_request(
+            request.to_json_value() if isinstance(request, ValidatedResourceArtifact) else request)
+    except (ResourceContractError, AttributeError, TypeError):
+        return _resolution_reject("invalid_request")
+    item = validated_asset.value
+    requested = validated_request.value
+    consumer = {"tenant_id": tenant_id, "universe_id": universe_id,
+                "production_id": production_id, "scope_kind": "production"}
+    if requested["consumer"] != consumer:
+        return _resolution_reject("consumer_scope_mismatch")
+    if item["scope"]["tenant_id"] != tenant_id:
+        return _resolution_reject("tenant_mismatch")
+    if item["scope"]["universe_id"] != universe_id:
+        return _resolution_reject("universe_mismatch")
+    if requested["purpose"] != purpose or item["purpose"] != purpose:
+        return _resolution_reject("purpose_mismatch")
+    expected_request = create_resource_resolution_request(
+        source_artifact=source_artifact, admission=admission, asset=validated_asset,
+        source_content=source_content, tenant_id=tenant_id, universe_id=universe_id,
+        production_id=production_id, purpose=purpose)
+    if requested != expected_request.value:
+        return _resolution_reject("authoritative_binding_mismatch")
+    value = {
+        "schema_version": "1", "contract_identity": "resource_resolution_result",
+        "contract_version": "1", "resolution_id": "resolved-resource-" + "0" * 32,
+        "request": {key: requested[key] for key in (
+            "request_id", "request_sha256", "operation_identity", "operation_version")},
+        "consumer": thaw_json(requested["consumer"]), "purpose": purpose,
+        "resolved_asset": {key: item[key] for key in (
+            "asset_id", "asset_revision", "asset_sha256", "asset_kind",
+            "content_sha256", "media_type")},
+        "source": thaw_json(item["source"]), "admission": thaw_json(item["admission"]),
+        "rights": {
+            "ownership_class": item["rights"]["ownership_class"], "status": "confirmed",
+            "permission": PERMISSION,
+            "restrictions": thaw_json(item["rights"]["restrictions"]),
+            "rights_reference": item["rights"]["rights_reference"],
+            "rights_policy_identity": item["rights"]["rights_policy_identity"],
+            "rights_policy_version": item["rights"]["rights_policy_version"],
+        },
+        "limitations": ["inert_resolution", "not_production_approval",
+                        "not_publication_authority", "not_redistribution_authority",
+                        "not_runtime_authority", "not_training_permission",
+                        "no_storage_authority", "exact_asset_revision_only"],
+        "result_sha256": "0" * 64,
+    }
+    value["resolution_id"] = _identifier(
+        "resolved-resource-", resolution_result_identity_material(value))
+    value["result_sha256"] = canonical_digest(resolution_result_seal_material(value))
+    try:
+        resource = validate_resource_resolution_result(
+            value, request=validated_request, source_artifact=source_artifact,
+            admission=admission, asset=validated_asset, source_content=source_content)
+    except ResourceContractError:
+        return _resolution_reject("invalid_resolution_result")
+    return ResourceResolutionResult(True, "resolved", resource)

@@ -65,6 +65,24 @@ def asset_identity_material(value):
     }
 
 
+def resolution_request_seal_material(value):
+    return {**value, "request_sha256": "0" * 64}
+
+
+def resolution_request_identity_material(value):
+    return {key: item for key, item in value.items()
+            if key not in {"request_id", "request_sha256"}}
+
+
+def resolution_result_seal_material(value):
+    return {**value, "result_sha256": "0" * 64}
+
+
+def resolution_result_identity_material(value):
+    return {key: item for key, item in value.items()
+            if key not in {"resolution_id", "result_sha256"}}
+
+
 def validate_production_resource_artifact(value, *, content=None, registry=None):
     value = _validate(value, "production_resource_artifact/1", registry)
     expected_resource_id = "resource-" + canonical_digest(resource_identity_material(value))[:32]
@@ -164,4 +182,78 @@ def validate_reusable_asset(value, *, source_artifact, admission, source_content
         raise ResourceContractError("asset restrictions are not canonical")
     if value["asset_sha256"] != canonical_digest(asset_seal_material(value)):
         raise ResourceContractError("reusable asset seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_resource_resolution_request(value, *, registry=None):
+    value = _validate(value, "resource_resolution_request/1", registry)
+    expected_id = "resource-resolution-" + canonical_digest(
+        resolution_request_identity_material(value))[:32]
+    if value["request_id"] != expected_id:
+        raise ResourceContractError("resource resolution request identity mismatch")
+    if value["restrictions"] != sorted(value["restrictions"]):
+        raise ResourceContractError("resource resolution restrictions are not canonical")
+    if value["request_sha256"] != canonical_digest(resolution_request_seal_material(value)):
+        raise ResourceContractError("resource resolution request seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_resource_resolution_result(value, *, request, source_artifact, admission,
+                                        asset, source_content=None, registry=None):
+    value = _validate(value, "resource_resolution_result/1", registry)
+    if not all(isinstance(item, ValidatedResourceArtifact)
+               for item in (request, source_artifact, admission, asset)):
+        raise ResourceContractError("resource resolution requires validated authorities")
+    validated_request = validate_resource_resolution_request(request.to_json_value(), registry=registry)
+    validated_asset = validate_reusable_asset(
+        asset.to_json_value(), source_artifact=source_artifact, admission=admission,
+        source_content=source_content, registry=registry)
+    request_value = validated_request.value
+    asset_value = validated_asset.value
+    expected_request_asset = {key: asset_value[key] for key in (
+        "asset_id", "asset_revision", "asset_sha256", "content_sha256")}
+    expected_request_source = {key: asset_value["source"][key] for key in (
+        "artifact_id", "artifact_sha256", "resource_id", "resource_revision")}
+    expected_request_admission = {key: asset_value["admission"][key] for key in (
+        "admission_id", "admission_sha256")}
+    if (request_value["asset"] != expected_request_asset
+            or request_value["source"] != expected_request_source
+            or request_value["admission"] != expected_request_admission
+            or request_value["consumer"]["tenant_id"] != asset_value["scope"]["tenant_id"]
+            or request_value["consumer"]["universe_id"] != asset_value["scope"]["universe_id"]
+            or request_value["purpose"] != asset_value["purpose"]
+            or request_value["permission"] not in asset_value["rights"]["permissions"]
+            or request_value["restrictions"] != asset_value["rights"]["restrictions"]
+            or request_value["rights_reference"] != asset_value["rights"]["rights_reference"]):
+        raise ResourceContractError("resource resolution request authoritative binding mismatch")
+    expected = {
+        "schema_version": "1", "contract_identity": "resource_resolution_result",
+        "contract_version": "1", "resolution_id": "resolved-resource-" + "0" * 32,
+        "request": {key: request_value[key] for key in (
+            "request_id", "request_sha256", "operation_identity", "operation_version")},
+        "consumer": thaw_json(request_value["consumer"]), "purpose": request_value["purpose"],
+        "resolved_asset": {key: asset_value[key] for key in (
+            "asset_id", "asset_revision", "asset_sha256", "asset_kind", "content_sha256", "media_type")},
+        "source": thaw_json(asset_value["source"]),
+        "admission": thaw_json(asset_value["admission"]),
+        "rights": {
+            "ownership_class": asset_value["rights"]["ownership_class"],
+            "status": asset_value["rights"]["status"],
+            "permission": request_value["permission"],
+            "restrictions": thaw_json(asset_value["rights"]["restrictions"]),
+            "rights_reference": asset_value["rights"]["rights_reference"],
+            "rights_policy_identity": asset_value["rights"]["rights_policy_identity"],
+            "rights_policy_version": asset_value["rights"]["rights_policy_version"],
+        },
+        "limitations": ["inert_resolution", "not_production_approval",
+                        "not_publication_authority", "not_redistribution_authority",
+                        "not_runtime_authority", "not_training_permission",
+                        "no_storage_authority", "exact_asset_revision_only"],
+        "result_sha256": "0" * 64,
+    }
+    expected["resolution_id"] = "resolved-resource-" + canonical_digest(
+        resolution_result_identity_material(expected))[:32]
+    expected["result_sha256"] = canonical_digest(resolution_result_seal_material(expected))
+    if value != expected:
+        raise ResourceContractError("resource resolution authoritative binding mismatch")
     return ValidatedResourceArtifact._create(value)

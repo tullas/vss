@@ -20,8 +20,10 @@ FILES = MappingProxyType({
     "production_resource_artifact/1": "production-resource-artifact-v1.schema.json",
     "reusable_asset_admission/1": "reusable-asset-admission-v1.schema.json",
     "reusable_asset/1": "reusable-asset-v1.schema.json",
+    "resource_resolution_request/1": "resource-resolution-request-v1.schema.json",
+    "resource_resolution_result/1": "resource-resolution-result-v1.schema.json",
 })
-BUILT_IN_REGISTRY_SHA256 = "2cb2ae3af468e22e2e50f6f6bdfd19ad84693c4f22273c99febe89110d117e27"  # pragma: allowlist secret
+BUILT_IN_REGISTRY_SHA256 = "9e88806d679c218c3ffaffd3055b4d3ebd9650458777245b2934e89e5b875a60"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 

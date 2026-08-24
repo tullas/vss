@@ -9,6 +9,7 @@ from vss_resource_contracts import (
     BUILT_IN_REGISTRY_SHA256,
     validate_production_resource_artifact,
     validate_reusable_asset_admission,
+    validate_resource_resolution_request,
 )
 
 
@@ -35,14 +36,23 @@ class ResourceContractTests(unittest.TestCase):
         second = ResourceContractRegistry.built_in()
         self.assertEqual(first.digest, second.digest)
         self.assertEqual(
-            "2cb2ae3af468e22e2e50f6f6bdfd19ad84693c4f22273c99febe89110d117e27",  # pragma: allowlist secret
+            "9e88806d679c218c3ffaffd3055b4d3ebd9650458777245b2934e89e5b875a60",  # pragma: allowlist secret
             BUILT_IN_REGISTRY_SHA256,
         )
         self.assertEqual(BUILT_IN_REGISTRY_SHA256, first.digest)
-        self.assertEqual(3, len(first.registrations))
-        for invalid in ("reusable_asset/latest", "reusable_asset/*", "unknown/1"):
+        self.assertEqual(5, len(first.registrations))
+        for invalid in ("reusable_asset/latest", "resource_resolution_request/latest",
+                        "reusable_asset/*", "unknown/1"):
             with self.assertRaises(ResourceContractError):
                 first.resolve(invalid)
+
+    def test_resolution_request_contract_is_closed(self):
+        from tests.resource_admission.test_resolution import authoritative_chain, request
+        source, admission, asset = authoritative_chain()
+        value = request(source, admission, asset).to_json_value()
+        value["consumer"]["storage_path"] = "/tmp/frame.png"
+        with self.assertRaises(ResourceContractError):
+            validate_resource_resolution_request(value)
 
     def test_artifact_is_immutable_and_not_an_asset(self):
         value = artifact()
