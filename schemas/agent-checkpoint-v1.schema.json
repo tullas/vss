@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/agent-checkpoint-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol", "checkpoint_type", "subject", "repository", "delta", "checks", "summary", "authority", "approval"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "protocol": {"const": "vss.agent-checkpoint"},
+    "checkpoint_type": {"enum": ["design", "implementation", "review", "blocked", "complete", "approval_record"]},
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "number"],
+      "properties": {
+        "kind": {"enum": ["issue", "pull_request"]},
+        "number": {"type": "integer", "minimum": 1, "maximum": 2147483647}
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name_with_owner", "branch", "base_sha", "head_sha", "code_dirty"],
+      "properties": {
+        "name_with_owner": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$", "maxLength": 201},
+        "branch": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$", "maxLength": 200},
+        "base_sha": {"$ref": "#/$defs/sha1"},
+        "head_sha": {"$ref": "#/$defs/sha1"},
+        "code_dirty": {"type": "boolean"}
+      }
+    },
+    "delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed_file_count", "changed_files", "insertions", "deletions", "omitted_path_count"],
+      "properties": {
+        "changed_file_count": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "changed_files": {
+          "type": "array", "maxItems": 64, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^[^\\x00-\\x1f\\x7f]+$"}
+        },
+        "insertions": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+        "deletions": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+        "omitted_path_count": {"type": "integer", "minimum": 0, "maximum": 1000000}
+      }
+    },
+    "checks": {
+      "type": "array", "maxItems": 32, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["name", "status"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+          "status": {"enum": ["passed", "failed", "not_run"]}
+        }
+      }
+    },
+    "summary": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\x00-\\x1f\\x7f]+$"},
+    "authority": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runtime_execution", "provider_execution", "production", "publication", "workflow_activation"],
+      "properties": {
+        "runtime_execution": {"const": false},
+        "provider_execution": {"const": false},
+        "production": {"const": false},
+        "publication": {"const": false},
+        "workflow_activation": {"const": false}
+      }
+    },
+    "approval": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["decision", "scope", "approved_head_sha", "operation_digest", "recorded_by", "invalidated_by_head_change", "runtime_authority", "provider_authority"],
+          "properties": {
+            "decision": {"enum": ["approved", "denied"]},
+            "scope": {"enum": ["paid_provider_attempt", "effectful_operation", "merge", "push"]},
+            "approved_head_sha": {"$ref": "#/$defs/sha1"},
+            "operation_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "recorded_by": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@/-]{0,127}$"},
+            "invalidated_by_head_change": {"const": true},
+            "runtime_authority": {"const": false},
+            "provider_authority": {"const": false}
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"checkpoint_type": {"const": "approval_record"}}, "required": ["checkpoint_type"]},
+      "then": {"properties": {"approval": {"type": "object"}}},
+      "else": {"properties": {"approval": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}

@@ -1,0 +1,479 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+PROTOCOL = "vss.agent-checkpoint"
+MARKER_PREFIX = "<!-- vss-agent-checkpoint:v1 sha256="
+MAX_COMMENT_BYTES = 16_384
+MAX_GH_BYTES = 1_048_576
+PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
+CHECKPOINT_TYPES = {"design", "implementation", "review", "blocked", "complete", "approval_record"}
+CHECK_STATUSES = {"passed", "failed", "not_run"}
+APPROVAL_SCOPES = {"paid_provider_attempt", "effectful_operation", "merge", "push"}
+SHA1 = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+ACCOUNTABILITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@/-]{0,127}$")
+REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
+BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+TARGET = re.compile(r"^(issue|pr):([1-9][0-9]{0,9})$")
+SENSITIVE_PATH_TERMS = re.compile(r"(?i)(?:^|[._/-])(secret|credential|token|api[_-]?key|private[_-]?key)(?:[._/-]|$)")
+SENSITIVE_TEXT = (
+    re.compile(r"gh[opsu]_[A-Za-z0-9]{36,}"),
+    re.compile(r"github_pat_[A-Za-z0-9_]{40,}"),
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+    re.compile(r"(?i)(?:password|secret|token|api[_-]?key)\s*[:=]\s*[^\s,}]{8,}"),
+)
+AUTHORITY = {
+    "runtime_execution": False,
+    "provider_execution": False,
+    "production": False,
+    "publication": False,
+    "workflow_activation": False,
+}
+
+
+class AgentFailure(Exception):
+    pass
+
+
+def fail(message: str) -> None:
+    raise AgentFailure(message)
+
+
+def run(arguments: list[str], *, maximum: int = MAX_GH_BYTES) -> bytes:
+    try:
+        result = subprocess.run(arguments, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+    except OSError as exc:
+        raise AgentFailure("required command is unavailable") from exc
+    if result.returncode != 0:
+        fail("required command failed")
+    if len(result.stdout) > maximum:
+        fail("command output exceeded its bound")
+    return result.stdout
+
+
+def git(*arguments: str) -> bytes:
+    return run(["git", *arguments])
+
+
+def text(value: bytes, *, maximum: int = 4096) -> str:
+    if len(value) > maximum:
+        fail("text value exceeded its bound")
+    try:
+        decoded = value.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise AgentFailure("text value is not UTF-8") from exc
+    if any(ord(character) < 32 or ord(character) == 127 for character in decoded):
+        fail("text value contains control characters")
+    return decoded
+
+
+def line(value: bytes, *, maximum: int = 4096) -> str:
+    if value.endswith(b"\n"):
+        value = value[:-1]
+    return text(value, maximum=maximum)
+
+
+def canonical(value: dict[str, Any]) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def safe_summary(value: str) -> str:
+    if not 1 <= len(value) <= 512 or any(ord(character) < 32 or ord(character) == 127 for character in value):
+        fail("summary is invalid")
+    if any(pattern.search(value) for pattern in SENSITIVE_TEXT):
+        fail("summary contains sensitive-looking material")
+    return value
+
+
+def parse_target(value: str) -> dict[str, Any]:
+    match = TARGET.fullmatch(value)
+    if match is None:
+        fail("target is invalid")
+    return {"kind": "issue" if match.group(1) == "issue" else "pull_request", "number": int(match.group(2))}
+
+
+def repository_name() -> str:
+    value = line(git("remote", "get-url", "origin"))
+    match = re.fullmatch(r"git@github\.com:([^/]+/[^/]+?)(?:\.git)?", value)
+    if match is None:
+        match = re.fullmatch(r"https://github\.com/([^/]+/[^/]+?)(?:\.git)?/?", value)
+    if match is None or REPOSITORY.fullmatch(match.group(1)) is None:
+        fail("origin is not a supported GitHub repository")
+    return match.group(1)
+
+
+def current_identity() -> tuple[str, str]:
+    branch = line(git("symbolic-ref", "--quiet", "--short", "HEAD"), maximum=256)
+    head = line(git("rev-parse", "HEAD"), maximum=64)
+    if BRANCH.fullmatch(branch) is None or SHA1.fullmatch(head) is None:
+        fail("repository identity is invalid")
+    return branch, head
+
+
+def verify_base(base: str, head: str) -> None:
+    if SHA1.fullmatch(base) is None:
+        fail("base SHA is invalid")
+    run(["git", "cat-file", "-e", f"{base}^{{commit}}"])
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", base, head],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    if result.returncode != 0:
+        fail("base SHA is not an ancestor of HEAD")
+
+
+def status_paths() -> list[str]:
+    fields = git("status", "--porcelain=v1", "-z", "--untracked-files=all").split(b"\0")
+    paths: list[str] = []
+    index = 0
+    while index < len(fields) and fields[index]:
+        field = fields[index]
+        if len(field) < 4 or field[2:3] != b" ":
+            fail("Git status output is malformed")
+        paths.append(text(field[3:], maximum=4096))
+        if b"R" in field[:2] or b"C" in field[:2]:
+            index += 1
+            if index >= len(fields) or not fields[index]:
+                fail("Git status rename output is malformed")
+            paths.append(text(fields[index], maximum=4096))
+        index += 1
+    return paths
+
+
+def sensitive_path(path: str) -> bool:
+    return path == ".local" or path.startswith(".local/") or SENSITIVE_PATH_TERMS.search(path) is not None
+
+
+def delta(base: str) -> tuple[dict[str, Any], bool]:
+    working_paths = status_paths()
+    committed = [text(item, maximum=4096) for item in git("diff", "--name-only", "-z", base, "--").split(b"\0") if item]
+    all_paths = sorted(set(working_paths + committed))
+    visible = [path for path in all_paths if not sensitive_path(path)]
+    omitted = len(all_paths) - len(visible)
+    if len(visible) > 64:
+        omitted += len(visible) - 64
+        visible = visible[:64]
+    insertions = 0
+    deletions = 0
+    for line in git("diff", "--numstat", base, "--").splitlines():
+        fields = line.split(b"\t", 2)
+        if len(fields) != 3:
+            fail("Git diff statistics are malformed")
+        if fields[0].isdigit():
+            insertions += int(fields[0])
+        if fields[1].isdigit():
+            deletions += int(fields[1])
+    code_dirty = any(path != PROTECTED_RESIDUE for path in working_paths)
+    return {
+        "changed_file_count": len(all_paths),
+        "changed_files": visible,
+        "insertions": insertions,
+        "deletions": deletions,
+        "omitted_path_count": omitted,
+    }, code_dirty
+
+
+def parse_checks(values: list[str]) -> list[dict[str, str]]:
+    checks: list[dict[str, str]] = []
+    names: set[str] = set()
+    for value in values:
+        name, separator, status = value.partition("=")
+        if not separator or NAME.fullmatch(name) is None or status not in CHECK_STATUSES or name in names:
+            fail("check evidence is invalid")
+        names.add(name)
+        checks.append({"name": name, "status": status})
+    if len(checks) > 32:
+        fail("too many checks were supplied")
+    return sorted(checks, key=lambda item: item["name"])
+
+
+def collect(
+    *, target: str, checkpoint_type: str, base: str, summary: str,
+    checks: list[str], approval: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if checkpoint_type not in CHECKPOINT_TYPES:
+        fail("checkpoint type is invalid")
+    branch, head = current_identity()
+    verify_base(base, head)
+    delta_value, dirty = delta(base)
+    payload = {
+        "schema_version": "1",
+        "protocol": PROTOCOL,
+        "checkpoint_type": checkpoint_type,
+        "subject": parse_target(target),
+        "repository": {
+            "name_with_owner": repository_name(), "branch": branch,
+            "base_sha": base, "head_sha": head, "code_dirty": dirty,
+        },
+        "delta": delta_value,
+        "checks": parse_checks(checks),
+        "summary": safe_summary(summary),
+        "authority": dict(AUTHORITY),
+        "approval": approval,
+    }
+    validate(payload)
+    confirmed_delta, confirmed_dirty = delta(base)
+    if confirmed_delta != delta_value or confirmed_dirty != dirty:
+        fail("repository delta changed during collection")
+    if current_identity() != (branch, head):
+        fail("repository identity changed during collection")
+    return payload
+
+
+def exact_keys(value: Any, keys: set[str], name: str) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != keys:
+        fail(f"{name} is malformed")
+    return value
+
+
+def validate(payload: Any) -> dict[str, Any]:
+    root = exact_keys(payload, {
+        "schema_version", "protocol", "checkpoint_type", "subject", "repository",
+        "delta", "checks", "summary", "authority", "approval",
+    }, "checkpoint")
+    if root["schema_version"] != "1" or root["protocol"] != PROTOCOL or root["checkpoint_type"] not in CHECKPOINT_TYPES:
+        fail("checkpoint identity is invalid")
+    subject = exact_keys(root["subject"], {"kind", "number"}, "subject")
+    if subject["kind"] not in {"issue", "pull_request"} or type(subject["number"]) is not int or not 1 <= subject["number"] <= 2147483647:
+        fail("subject is invalid")
+    repository = exact_keys(root["repository"], {"name_with_owner", "branch", "base_sha", "head_sha", "code_dirty"}, "repository")
+    if (type(repository["name_with_owner"]) is not str or REPOSITORY.fullmatch(repository["name_with_owner"]) is None
+            or type(repository["branch"]) is not str or BRANCH.fullmatch(repository["branch"]) is None
+            or type(repository["base_sha"]) is not str or SHA1.fullmatch(repository["base_sha"]) is None
+            or type(repository["head_sha"]) is not str or SHA1.fullmatch(repository["head_sha"]) is None
+            or type(repository["code_dirty"]) is not bool):
+        fail("repository evidence is invalid")
+    delta_value = exact_keys(root["delta"], {"changed_file_count", "changed_files", "insertions", "deletions", "omitted_path_count"}, "delta")
+    for name, maximum in (("changed_file_count", 1000000), ("insertions", 1000000000), ("deletions", 1000000000), ("omitted_path_count", 1000000)):
+        if type(delta_value[name]) is not int or not 0 <= delta_value[name] <= maximum:
+            fail("delta counts are invalid")
+    paths = delta_value["changed_files"]
+    if (type(paths) is not list or len(paths) > 64 or paths != sorted(set(paths))
+            or any(type(path) is not str or not 1 <= len(path) <= 240 or sensitive_path(path)
+                   or any(ord(character) < 32 or ord(character) == 127 for character in path) for path in paths)):
+        fail("delta paths are invalid")
+    if delta_value["changed_file_count"] < len(paths) + delta_value["omitted_path_count"]:
+        fail("delta path counts are inconsistent")
+    checks = root["checks"]
+    if type(checks) is not list or len(checks) > 32:
+        fail("checks are invalid")
+    names = []
+    for check in checks:
+        item = exact_keys(check, {"name", "status"}, "check")
+        if type(item["name"]) is not str or NAME.fullmatch(item["name"]) is None or item["status"] not in CHECK_STATUSES:
+            fail("check is invalid")
+        names.append(item["name"])
+    if names != sorted(set(names)):
+        fail("checks are not uniquely sorted")
+    safe_summary(root["summary"] if type(root["summary"]) is str else "")
+    if exact_keys(root["authority"], set(AUTHORITY), "authority") != AUTHORITY:
+        fail("checkpoint grants authority")
+    approval = root["approval"]
+    if root["checkpoint_type"] != "approval_record":
+        if approval is not None:
+            fail("non-approval checkpoint contains approval metadata")
+    else:
+        value = exact_keys(approval, {
+            "decision", "scope", "approved_head_sha", "operation_digest", "recorded_by",
+            "invalidated_by_head_change", "runtime_authority", "provider_authority",
+        }, "approval")
+        if (value["decision"] not in {"approved", "denied"} or value["scope"] not in APPROVAL_SCOPES
+                or type(value["approved_head_sha"]) is not str or SHA1.fullmatch(value["approved_head_sha"]) is None
+                or value["approved_head_sha"] != repository["head_sha"]
+                or type(value["operation_digest"]) is not str or SHA256.fullmatch(value["operation_digest"]) is None
+                or type(value["recorded_by"]) is not str or ACCOUNTABILITY.fullmatch(value["recorded_by"]) is None
+                or value["invalidated_by_head_change"] is not True
+                or value["runtime_authority"] is not False or value["provider_authority"] is not False):
+            fail("approval metadata is invalid")
+    encoded = canonical(root)
+    if len(encoded) > MAX_COMMENT_BYTES:
+        fail("checkpoint exceeded its bound")
+    if any(pattern.search(encoded.decode("utf-8")) for pattern in SENSITIVE_TEXT):
+        fail("checkpoint contains sensitive-looking material")
+    return root
+
+
+def render(payload: dict[str, Any]) -> str:
+    encoded = canonical(validate(payload))
+    digest = hashlib.sha256(encoded).hexdigest()
+    comment = f"{MARKER_PREFIX}{digest} -->\n```json\n{encoded.decode('utf-8')}\n```"
+    if len(comment.encode("utf-8")) > MAX_COMMENT_BYTES:
+        fail("comment exceeded its bound")
+    return comment
+
+
+def parse_document(content: str) -> tuple[dict[str, Any], str | None]:
+    if len(content.encode("utf-8")) > MAX_COMMENT_BYTES:
+        fail("input exceeded its bound")
+    if content.endswith("\n"):
+        content = content[:-1]
+    marker_digest: str | None = None
+    json_text = content
+    if content.startswith(MARKER_PREFIX):
+        first, separator, rest = content.partition("\n")
+        if not separator or not first.endswith(" -->"):
+            fail("checkpoint marker is malformed")
+        marker_digest = first[len(MARKER_PREFIX):-4]
+        if SHA256.fullmatch(marker_digest) is None or not rest.startswith("```json\n") or not rest.endswith("\n```"):
+            fail("checkpoint envelope is malformed")
+        json_text = rest[8:-4]
+    try:
+        value = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        raise AgentFailure("checkpoint JSON is malformed") from exc
+    payload = validate(value)
+    if marker_digest is not None and hashlib.sha256(canonical(payload)).hexdigest() != marker_digest:
+        fail("checkpoint digest does not match")
+    return payload, marker_digest
+
+
+def post(payload: dict[str, Any], comment: str) -> None:
+    repository = payload["repository"]["name_with_owner"]
+    number = payload["subject"]["number"]
+    subject_endpoint = f"repos/{repository}/issues/{number}"
+    endpoint = f"repos/{repository}/issues/{number}/comments"
+    marker = comment.partition("\n")[0]
+    raw_subject = run(["gh", "api", subject_endpoint])
+    try:
+        subject = json.loads(raw_subject)
+    except json.JSONDecodeError as exc:
+        raise AgentFailure("GitHub response is malformed") from exc
+    if type(subject) is not dict:
+        fail("GitHub response is malformed")
+    actual_kind = "pull_request" if "pull_request" in subject else "issue"
+    if actual_kind != payload["subject"]["kind"]:
+        fail("GitHub target kind does not match")
+    raw = run(["gh", "api", "--paginate", endpoint])
+    try:
+        decoded = raw.decode("utf-8")
+        decoder = json.JSONDecoder()
+        pages = []
+        position = 0
+        while position < len(decoded):
+            while position < len(decoded) and decoded[position].isspace():
+                position += 1
+            if position == len(decoded):
+                break
+            page, position = decoder.raw_decode(decoded, position)
+            pages.append(page)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AgentFailure("GitHub response is malformed") from exc
+    if not pages or any(type(page) is not list for page in pages):
+        fail("GitHub response is malformed")
+    for page in pages:
+        for item in page:
+            if type(item) is not dict or type(item.get("body")) is not str:
+                fail("GitHub comment is malformed")
+            body = item["body"]
+            if not body.startswith(marker):
+                continue
+            existing, existing_digest = parse_document(body)
+            if existing_digest is not None and render(existing) == comment:
+                print(json.dumps({"status": "already_posted", "sha256": marker[len(MARKER_PREFIX):-4]}, sort_keys=True, separators=(",", ":")))
+                return
+    run(["gh", "api", "--method", "POST", endpoint, "-f", f"body={comment}"])
+    print(json.dumps({"status": "posted", "sha256": marker[len(MARKER_PREFIX):-4]}, sort_keys=True, separators=(",", ":")))
+
+
+def add_common(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--post", action="store_true")
+
+
+def parser() -> argparse.ArgumentParser:
+    root = argparse.ArgumentParser(prog="vss-agent")
+    commands = root.add_subparsers(dest="command", required=True)
+    checkpoint = commands.add_parser("checkpoint")
+    add_common(checkpoint)
+    checkpoint.add_argument("--type", required=True, choices=sorted(CHECKPOINT_TYPES - {"approval_record"}))
+    checkpoint.add_argument("--base", required=True)
+    checkpoint.add_argument("--summary", required=True)
+    checkpoint.add_argument("--check", action="append", default=[])
+    approval = commands.add_parser("approval")
+    add_common(approval)
+    approval.add_argument("--scope", required=True, choices=sorted(APPROVAL_SCOPES))
+    approval.add_argument("--operation-digest", required=True)
+    approval.add_argument("--decision", required=True, choices=("approved", "denied"))
+    approval.add_argument("--recorded-by", required=True)
+    validate_parser = commands.add_parser("validate")
+    validate_parser.add_argument("--input", required=True)
+    validate_parser.add_argument("--require-current-head", action="store_true")
+    return root
+
+
+def main(arguments: list[str] | None = None) -> int:
+    args = parser().parse_args(arguments)
+    if args.command == "validate":
+        if args.input == "-":
+            content = sys.stdin.read(MAX_COMMENT_BYTES + 1)
+        else:
+            try:
+                content = Path(args.input).read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                raise AgentFailure("checkpoint input could not be read") from exc
+        payload, _ = parse_document(content)
+        fresh = True
+        if args.require_current_head:
+            _, head = current_identity()
+            fresh = payload["repository"]["head_sha"] == head
+            if payload["checkpoint_type"] == "approval_record":
+                fresh = fresh and payload["approval"]["approved_head_sha"] == head
+            if not fresh:
+                fail("checkpoint is stale for current HEAD")
+        print(json.dumps({"status": "valid", "fresh": fresh}, sort_keys=True, separators=(",", ":")))
+        return 0
+    if args.command == "checkpoint":
+        payload = collect(
+            target=args.target, checkpoint_type=args.type, base=args.base,
+            summary=args.summary, checks=args.check,
+        )
+    else:
+        branch, head = current_identity()
+        delta_value, dirty = delta(head)
+        if dirty:
+            fail("approval requires a clean code worktree")
+        approval_value = {
+            "decision": args.decision, "scope": args.scope, "approved_head_sha": head,
+            "operation_digest": args.operation_digest, "recorded_by": args.recorded_by,
+            "invalidated_by_head_change": True, "runtime_authority": False,
+            "provider_authority": False,
+        }
+        payload = collect(
+            target=args.target, checkpoint_type="approval_record", base=head,
+            summary=f"Approval {args.decision} for {args.scope}.", checks=[], approval=approval_value,
+        )
+        if payload["repository"]["branch"] != branch or payload["delta"] != delta_value:
+            fail("repository changed during approval collection")
+    comment = render(payload)
+    if args.post:
+        branch, head = current_identity()
+        if (branch != payload["repository"]["branch"]
+                or head != payload["repository"]["head_sha"]):
+            fail("repository identity changed before posting")
+        if payload["checkpoint_type"] == "approval_record":
+            _, dirty = delta(head)
+            if dirty:
+                fail("approval requires a clean code worktree")
+        post(payload, comment)
+    else:
+        print(comment)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except AgentFailure as exc:
+        print(f"vss-agent: {exc}", file=sys.stderr)
+        raise SystemExit(2)
