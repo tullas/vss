@@ -300,6 +300,51 @@ def dependency_impact_result_seal_material(value):
     return {**value, "result_sha256": "0" * 64}
 
 
+def media_provenance_request_seal_material(value):
+    return {**value, "request_sha256": "0" * 64}
+
+
+def media_provenance_view_identity_material(value):
+    return {key: item for key, item in value.items()
+            if key not in {"provenance_id", "result_sha256"}}
+
+
+def media_provenance_view_seal_material(value):
+    return {**value, "result_sha256": "0" * 64}
+
+
+def validate_media_provenance_request(value, *, registry=None):
+    try:
+        value = _validate(value, "media_provenance_request/1", registry)
+        if value["request_sha256"] != canonical_digest(
+                media_provenance_request_seal_material(value)):
+            raise ResourceContractError("media provenance request seal mismatch")
+    except ResourceContractError as exc:
+        raise ResourceContractError("media_provenance_request_invalid") from exc
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_media_provenance_view(value, *, registry=None):
+    try:
+        value = _validate(value, "media_provenance_view/1", registry)
+        expected_id = "media-provenance-" + canonical_digest(
+            media_provenance_view_identity_material(value))[:32]
+        if value["provenance_id"] != expected_id:
+            raise ResourceContractError("media provenance view identity mismatch")
+        if value["lineage"] != sorted(value["lineage"], key=lambda item: item["kind"]):
+            raise ResourceContractError("media provenance lineage is not canonical")
+        if value["rights"]["permissions"] != sorted(value["rights"]["permissions"]):
+            raise ResourceContractError("media provenance permissions are not canonical")
+        if value["rights"]["restrictions"] != sorted(value["rights"]["restrictions"]):
+            raise ResourceContractError("media provenance restrictions are not canonical")
+        if value["result_sha256"] != canonical_digest(
+                media_provenance_view_seal_material(value)):
+            raise ResourceContractError("media provenance view seal mismatch")
+    except ResourceContractError as exc:
+        raise ResourceContractError("media_provenance_view_invalid") from exc
+    return ValidatedResourceArtifact._create(value)
+
+
 def validate_dependency_impact_request(value, *, registry=None):
     try:
         value = _validate(value, "dependency_impact_request/1", registry)

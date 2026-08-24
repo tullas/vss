@@ -14,6 +14,12 @@ M9.3 reuses this contract registry and canonical integrity convention for one
 versioned movie creative-decision, production-context canon snapshot, and exact
 production-input binding. See [Versioned movie canon binding](movie-canon-binding.md).
 
+M9.5 adds one deterministic Media BOM/provenance view for the exact production
+storyboard review frame. It joins the M9.1 artifact to the independently
+reconstructed M9.3 decision/canon binding and real shot-plan, storyboard, and
+pictorial-admission chain. The JSON view is exportable data, but constructing it
+is not an export, storage, publication, or execution operation.
+
 ## Contracts
 
 `production_resource_artifact/1` records an immutable PNG output with exact
@@ -133,13 +139,44 @@ Runtime, reads no path or mutable catalog, persists nothing, and activates no
 workflow. The result grants no storage, publication, redistribution, training,
 ownership, provider, Runtime, scheduling, or cross-scope authority.
 
+## Storyboard review-frame provenance
+
+`media_provenance_request/1` pins one exact production artifact, accepted
+creative-decision revision, canon snapshot, production binding, pictorial
+admission, frame, content digest, and tenant/universe/production/scene scope.
+`create_media_provenance_request` constructs the sealed request only from the
+explicitly supplied admitted values; it performs no lookup.
+
+`create_storyboard_review_frame_provenance` accepts the request plus the real
+review, option, breakdown, shot-plan, storyboard, pictorial, artifact, and PNG
+evidence. Before producing `media_provenance_view/1`, it reconstructs the
+accepted creative decision, canon and production binding, independently admits
+the shot-plan/storyboard/pictorial chain, reconstructs the resource artifact,
+and hashes the supplied PNG bytes. A validly resealed request or artifact cannot
+substitute another scope, decision, canon, frame, content, rights reference, or
+restriction.
+
+The immutable view records the exact output identity, decision/canon binding,
+nine bounded lineage facts, and the artifact's complete rights facts. Its
+preservation class is `disposable_intermediate_review_material`; payload
+availability is explicitly `caller_supplied_not_persisted`. It claims only
+`identity_and_provenance` reproducibility and explicitly does not claim
+semantic, operational, or exact-byte replay. Provider, model, version, and
+runtime-environment evidence unavailable from the admitted chain is named as
+unavailable rather than inferred.
+
+The view grants no production, Runtime, provider, workflow, scheduling,
+regeneration, export/publication, storage/deletion, or rights authority. It
+does not mutate its historical inputs and does not change M9.4 impact semantics.
+
 ## Limitations
 
-Only one PNG review-frame to universe visual-reference admission and exact
-production resolution path exists. Callers must already possess and explicitly
-supply the authoritative artifact chain and bytes; there is no lookup.
-Other
+Only one PNG review-frame admission, exact production resolution, and exact
+review-frame provenance path exists. Callers must already possess and
+explicitly supply the authoritative artifact chains and bytes; there is no
+lookup. Other
 resource types, production-only admissions, cross-tenant transactions,
 revocation propagation, catalogs, persistence, lookup, authentication, legal
-interpretation, canon/BOM export, storage, publication, and effectful execution
+interpretation, BOM export transport, external provenance formats/signatures,
+stronger reproducibility claims, storage, publication, and effectful execution
 remain deferred.

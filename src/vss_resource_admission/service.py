@@ -25,6 +25,12 @@ from vss_resource_contracts import (
     validate_reusable_asset_admission,
     validate_resource_resolution_request,
     validate_resource_resolution_result,
+    media_provenance_request_seal_material,
+    media_provenance_view_identity_material,
+    media_provenance_view_seal_material,
+    validate_media_provenance_request,
+    validate_media_provenance_view,
+    validate_canon_snapshot,
 )
 
 
@@ -52,6 +58,207 @@ class ResourceResolutionResult:
 
 def _identifier(prefix: str, material: Any) -> str:
     return prefix + canonical_digest(material)[:32]
+
+
+def _decision_reference(value):
+    return {key: value[key] for key in ("decision_id", "revision", "decision_sha256")}
+
+
+def _canon_reference(value):
+    return {key: value[key] for key in (
+        "canon_snapshot_id", "snapshot_version", "canon_sha256")}
+
+
+def create_media_provenance_request(*, production_artifact: ValidatedResourceArtifact,
+                                    decision_revision: Any,
+                                    canon_snapshot: ValidatedResourceArtifact,
+                                    production_canon_binding: ValidatedResourceArtifact,
+                                    pictorial_frame: AdmittedPictorialFrame
+                                    ) -> ValidatedResourceArtifact:
+    try:
+        artifact = production_artifact.value
+        decision = decision_revision.value
+        canon = canon_snapshot.value
+        binding = production_canon_binding.value
+        if (artifact["contract_identity"] != "production_resource_artifact"
+                or canon["contract_identity"] != "canon_snapshot"
+                or binding["contract_identity"] != "production_canon_binding"
+                or not isinstance(pictorial_frame, AdmittedPictorialFrame)):
+            raise ResourceContractError("media provenance authorities are invalid")
+        value = {
+            "schema_version": "1", "contract_identity": "media_provenance_request",
+            "contract_version": "1",
+            "operation_identity": "create_storyboard_review_frame_provenance",
+            "operation_version": "1",
+            "scope": {"tenant_id": artifact["scope"]["tenant_id"],
+                      "universe_id": artifact["scope"]["universe_id"],
+                      "production_id": artifact["scope"]["production_id"],
+                      "scene_id": pictorial_frame.scene_id,
+                      "scope_kind": "production_scene"},
+            "artifact": {key: artifact[key] for key in (
+                "artifact_id", "artifact_sha256", "resource_id", "resource_revision",
+                "content_sha256")},
+            "decision": _decision_reference(decision),
+            "canon": _canon_reference(canon),
+            "production_binding": {key: binding[key] for key in (
+                "binding_id", "result_sha256")},
+            "pictorial_admission": {
+                "admission_id": pictorial_frame.admission_id,
+                "storyboard_specification_digest": pictorial_frame.storyboard_specification_digest,
+                "frame_id": pictorial_frame.frame_id,
+                "frame_specification_digest": pictorial_frame.frame_specification_digest,
+                "semantic_request_digest": pictorial_frame.semantic_request_digest,
+            },
+            "request_sha256": "0" * 64,
+        }
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ResourceContractError("media_provenance_request_invalid") from exc
+    value["request_sha256"] = canonical_digest(media_provenance_request_seal_material(value))
+    return validate_media_provenance_request(value)
+
+
+def create_storyboard_review_frame_provenance(
+    request_data: dict[str, Any], *, decision_data: Any, review_packet_data: Any,
+    option_set_data: Any, scene_breakdown_data: Any, decision_revision: Any,
+    canon_snapshot: Any, production_canon_binding: Any, shot_plan_data: Any,
+    storyboard_data: Any, admitted_pictorial_frame: Any, production_artifact: Any,
+    content: bytes, previous_revision: Any = None,
+) -> ValidatedResourceArtifact:
+    """Construct one inert provenance view after reconstructing both authoritative chains."""
+    from vss_movie_canon import (
+        AdmittedCreativeDecision, bind_production_input_to_canon,
+        create_creative_decision_revision,
+    )
+    from vss_movie_pictorial import admit_pictorial_frame
+
+    request = validate_media_provenance_request(request_data)
+    if (not isinstance(decision_revision, AdmittedCreativeDecision)
+            or not isinstance(canon_snapshot, ValidatedResourceArtifact)
+            or not isinstance(production_canon_binding, ValidatedResourceArtifact)
+            or not isinstance(admitted_pictorial_frame, AdmittedPictorialFrame)
+            or not isinstance(production_artifact, ValidatedResourceArtifact)):
+        raise ResourceContractError("media provenance authoritative chain incomplete")
+    scope = request.value["scope"]
+    try:
+        reconstructed_decision = create_creative_decision_revision(
+            decision_data, review_packet_data, option_set_data, scene_breakdown_data,
+            tenant_id=scope["tenant_id"], universe_id=scope["universe_id"],
+            revision=decision_revision.value["revision"],
+            status=decision_revision.value["status"], previous_revision=previous_revision)
+        if reconstructed_decision != decision_revision:
+            raise ResourceContractError("decision reconstruction mismatch")
+        checked_canon = validate_canon_snapshot(
+            canon_snapshot.to_json_value(), decisions=[decision_revision])
+        reconstructed_binding = bind_production_input_to_canon(
+            decision_data, review_packet_data, option_set_data, scene_breakdown_data,
+            tenant_id=scope["tenant_id"], universe_id=scope["universe_id"],
+            decisions=[decision_revision], canon_snapshot=checked_canon,
+            previous_revision=previous_revision)
+        if reconstructed_binding != production_canon_binding:
+            raise ResourceContractError("production binding reconstruction mismatch")
+        reconstructed_pictorial = admit_pictorial_frame(
+            decision_data, review_packet_data, option_set_data, scene_breakdown_data,
+            shot_plan_data, storyboard_data,
+            frame_id=admitted_pictorial_frame.frame_id, environment="development")
+        if reconstructed_pictorial != admitted_pictorial_frame:
+            raise ResourceContractError("pictorial reconstruction mismatch")
+        artifact_value = production_artifact.value
+        reconstructed_artifact = create_production_artifact(
+            pictorial_frame=reconstructed_pictorial,
+            resource_revision=artifact_value["resource_revision"],
+            tenant_id=scope["tenant_id"], universe_id=scope["universe_id"],
+            content=content,
+            ownership_class=artifact_value["rights"]["ownership_class"],
+            rights_status=artifact_value["rights"]["status"],
+            permissions=list(artifact_value["rights"]["permissions"]),
+            restrictions=list(artifact_value["rights"]["restrictions"]),
+            rights_reference=artifact_value["rights"]["rights_reference"],
+            ancestors=list(artifact_value["lineage"]["ancestors"]),
+        )
+        if reconstructed_artifact != production_artifact:
+            raise ResourceContractError("production artifact reconstruction mismatch")
+    except ResourceContractError:
+        raise
+    except Exception as exc:
+        raise ResourceContractError("media provenance authoritative chain invalid") from exc
+
+    artifact = reconstructed_artifact.value
+    decision = reconstructed_decision.value
+    canon = checked_canon.value
+    binding = reconstructed_binding.value
+    expected_scope = {"tenant_id": artifact["scope"]["tenant_id"],
+                      "universe_id": artifact["scope"]["universe_id"],
+                      "production_id": artifact["scope"]["production_id"],
+                      "scene_id": reconstructed_pictorial.scene_id,
+                      "scope_kind": "production_scene"}
+    expected_request = create_media_provenance_request(
+        production_artifact=reconstructed_artifact, decision_revision=decision_revision,
+        canon_snapshot=checked_canon, production_canon_binding=reconstructed_binding,
+        pictorial_frame=reconstructed_pictorial)
+    if request != expected_request or scope != expected_scope or binding["scope"] != scope:
+        raise ResourceContractError("media provenance request authoritative binding mismatch")
+
+    review_digest = decision["semantic_payload"]["decision_complete_digest"]
+    lineage = sorted([
+        {"kind": "canon_snapshot", "identity": canon["canon_snapshot_id"],
+         "version": str(canon["snapshot_version"]), "sha256": canon["canon_sha256"]},
+        {"kind": "creative_decision_revision", "identity": decision["decision_id"],
+         "version": str(decision["revision"]), "sha256": decision["decision_sha256"]},
+        {"kind": "pictorial_admission", "identity": reconstructed_pictorial.frame_id,
+         "version": "1", "sha256": reconstructed_pictorial.semantic_request_digest},
+        {"kind": "production_canon_binding", "identity": binding["binding_id"],
+         "version": binding["operation_version"], "sha256": binding["result_sha256"]},
+        {"kind": "review_decision", "identity": decision_data["result_family"],
+         "version": decision_data["result_version"], "sha256": review_digest},
+        {"kind": "scene_breakdown", "identity": scene_breakdown_data["result_family"],
+         "version": scene_breakdown_data["result_version"],
+         "sha256": decision["semantic_payload"]["scene_breakdown_digest"]},
+        {"kind": "shot_plan_draft", "identity": shot_plan_data["result_family"],
+         "version": shot_plan_data["result_version"],
+         "sha256": shot_plan_data["integrity"]["complete_result_sha256"]},
+        {"kind": "storyboard_frame", "identity": reconstructed_pictorial.frame_id,
+         "version": "1", "sha256": reconstructed_pictorial.frame_specification_digest},
+        {"kind": "storyboard_specification", "identity": storyboard_data["result_family"],
+         "version": storyboard_data["result_version"],
+         "sha256": reconstructed_pictorial.storyboard_specification_digest},
+    ], key=lambda item: item["kind"])
+    value = {
+        "schema_version": "1", "contract_identity": "media_provenance_view",
+        "contract_version": "1", "provenance_id": "media-provenance-" + "0" * 32,
+        "request_sha256": request.value["request_sha256"], "scope": thaw_json(scope),
+        "output": {key: artifact[key] for key in (
+            "artifact_id", "artifact_sha256", "resource_id", "resource_revision",
+            "resource_kind", "content_sha256", "media_type")},
+        "production_input": {
+            "decision_id": decision["decision_id"], "decision_revision": decision["revision"],
+            "decision_sha256": decision["decision_sha256"],
+            "canon_snapshot_id": canon["canon_snapshot_id"],
+            "canon_snapshot_version": canon["snapshot_version"],
+            "canon_sha256": canon["canon_sha256"], "binding_id": binding["binding_id"],
+            "binding_sha256": binding["result_sha256"],
+        },
+        "lineage": lineage, "rights": thaw_json(artifact["rights"]),
+        "preservation": {"class": "disposable_intermediate_review_material",
+                         "payload_availability": "caller_supplied_not_persisted"},
+        "reproducibility": {"level": "identity_and_provenance",
+                            "content_identity_verified": True,
+                            "semantic_replay_claimed": False,
+                            "operational_replay_claimed": False,
+                            "exact_byte_replay_claimed": False},
+        "unavailable_evidence": ["model_identity", "model_version", "provider_identity",
+                                 "provider_version", "runtime_environment_identity"],
+        "limitations": ["inert_provenance_view", "not_production_approval",
+                        "not_runtime_authority", "not_provider_authority",
+                        "not_workflow_authority", "not_scheduling_authority",
+                        "not_regeneration_authority", "not_export_or_publication_authority",
+                        "not_storage_or_deletion_authority", "not_rights_authority",
+                        "not_reproducibility_guarantee", "exact_artifact_revision_only"],
+        "result_sha256": "0" * 64,
+    }
+    value["provenance_id"] = _identifier(
+        "media-provenance-", media_provenance_view_identity_material(value))
+    value["result_sha256"] = canonical_digest(media_provenance_view_seal_material(value))
+    return validate_media_provenance_view(value)
 
 
 def create_production_artifact(*, pictorial_frame: AdmittedPictorialFrame,

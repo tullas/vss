@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vss.resource.media_provenance_request/1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_identity", "contract_version", "operation_identity", "operation_version", "scope", "artifact", "decision", "canon", "production_binding", "pictorial_admission", "request_sha256"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "contract_identity": {"const": "media_provenance_request"},
+    "contract_version": {"const": "1"},
+    "operation_identity": {"const": "create_storyboard_review_frame_provenance"},
+    "operation_version": {"const": "1"},
+    "scope": {"$ref": "#/$defs/scope"},
+    "artifact": {"$ref": "#/$defs/artifact"},
+    "decision": {"$ref": "#/$defs/decision"},
+    "canon": {"$ref": "#/$defs/canon"},
+    "production_binding": {"$ref": "#/$defs/binding"},
+    "pictorial_admission": {"$ref": "#/$defs/pictorial"},
+    "request_sha256": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "scope": {"type": "object", "additionalProperties": false, "required": ["tenant_id", "universe_id", "production_id", "scene_id", "scope_kind"], "properties": {"tenant_id": {"$ref": "#/$defs/id"}, "universe_id": {"$ref": "#/$defs/id"}, "production_id": {"$ref": "#/$defs/id"}, "scene_id": {"$ref": "#/$defs/id"}, "scope_kind": {"const": "production_scene"}}},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["artifact_id", "artifact_sha256", "resource_id", "resource_revision", "content_sha256"], "properties": {"artifact_id": {"type": "string", "pattern": "^artifact-[0-9a-f]{32}$"}, "artifact_sha256": {"$ref": "#/$defs/digest"}, "resource_id": {"type": "string", "pattern": "^resource-[0-9a-f]{32}$"}, "resource_revision": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "content_sha256": {"$ref": "#/$defs/digest"}}},
+    "decision": {"type": "object", "additionalProperties": false, "required": ["decision_id", "revision", "decision_sha256"], "properties": {"decision_id": {"type": "string", "pattern": "^decision-[0-9a-f]{32}$"}, "revision": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "decision_sha256": {"$ref": "#/$defs/digest"}}},
+    "canon": {"type": "object", "additionalProperties": false, "required": ["canon_snapshot_id", "snapshot_version", "canon_sha256"], "properties": {"canon_snapshot_id": {"type": "string", "pattern": "^canon-[0-9a-f]{32}$"}, "snapshot_version": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "canon_sha256": {"$ref": "#/$defs/digest"}}},
+    "binding": {"type": "object", "additionalProperties": false, "required": ["binding_id", "result_sha256"], "properties": {"binding_id": {"type": "string", "pattern": "^production-canon-binding-[0-9a-f]{32}$"}, "result_sha256": {"$ref": "#/$defs/digest"}}},
+    "pictorial": {"type": "object", "additionalProperties": false, "required": ["admission_id", "storyboard_specification_digest", "frame_id", "frame_specification_digest", "semantic_request_digest"], "properties": {"admission_id": {"$ref": "#/$defs/digest"}, "storyboard_specification_digest": {"$ref": "#/$defs/digest"}, "frame_id": {"$ref": "#/$defs/id"}, "frame_specification_digest": {"$ref": "#/$defs/digest"}, "semantic_request_digest": {"$ref": "#/$defs/digest"}}}
+  }
+}
