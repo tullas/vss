@@ -9,6 +9,7 @@ from vss_movie_pictorial import admit_pictorial_frame
 from vss_reasoning_contracts import canonical_digest
 
 EXPERIMENT_IDENTITY = "m8-3-real-provider-smoke-2"
+SMOKE_3_EXPERIMENT_IDENTITY = "m8-3-real-provider-smoke-3"
 EXPERIMENT_FRAME_ID = "frame-55a9d7015fdf1f72571b74c5"
 EXPECTED_FRAME_SPECIFICATION_DIGEST = "019052d98e3db5862a8199993e29c5199b5df44c466aecda02f3128fa0867d7b"  # pragma: allowlist secret
 EXPECTED_DEPICTION_PROJECTION_DIGEST = "3aa69cfccff612188bfd8d5820be1e691891d583074aff1e5205be986ed4c554"  # pragma: allowlist secret
@@ -84,6 +85,7 @@ def project_openai_prompt(projection: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True, slots=True, init=False)
 class AdmittedCreativeSmoke:
+    experiment_identity: str
     admission_id: str
     project_id: str
     scene_id: str
@@ -113,6 +115,7 @@ def admit_creative_smoke(
     storyboard_data: Any,
     *,
     environment: str,
+    experiment_identity: str = EXPERIMENT_IDENTITY,
 ) -> AdmittedCreativeSmoke:
     if environment != "development":
         raise MovieContractError("creative smoke validation is development-only")
@@ -132,8 +135,10 @@ def admit_creative_smoke(
         "quality": OUTPUT_QUALITY,
         "output_format": OUTPUT_FORMAT,
     })
+    if experiment_identity not in {EXPERIMENT_IDENTITY, SMOKE_3_EXPERIMENT_IDENTITY}:
+        raise MovieContractError("creative smoke experiment identity is unsupported")
     admission_id = canonical_digest({
-        "experiment": EXPERIMENT_IDENTITY,
+        "experiment": experiment_identity,
         "base_semantic_request_digest": base.semantic_request_digest,
         "depiction_projection_digest": base.provider_visible_digest,
         "provider_request_digest": provider_request_digest,
@@ -151,6 +156,7 @@ def admit_creative_smoke(
     })
     return AdmittedCreativeSmoke(
         _KEY,
+        experiment_identity=experiment_identity,
         admission_id=admission_id,
         project_id=base.project_id,
         scene_id=base.scene_id,
