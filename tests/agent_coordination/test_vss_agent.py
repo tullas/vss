@@ -386,6 +386,33 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertEqual(plan["unknown_paths"], ["unknown.txt"])
         self.assertIn("canonical", plan["profiles"])
 
+    def test_representative_domain_impacts_select_focused_profiles_and_preserve_risk(self) -> None:
+        cases = [
+            ("src/vss_movie_scene_breakdown/new_service.py", "movie", "L1", "isolated",
+             ["movie-scene-breakdown-tests"], False),
+            ("src/vss_config/new_loader.py", "configuration", "L1", "isolated",
+             ["configuration-tests"], False),
+            ("src/vss_reasoning/new_gateway.py", "reasoning", "L2", "shared",
+             ["reasoning-contract-tests", "reasoning-tests"], False),
+            ("src/vss_runtime/new_transport.py", "runtime", "L3", "external-effect",
+             ["canonical"], True),
+        ]
+        for path, domain, level, risk, profiles, human_gate in cases:
+            with self.subTest(path=path):
+                candidate = self.root / path
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                candidate.write_text("pass\n", encoding="utf-8")
+                result = self.agent("impact", "--base", self.base)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                plan = json.loads(result.stdout)
+                self.assertEqual(plan["domains"], [domain])
+                self.assertEqual(plan["minimum_level"], level)
+                self.assertEqual(plan["risk"], risk)
+                self.assertEqual(plan["profiles"], profiles)
+                self.assertEqual(plan["human_gate_required"], human_gate)
+                self.assertEqual(plan["unknown_paths"], [])
+                candidate.unlink()
+
     def test_sensitive_unexpected_change_fails_closed_without_path_disclosure(self) -> None:
         path = self.root / ".local/credentials.json"
         path.write_text("{}", encoding="utf-8")
