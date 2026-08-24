@@ -51,6 +51,18 @@ Keep semantic and review artifacts separate from operational authority:
 Do not silently expand authority in later milestones. Enforce intentionally
 inert or draft-only status structurally in contracts.
 
+## Studio platform boundaries
+
+Keep tenant, universe, production, resource scope, and rights explicit. Equal
+bytes, shared storage, or operational possession grant no cross-tenant access,
+promotion, reuse, ownership, redistribution, or training rights.
+
+Treat platform maintenance as governed capability work: detection and planning
+grant no execution authority, and Runtime remains the effect boundary. At major
+architecture boundaries, run the bounded material-risk-only
+`UNKNOWN_UNKNOWN_REVIEW`; do not impose it on ordinary changes or turn it into
+a speculative feature list.
+
 ## Human identity
 
 Caller-supplied reviewer or user IDs are accountability metadata unless real authentication
