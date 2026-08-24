@@ -42,11 +42,10 @@ from vss_resource_admission import (
 )
 
 artifact = create_production_artifact(
+    pictorial_frame=authoritatively_admitted_pictorial_frame,
     resource_revision=1,
     tenant_id="tenant-one",
     universe_id="universe-one",
-    production_id="production-one",
-    activity_id="activity-one",
     content=png_bytes,
     ownership_class="customer_owned",
     rights_status="confirmed",
@@ -64,8 +63,14 @@ result = admit_storyboard_frame_to_universe(
 )
 ```
 
-The service independently revalidates the source and reconstructs its content
-digest before comparing the exact admission binding. Identical authoritative
+Artifact construction requires the unforgeable `AdmittedPictorialFrame` from
+the real movie path and independently applies the established strict pictorial
+PNG validator. Production, storyboard, frame, and semantic-request bindings
+come from that admitted object rather than caller labels. The service
+independently revalidates the source and reconstructs its content digest before
+comparing the exact admission binding. Asset validation also requires and
+revalidates the independently admitted source and admission artifacts; it does
+not authorize a candidate from its own resealed JSON. Identical authoritative
 inputs produce identical IDs, seals, assets, and result codes. There are no
 timestamps, UUIDs, filesystem paths, storage identifiers, provider calls,
 Runtime calls, persistence, workflow activation, or global mutable state.

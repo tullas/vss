@@ -2,22 +2,24 @@ import copy
 import unittest
 
 from vss_resource_admission import create_production_artifact, create_universe_admission
+from tests.resource_test_support import admitted_pictorial_frame, pictorial_png
 from vss_resource_contracts import (
     ResourceContractError,
     ResourceContractRegistry,
+    BUILT_IN_REGISTRY_SHA256,
     validate_production_resource_artifact,
     validate_reusable_asset_admission,
 )
 
 
-CONTENT = b"\x89PNG\r\n\x1a\nreview-frame"
+CONTENT = pictorial_png()
 
 
 def artifact(**overrides):
     values = dict(
-        resource_revision=1,
-        tenant_id="tenant-one", universe_id="universe-one", production_id="production-one",
-        activity_id="activity-one", content=CONTENT, ownership_class="customer_owned",
+        pictorial_frame=admitted_pictorial_frame(), resource_revision=1,
+        tenant_id="tenant-one", universe_id="universe-one",
+        content=CONTENT, ownership_class="customer_owned",
         rights_status="confirmed",
         permissions=["use_in_source_production", "reuse_as_universe_visual_reference"],
         restrictions=["no_training", "no_redistribution", "no_publication"],
@@ -32,6 +34,11 @@ class ResourceContractTests(unittest.TestCase):
         first = ResourceContractRegistry.built_in()
         second = ResourceContractRegistry.built_in()
         self.assertEqual(first.digest, second.digest)
+        self.assertEqual(
+            "2cb2ae3af468e22e2e50f6f6bdfd19ad84693c4f22273c99febe89110d117e27",  # pragma: allowlist secret
+            BUILT_IN_REGISTRY_SHA256,
+        )
+        self.assertEqual(BUILT_IN_REGISTRY_SHA256, first.digest)
         self.assertEqual(3, len(first.registrations))
         for invalid in ("reusable_asset/latest", "reusable_asset/*", "unknown/1"):
             with self.assertRaises(ResourceContractError):

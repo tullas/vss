@@ -21,6 +21,7 @@ FILES = MappingProxyType({
     "reusable_asset_admission/1": "reusable-asset-admission-v1.schema.json",
     "reusable_asset/1": "reusable-asset-v1.schema.json",
 })
+BUILT_IN_REGISTRY_SHA256 = "2cb2ae3af468e22e2e50f6f6bdfd19ad84693c4f22273c99febe89110d117e27"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 
@@ -106,6 +107,8 @@ class ResourceContractRegistry:
             ],
             "schemas": {key: value["sha256"] for key, value in sorted(schemas.items())},
         })
+        if self.digest != BUILT_IN_REGISTRY_SHA256:
+            raise ResourceRegistryError("resource registry digest does not match reviewed pin")
 
     @classmethod
     def built_in(cls):

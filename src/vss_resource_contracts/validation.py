@@ -1,7 +1,7 @@
 import hashlib
 
 from vss_reasoning_contracts import canonical_digest
-from vss_reasoning_contracts.canonicalization import validate_json_value
+from vss_reasoning_contracts.canonicalization import thaw_json, validate_json_value
 
 from .errors import ResourceContractError
 from .models import ValidatedResourceArtifact
@@ -102,8 +102,61 @@ def validate_reusable_asset_admission(value, *, registry=None):
     return ValidatedResourceArtifact._create(value)
 
 
-def validate_reusable_asset(value, *, registry=None):
+def validate_reusable_asset(value, *, source_artifact, admission, source_content=None,
+                            registry=None):
     value = _validate(value, "reusable_asset/1", registry)
+    if not isinstance(source_artifact, ValidatedResourceArtifact) or not isinstance(admission, ValidatedResourceArtifact):
+        raise ResourceContractError("reusable asset requires validated source and admission")
+    source = validate_production_resource_artifact(
+        source_artifact.to_json_value(), content=source_content, registry=registry)
+    admitted = validate_reusable_asset_admission(admission.to_json_value(), registry=registry)
+    source_value = source.value
+    admission_value = admitted.value
+    scope = source_value["scope"]
+    expected_admission_source = {
+        "artifact_id": source_value["artifact_id"],
+        "artifact_sha256": source_value["artifact_sha256"],
+        "resource_id": source_value["resource_id"],
+        "resource_revision": source_value["resource_revision"],
+        "content_sha256": source_value["content_sha256"],
+        "tenant_id": scope["tenant_id"], "universe_id": scope["universe_id"],
+        "production_id": scope["production_id"],
+    }
+    if admission_value["source"] != expected_admission_source:
+        raise ResourceContractError("reusable asset admission source mismatch")
+    if scope["universe_id"] is None or admission_value["destination"]["tenant_id"] != scope["tenant_id"] or admission_value["destination"]["universe_id"] != scope["universe_id"]:
+        raise ResourceContractError("reusable asset admission scope mismatch")
+    expected_source = {
+        "artifact_id": source_value["artifact_id"],
+        "artifact_sha256": source_value["artifact_sha256"],
+        "resource_id": source_value["resource_id"],
+        "resource_revision": source_value["resource_revision"],
+        "content_sha256": source_value["content_sha256"],
+        "production_id": scope["production_id"],
+        "activity": thaw_json(source_value["activity"]),
+        "ancestors": thaw_json(source_value["lineage"]["ancestors"]),
+    }
+    expected_admission = {
+        "admission_id": admission_value["admission_id"],
+        "admission_sha256": admission_value["admission_sha256"],
+        "operation_identity": admission_value["operation_identity"],
+        "operation_version": admission_value["operation_version"],
+        "policy_identity": admission_value["policy_identity"],
+        "policy_version": admission_value["policy_version"],
+    }
+    if value["scope"] != admission_value["destination"] or value["source"] != expected_source or value["admission"] != expected_admission:
+        raise ResourceContractError("reusable asset authoritative binding mismatch")
+    rights = source_value["rights"]
+    expected_rights = {
+        "ownership_class": rights["ownership_class"], "status": "confirmed",
+        "permissions": ["reuse_as_universe_visual_reference"],
+        "restrictions": thaw_json(rights["restrictions"]),
+        "rights_reference": rights["rights_reference"],
+        "rights_policy_identity": rights["rights_policy_identity"],
+        "rights_policy_version": rights["rights_policy_version"],
+    }
+    if value["rights"] != expected_rights or value["content_sha256"] != source_value["content_sha256"]:
+        raise ResourceContractError("reusable asset authoritative rights mismatch")
     expected_id = "asset-" + canonical_digest(asset_identity_material(value))[:32]
     if value["asset_id"] != expected_id:
         raise ResourceContractError("reusable asset identity mismatch")

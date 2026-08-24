@@ -1,6 +1,6 @@
 from .errors import ResourceContractError, ResourceRegistryError
 from .models import ResourceRegistration, ValidatedResourceArtifact
-from .registry import ResourceContractRegistry
+from .registry import BUILT_IN_REGISTRY_SHA256, ResourceContractRegistry
 from .validation import (
     admission_seal_material,
     admission_identity_material,
@@ -16,7 +16,8 @@ from .validation import (
 
 __all__ = [
     "ResourceContractError", "ResourceRegistryError", "ResourceRegistration",
-    "ValidatedResourceArtifact", "ResourceContractRegistry", "artifact_seal_material",
+    "ValidatedResourceArtifact", "ResourceContractRegistry", "BUILT_IN_REGISTRY_SHA256",
+    "artifact_seal_material",
     "artifact_identity_material", "admission_seal_material", "admission_identity_material",
     "asset_seal_material", "asset_identity_material", "resource_identity_material",
     "validate_production_resource_artifact",

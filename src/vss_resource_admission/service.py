@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import hashlib
 from typing import Any
 
+from vss_movie_pictorial import AdmittedPictorialFrame
+from vss_providers.png import validate_pictorial_png
 from vss_reasoning_contracts import canonical_digest
 from vss_reasoning_contracts.canonicalization import thaw_json
 from vss_resource_contracts import (
@@ -39,21 +41,32 @@ def _identifier(prefix: str, material: Any) -> str:
     return prefix + canonical_digest(material)[:32]
 
 
-def create_production_artifact(*, resource_revision: int,
-                               tenant_id: str, production_id: str,
-                               universe_id: str | None, activity_id: str,
+def create_production_artifact(*, pictorial_frame: AdmittedPictorialFrame,
+                               resource_revision: int, tenant_id: str,
+                               universe_id: str | None,
                                content: bytes, ownership_class: str,
                                rights_status: str, permissions: list[str],
                                restrictions: list[str], rights_reference: str,
                                ancestors: list[dict[str, Any]] | None = None
                                ) -> ValidatedResourceArtifact:
-    if type(content) is not bytes:
-        raise ResourceContractError("resource content must be bytes")
+    if not isinstance(pictorial_frame, AdmittedPictorialFrame):
+        raise ResourceContractError("resource creation requires authoritative pictorial admission")
+    try:
+        validate_pictorial_png(content)
+    except Exception as exc:
+        raise ResourceContractError("resource content is not a validated pictorial PNG") from exc
     scope = {"tenant_id": tenant_id, "universe_id": universe_id,
-             "production_id": production_id}
-    activity = {"activity_id": activity_id,
-                "operation_identity": "vss.movie.storyboard.local-pictorial-render",
-                "operation_version": "1", "output_name": "review_frame"}
+             "production_id": pictorial_frame.project_id}
+    activity = {
+        "activity_id": _identifier("pictorial-activity-", pictorial_frame.semantic_request_digest),
+        "operation_identity": "generate_one_pictorial_storyboard_frame",
+        "operation_version": "1", "output_name": "review_frame",
+        "pictorial_admission_id": pictorial_frame.admission_id,
+        "storyboard_specification_digest": pictorial_frame.storyboard_specification_digest,
+        "frame_id": pictorial_frame.frame_id,
+        "frame_specification_digest": pictorial_frame.frame_specification_digest,
+        "semantic_request_digest": pictorial_frame.semantic_request_digest,
+    }
     content_digest = hashlib.sha256(content).hexdigest()
     rights = {
         "ownership_class": ownership_class, "status": rights_status,
@@ -168,9 +181,7 @@ def admit_storyboard_frame_to_universe(source_artifact: Any, *, source_content: 
         "artifact_id": artifact["artifact_id"], "artifact_sha256": artifact["artifact_sha256"],
         "resource_id": artifact["resource_id"], "resource_revision": artifact["resource_revision"],
         "content_sha256": artifact["content_sha256"], "production_id": scope["production_id"],
-        "activity_id": artifact["activity"]["activity_id"],
-        "operation_identity": artifact["activity"]["operation_identity"],
-        "operation_version": artifact["activity"]["operation_version"],
+        "activity": thaw_json(artifact["activity"]),
         "ancestors": thaw_json(artifact["lineage"]["ancestors"]),
     }
     admission_binding = {
@@ -198,7 +209,8 @@ def admit_storyboard_frame_to_universe(source_artifact: Any, *, source_content: 
     value["asset_id"] = _identifier("asset-", asset_identity_material(value))
     value["asset_sha256"] = canonical_digest(asset_seal_material(value))
     try:
-        asset = validate_reusable_asset(value)
+        asset = validate_reusable_asset(value, source_artifact=source, admission=request,
+                                        source_content=source_content)
     except ResourceContractError:
         return _reject("invalid_derived_asset")
     return ResourceAdmissionResult(True, "admitted", asset)

@@ -10,19 +10,22 @@ from vss_resource_admission import (
 from vss_resource_contracts import (
     admission_identity_material,
     admission_seal_material,
+    asset_identity_material,
+    asset_seal_material,
     validate_reusable_asset,
     validate_reusable_asset_admission,
 )
+from tests.resource_test_support import admitted_pictorial_frame, pictorial_png
 
 
-CONTENT = b"\x89PNG\r\n\x1a\nreview-frame"
+CONTENT = pictorial_png()
 
 
 def source(**overrides):
     values = dict(
-        resource_revision=1,
-        tenant_id="tenant-one", universe_id="universe-one", production_id="production-one",
-        activity_id="activity-one", content=CONTENT, ownership_class="customer_owned",
+        pictorial_frame=admitted_pictorial_frame(), resource_revision=1,
+        tenant_id="tenant-one", universe_id="universe-one",
+        content=CONTENT, ownership_class="customer_owned",
         rights_status="confirmed",
         permissions=["use_in_source_production", "reuse_as_universe_visual_reference"],
         restrictions=["no_training", "no_redistribution", "no_publication"],
@@ -62,7 +65,8 @@ class ResourceAdmissionServiceTests(unittest.TestCase):
         self.assertEqual(["reuse_as_universe_visual_reference"], list(value["rights"]["permissions"]))
         self.assertEqual(list(item.value["rights"]["restrictions"]), list(value["rights"]["restrictions"]))
         self.assertEqual(item.value["artifact_sha256"], value["source"]["artifact_sha256"])
-        validate_reusable_asset(first.asset.to_json_value())
+        validate_reusable_asset(first.asset.to_json_value(), source_artifact=item,
+                                admission=admission, source_content=CONTENT)
 
     def test_changed_content_and_non_admission_do_not_promote(self):
         item = source()
@@ -70,6 +74,21 @@ class ResourceAdmissionServiceTests(unittest.TestCase):
             item, source_content=b"copied-but-changed", admission_request=request(item)).code)
         self.assertEqual("invalid_admission", admit_storyboard_frame_to_universe(
             item, source_content=CONTENT, admission_request=item.to_json_value()).code)
+
+    def test_artifact_creation_requires_genuine_pictorial_admission_and_png(self):
+        values = dict(
+            pictorial_frame=admitted_pictorial_frame(), resource_revision=1,
+            tenant_id="tenant-one", universe_id="universe-one",
+            content=b"not-a-png", ownership_class="customer_owned",
+            rights_status="confirmed", permissions=["reuse_as_universe_visual_reference"],
+            restrictions=["no_training"], rights_reference="rights-reference-one",
+        )
+        with self.assertRaisesRegex(Exception, "validated pictorial PNG"):
+            create_production_artifact(**values)
+        values["content"] = CONTENT
+        values["pictorial_frame"] = object()
+        with self.assertRaisesRegex(Exception, "authoritative pictorial admission"):
+            create_production_artifact(**values)
 
     def test_same_bytes_do_not_cross_tenant_or_universe(self):
         item = source()
@@ -139,7 +158,21 @@ class ResourceAdmissionServiceTests(unittest.TestCase):
         value = result.asset.to_json_value()
         value["source"]["ancestors"][0]["resource_revision"] = 2
         with self.assertRaises(Exception):
-            validate_reusable_asset(value)
+            validate_reusable_asset(value, source_artifact=item, admission=request(item),
+                                    source_content=CONTENT)
+
+    def test_validly_resealed_asset_cannot_substitute_universe(self):
+        item = source()
+        admission = request(item)
+        result = admit_storyboard_frame_to_universe(
+            item, source_content=CONTENT, admission_request=admission)
+        value = result.asset.to_json_value()
+        value["scope"]["universe_id"] = "universe-two"
+        value["asset_id"] = "asset-" + canonical_digest(asset_identity_material(value))[:32]
+        value["asset_sha256"] = canonical_digest(asset_seal_material(value))
+        with self.assertRaisesRegex(Exception, "authoritative binding mismatch"):
+            validate_reusable_asset(value, source_artifact=item, admission=admission,
+                                    source_content=CONTENT)
 
 
 if __name__ == "__main__":
