@@ -48,10 +48,27 @@ class DependencyBoundaryTests(unittest.TestCase):
             "vss_context_contracts",
             "vss_knowledge_contracts",
             "vss_movie_contracts",
+            "vss_resource_contracts",
             "vss_reasoning_contracts",
         ):
             with self.subTest(package=package):
                 self.assert_package_avoids(package, forbidden)
+
+    def test_resource_admission_remains_inert(self) -> None:
+        self.assert_package_avoids(
+            "vss_resource_admission",
+            {"vss_capabilities", "vss_commands", "vss_reasoning", "vss_reasoning_providers",
+             "vss_reasoning_strategies", "vss_runtime", "vss_workflows"},
+        )
+        provider_imports = [
+            (path.relative_to(ROOT), module)
+            for path, module in _imports("vss_resource_admission")
+            if _top_level(module) == "vss_providers"
+        ]
+        self.assertEqual(
+            [(Path("src/vss_resource_admission/service.py"), "vss_providers.png")],
+            provider_imports,
+        )
 
     def test_semantic_implementations_do_not_depend_on_effect_or_cli_layers(self) -> None:
         forbidden = {"vss_capabilities", "vss_commands", "vss_runtime", "vss_workflows"}
