@@ -19,6 +19,9 @@ from .validation import (
     canon_snapshot_seal_material,
     production_canon_binding_identity_material,
     production_canon_binding_seal_material,
+    dependency_impact_request_seal_material,
+    dependency_impact_result_identity_material,
+    dependency_impact_result_seal_material,
     validate_production_resource_artifact,
     validate_reusable_asset,
     validate_reusable_asset_admission,
@@ -27,6 +30,8 @@ from .validation import (
     validate_creative_decision_revision,
     validate_canon_snapshot,
     validate_production_canon_binding,
+    validate_dependency_impact_request,
+    validate_dependency_impact_result,
 )
 
 __all__ = [
@@ -40,9 +45,12 @@ __all__ = [
     "creative_decision_identity_material", "creative_decision_seal_material",
     "canon_snapshot_identity_material", "canon_snapshot_seal_material",
     "production_canon_binding_identity_material", "production_canon_binding_seal_material",
+    "dependency_impact_request_seal_material", "dependency_impact_result_identity_material",
+    "dependency_impact_result_seal_material",
     "validate_production_resource_artifact",
     "validate_reusable_asset_admission", "validate_reusable_asset",
     "validate_resource_resolution_request", "validate_resource_resolution_result",
     "validate_creative_decision_revision", "validate_canon_snapshot",
     "validate_production_canon_binding",
+    "validate_dependency_impact_request", "validate_dependency_impact_result",
 ]
