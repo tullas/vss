@@ -39,6 +39,13 @@ class LocalMovieDemoTests(unittest.TestCase):
         )
         self.assertEqual(result["selected_option_id"], result["review_decision"]["payload"]["decisions"][0]["option_id"])
         self.assertEqual(result["review_decision"]["payload"]["decisions"][0]["outcome"], "accept")
+        self.assertEqual(result["creative_decision_revision"]["status"], "accepted")
+        self.assertEqual(result["canon_snapshot"]["decisions"][0]["decision_sha256"],
+                         result["creative_decision_revision"]["decision_sha256"])
+        self.assertEqual(result["production_canon_binding"]["canon_snapshot"]["canon_sha256"],
+                         result["canon_snapshot"]["canon_sha256"])
+        self.assertIn("not_runtime_authority",
+                      result["production_canon_binding"]["limitations"])
         task, decision, packet, option_set, breakdown, _ = admit_shot_plan_inputs(
             result["review_decision"], result["review_packet"],
             result["scene_production_option_set"], result["scene_breakdown"],

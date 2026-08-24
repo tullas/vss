@@ -22,8 +22,11 @@ FILES = MappingProxyType({
     "reusable_asset/1": "reusable-asset-v1.schema.json",
     "resource_resolution_request/1": "resource-resolution-request-v1.schema.json",
     "resource_resolution_result/1": "resource-resolution-result-v1.schema.json",
+    "creative_decision_revision/1": "creative-decision-revision-v1.schema.json",
+    "canon_snapshot/1": "canon-snapshot-v1.schema.json",
+    "production_canon_binding/1": "production-canon-binding-v1.schema.json",
 })
-BUILT_IN_REGISTRY_SHA256 = "9e88806d679c218c3ffaffd3055b4d3ebd9650458777245b2934e89e5b875a60"  # pragma: allowlist secret
+BUILT_IN_REGISTRY_SHA256 = "f2415f0c680ea154247821db68757f933bc47cfa0d4dd4a5fc5708bca82efa16"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 

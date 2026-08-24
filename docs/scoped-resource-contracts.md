@@ -10,6 +10,10 @@ M9.2 adds one exact deterministic resolution path that lets a named production
 consume that already-admitted universe visual reference as an inert resolution
 artifact. It does not add lookup, discovery, storage, or execution.
 
+M9.3 reuses this contract registry and canonical integrity convention for one
+versioned movie creative-decision, production-context canon snapshot, and exact
+production-input binding. See [Versioned movie canon binding](movie-canon-binding.md).
+
 ## Contracts
 
 `production_resource_artifact/1` records an immutable PNG output with exact
@@ -38,7 +42,7 @@ restrictions. `resource_resolution_result/1` preserves that request binding,
 the resolved asset identity, full source activity and ancestor lineage,
 admission policy evidence, rights facts, and explicit inert limitations.
 
-All five contracts are bounded Draft 2020-12 schemas with closed nested
+All resource contracts are bounded Draft 2020-12 schemas with closed nested
 objects, exact versions, closed enums, and no `latest` input identity.
 Canonical SHA-256 digests reuse the existing VSS canonical JSON convention.
 Digests are integrity evidence, not ownership, access, promotion, or execution
