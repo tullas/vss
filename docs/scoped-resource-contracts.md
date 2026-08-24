@@ -20,6 +20,10 @@ reconstructed M9.3 decision/canon binding and real shot-plan, storyboard, and
 pictorial-admission chain. The JSON view is exportable data, but constructing it
 is not an export, storage, publication, or execution operation.
 
+M9.6 adds one deterministic reassessment of an exact resolved universe visual
+reference after explicitly supplied, sealed candidate rights evidence changes.
+It decides future eligibility only and never rewrites historical artifacts.
+
 ## Contracts
 
 `production_resource_artifact/1` records an immutable PNG output with exact
@@ -168,6 +172,24 @@ unavailable rather than inferred.
 The view grants no production, Runtime, provider, workflow, scheduling,
 regeneration, export/publication, storage/deletion, or rights authority. It
 does not mutate its historical inputs and does not change M9.4 impact semantics.
+
+## Rights eligibility reassessment
+
+M9.6 adds `rights_eligibility_reassessment_request/1` and
+`rights_eligibility_reassessment_result/1` for one exact M9.2 production
+resolution. The request seals the original M9.1/M9.2 identities and rights plus
+one candidate rights-evidence revision bound to the same source revision and
+original rights digest. It is not a rights registry or legal adjudication.
+
+`reassess_storyboard_visual_reference_rights` independently reconstructs the
+source/admission/asset/resolution chain. Confirmed active candidate evidence is
+eligible only when the required visual-reference permission remains and
+`no_reuse` is absent. Revocation or either applicable change makes new use
+ineligible; unknown/conflicting or mismatched evidence fails closed. Unrelated
+restrictions are retained as evidence but do not invalidate this exact purpose.
+Results never alter historical artifacts or grant admission, quarantine,
+storage/deletion, regeneration, production, publication, Runtime, provider, or
+workflow authority.
 
 ## Limitations
 

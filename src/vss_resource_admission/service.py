@@ -31,6 +31,12 @@ from vss_resource_contracts import (
     validate_media_provenance_request,
     validate_media_provenance_view,
     validate_canon_snapshot,
+    rights_evidence_seal_material,
+    rights_eligibility_request_seal_material,
+    rights_eligibility_result_identity_material,
+    rights_eligibility_result_seal_material,
+    validate_rights_eligibility_reassessment_request,
+    validate_rights_eligibility_reassessment_result,
 )
 
 
@@ -54,6 +60,13 @@ class ResourceResolutionResult:
     resolved: bool
     code: str
     resource: ValidatedResourceArtifact | None
+
+
+@dataclass(frozen=True, slots=True)
+class RightsEligibilityReassessmentResult:
+    assessed: bool
+    code: str
+    result: ValidatedResourceArtifact | None
 
 
 def _identifier(prefix: str, material: Any) -> str:
@@ -548,3 +561,158 @@ def resolve_universe_visual_reference(*, source_artifact: Any, admission: Any,
     except ResourceContractError:
         return _resolution_reject("invalid_resolution_result")
     return ResourceResolutionResult(True, "resolved", resource)
+
+
+def create_rights_eligibility_reassessment_request(
+    *, source_artifact: ValidatedResourceArtifact, source_content: bytes,
+    admission: ValidatedResourceArtifact, asset: ValidatedResourceArtifact,
+    resolution_request: ValidatedResourceArtifact,
+    resolution_result: ValidatedResourceArtifact, tenant_id: str, universe_id: str,
+    production_id: str, candidate_evidence_revision: int,
+    candidate_evidence_reference: str, candidate_status: str,
+    candidate_revocation: str, candidate_permissions: list[str],
+    candidate_restrictions: list[str], candidate_rights_reference: str,
+) -> ValidatedResourceArtifact:
+    source = validate_production_resource_artifact(source_artifact.to_json_value(), content=source_content)
+    admitted = validate_reusable_asset_admission(admission.to_json_value())
+    checked_asset = validate_reusable_asset(asset.to_json_value(), source_artifact=source,
+                                            admission=admitted, source_content=source_content)
+    checked_request = validate_resource_resolution_request(resolution_request.to_json_value())
+    checked_result = validate_resource_resolution_result(
+        resolution_result.to_json_value(), request=checked_request, source_artifact=source,
+        admission=admitted, asset=checked_asset, source_content=source_content)
+    artifact = source.value
+    original_rights = thaw_json(artifact["rights"])
+    source_ref = {key: artifact[key] for key in (
+        "artifact_id", "artifact_sha256", "resource_id", "resource_revision", "content_sha256")}
+    candidate = {
+        "evidence_revision": candidate_evidence_revision,
+        "evidence_reference": candidate_evidence_reference, "subject": source_ref,
+        "supersedes_rights_sha256": canonical_digest(original_rights),
+        "ownership_class": artifact["rights"]["ownership_class"], "status": candidate_status,
+        "revocation": candidate_revocation, "permissions": sorted(candidate_permissions),
+        "restrictions": sorted(candidate_restrictions),
+        "rights_reference": candidate_rights_reference,
+        "rights_policy_identity": artifact["rights"]["rights_policy_identity"],
+        "rights_policy_version": artifact["rights"]["rights_policy_version"],
+        "evidence_sha256": "0" * 64,
+    }
+    candidate["evidence_sha256"] = canonical_digest(rights_evidence_seal_material(candidate))
+    value = {
+        "schema_version": "1", "contract_identity": "rights_eligibility_reassessment_request",
+        "contract_version": "1", "operation_identity": "reassess_storyboard_visual_reference_rights",
+        "operation_version": "1", "scope": {"tenant_id": tenant_id, "universe_id": universe_id,
+        "production_id": production_id, "scope_kind": "production"},
+        "purpose": "storyboard_visual_reference", "required_permission": PERMISSION,
+        "source": source_ref,
+        "admission": {key: admitted.value[key] for key in ("admission_id", "admission_sha256")},
+        "asset": {key: checked_asset.value[key] for key in ("asset_id", "asset_revision", "asset_sha256")},
+        "resolution": {"request_id": checked_request.value["request_id"],
+                       "request_sha256": checked_request.value["request_sha256"],
+                       "resolution_id": checked_result.value["resolution_id"],
+                       "result_sha256": checked_result.value["result_sha256"]},
+        "original_rights": original_rights, "candidate_rights": candidate,
+        "request_sha256": "0" * 64,
+    }
+    value["request_sha256"] = canonical_digest(rights_eligibility_request_seal_material(value))
+    return validate_rights_eligibility_reassessment_request(value)
+
+
+def _rights_assessment(request, classification: str, reason_code: str):
+    value = request.value
+    candidate = value["candidate_rights"]
+    result = {
+        "schema_version": "1", "contract_identity": "rights_eligibility_reassessment_result",
+        "contract_version": "1", "assessment_id": "rights-eligibility-" + "0" * 32,
+        "request_sha256": value["request_sha256"], "scope": thaw_json(value["scope"]),
+        "purpose": value["purpose"], "source": thaw_json(value["source"]),
+        "admission": thaw_json(value["admission"]), "asset": thaw_json(value["asset"]),
+        "resolution": thaw_json(value["resolution"]),
+        "original_rights_sha256": canonical_digest(value["original_rights"]),
+        "candidate_evidence": {key: candidate[key] for key in (
+            "evidence_revision", "evidence_reference", "evidence_sha256")},
+        "classification": classification, "reason_code": reason_code,
+        "limitations": ["inert_rights_eligibility_reassessment", "not_historical_invalidation",
+            "not_legal_adjudication", "not_admission_or_promotion_authority",
+            "not_quarantine_or_storage_authority", "not_regeneration_authority",
+            "not_deletion_authority", "not_production_approval",
+            "not_publication_or_export_authority", "not_runtime_authority",
+            "not_provider_authority", "not_workflow_authority"], "result_sha256": "0" * 64,
+    }
+    result["assessment_id"] = _identifier(
+        "rights-eligibility-", rights_eligibility_result_identity_material(result))
+    result["result_sha256"] = canonical_digest(rights_eligibility_result_seal_material(result))
+    return validate_rights_eligibility_reassessment_result(result)
+
+
+def reassess_storyboard_visual_reference_rights(
+    request_data: Any, *, source_artifact: Any, source_content: bytes, admission: Any,
+    asset: Any, resolution_request: Any, resolution_result: Any, tenant_id: str,
+    universe_id: str, production_id: str, purpose: str = "storyboard_visual_reference",
+) -> RightsEligibilityReassessmentResult:
+    request = validate_rights_eligibility_reassessment_request(request_data)
+    incomplete = lambda code: RightsEligibilityReassessmentResult(
+        False, code, _rights_assessment(request, "incomplete_fail_closed", code))
+    if not all(isinstance(value, ValidatedResourceArtifact) for value in (
+            source_artifact, admission, asset, resolution_request, resolution_result)):
+        return incomplete("authoritative_chain_incomplete")
+    if purpose != "storyboard_visual_reference":
+        return incomplete("purpose_mismatch")
+    expected_scope = {"tenant_id": tenant_id, "universe_id": universe_id,
+                      "production_id": production_id, "scope_kind": "production"}
+    if request.value["scope"] != expected_scope:
+        return incomplete("scope_mismatch")
+    try:
+        source = validate_production_resource_artifact(source_artifact.to_json_value(), content=source_content)
+        admitted = validate_reusable_asset_admission(admission.to_json_value())
+        checked_asset = validate_reusable_asset(asset.to_json_value(), source_artifact=source,
+                                                admission=admitted, source_content=source_content)
+        expected_request = create_resource_resolution_request(
+            source_artifact=source, admission=admitted, asset=checked_asset, source_content=source_content,
+            tenant_id=tenant_id, universe_id=universe_id, production_id=production_id, purpose=purpose)
+        supplied_request = validate_resource_resolution_request(resolution_request.to_json_value())
+        if supplied_request != expected_request:
+            return incomplete("authoritative_chain_incomplete")
+        checked_resolution = validate_resource_resolution_result(
+            resolution_result.to_json_value(), request=supplied_request, source_artifact=source,
+            admission=admitted, asset=checked_asset, source_content=source_content)
+    except (ResourceContractError, AttributeError, TypeError):
+        return incomplete("authoritative_chain_incomplete")
+    source_value = source.value
+    expected_source = {key: source_value[key] for key in (
+        "artifact_id", "artifact_sha256", "resource_id", "resource_revision", "content_sha256")}
+    if (request.value["source"] != expected_source
+            or request.value["admission"] != {key: admitted.value[key] for key in ("admission_id", "admission_sha256")}
+            or request.value["asset"] != {key: checked_asset.value[key] for key in ("asset_id", "asset_revision", "asset_sha256")}
+            or request.value["resolution"] != {"request_id": expected_request.value["request_id"], "request_sha256": expected_request.value["request_sha256"], "resolution_id": checked_resolution.value["resolution_id"], "result_sha256": checked_resolution.value["result_sha256"]}
+            or request.value["original_rights"] != source_value["rights"]):
+        return incomplete("authoritative_chain_incomplete")
+    candidate = request.value["candidate_rights"]
+    if candidate["subject"] != expected_source:
+        return incomplete("candidate_subject_mismatch")
+    if candidate["supersedes_rights_sha256"] != canonical_digest(source_value["rights"]):
+        return incomplete("candidate_predecessor_mismatch")
+    if (candidate["rights_reference"] != source_value["rights"]["rights_reference"]
+            or candidate["rights_policy_identity"] != source_value["rights"]["rights_policy_identity"]
+            or candidate["rights_policy_version"] != source_value["rights"]["rights_policy_version"]):
+        return incomplete("rights_reference_mismatch")
+    if candidate["status"] == "unknown":
+        return incomplete("candidate_rights_unknown")
+    if candidate["status"] == "conflicting":
+        return incomplete("candidate_rights_conflicting")
+    if candidate["revocation"] == "revoked":
+        result = _rights_assessment(request, "ineligible_new_use", "authoritative_rights_revoked")
+        return RightsEligibilityReassessmentResult(True, "authoritative_rights_revoked", result)
+    if PERMISSION not in candidate["permissions"]:
+        result = _rights_assessment(request, "ineligible_new_use", "required_permission_removed")
+        return RightsEligibilityReassessmentResult(True, "required_permission_removed", result)
+    if BLOCKING_RESTRICTION in candidate["restrictions"]:
+        result = _rights_assessment(request, "ineligible_new_use", "applicable_no_reuse_added")
+        return RightsEligibilityReassessmentResult(True, "applicable_no_reuse_added", result)
+    original = source_value["rights"]
+    applicable_equal = (candidate["permissions"] == original["permissions"]
+                        and candidate["restrictions"] == original["restrictions"]
+                        and candidate["ownership_class"] == original["ownership_class"])
+    reason = "applicable_rights_unchanged" if applicable_equal else "unrelated_rights_change_eligibility_unchanged"
+    result = _rights_assessment(request, "eligible_unchanged", reason)
+    return RightsEligibilityReassessmentResult(True, reason, result)

@@ -25,6 +25,10 @@ from .validation import (
     media_provenance_request_seal_material,
     media_provenance_view_identity_material,
     media_provenance_view_seal_material,
+    rights_eligibility_request_seal_material,
+    rights_evidence_seal_material,
+    rights_eligibility_result_identity_material,
+    rights_eligibility_result_seal_material,
     validate_production_resource_artifact,
     validate_reusable_asset,
     validate_reusable_asset_admission,
@@ -37,6 +41,8 @@ from .validation import (
     validate_dependency_impact_result,
     validate_media_provenance_request,
     validate_media_provenance_view,
+    validate_rights_eligibility_reassessment_request,
+    validate_rights_eligibility_reassessment_result,
 )
 
 __all__ = [
@@ -54,6 +60,8 @@ __all__ = [
     "dependency_impact_result_seal_material",
     "media_provenance_request_seal_material", "media_provenance_view_identity_material",
     "media_provenance_view_seal_material",
+    "rights_eligibility_request_seal_material", "rights_evidence_seal_material",
+    "rights_eligibility_result_identity_material", "rights_eligibility_result_seal_material",
     "validate_production_resource_artifact",
     "validate_reusable_asset_admission", "validate_reusable_asset",
     "validate_resource_resolution_request", "validate_resource_resolution_result",
@@ -61,4 +69,6 @@ __all__ = [
     "validate_production_canon_binding",
     "validate_dependency_impact_request", "validate_dependency_impact_result",
     "validate_media_provenance_request", "validate_media_provenance_view",
+    "validate_rights_eligibility_reassessment_request",
+    "validate_rights_eligibility_reassessment_result",
 ]

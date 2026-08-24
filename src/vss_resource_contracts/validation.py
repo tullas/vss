@@ -313,6 +313,23 @@ def media_provenance_view_seal_material(value):
     return {**value, "result_sha256": "0" * 64}
 
 
+def rights_eligibility_request_seal_material(value):
+    return {**value, "request_sha256": "0" * 64}
+
+
+def rights_evidence_seal_material(value):
+    return {**value, "evidence_sha256": "0" * 64}
+
+
+def rights_eligibility_result_identity_material(value):
+    return {key: item for key, item in value.items()
+            if key not in {"assessment_id", "result_sha256"}}
+
+
+def rights_eligibility_result_seal_material(value):
+    return {**value, "result_sha256": "0" * 64}
+
+
 def validate_media_provenance_request(value, *, registry=None):
     try:
         value = _validate(value, "media_provenance_request/1", registry)
@@ -342,6 +359,54 @@ def validate_media_provenance_view(value, *, registry=None):
             raise ResourceContractError("media provenance view seal mismatch")
     except ResourceContractError as exc:
         raise ResourceContractError("media_provenance_view_invalid") from exc
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_rights_eligibility_reassessment_request(value, *, registry=None):
+    try:
+        value = _validate(value, "rights_eligibility_reassessment_request/1", registry)
+        candidate = value["candidate_rights"]
+        if candidate["permissions"] != sorted(candidate["permissions"]):
+            raise ResourceContractError("candidate rights permissions are not canonical")
+        if candidate["restrictions"] != sorted(candidate["restrictions"]):
+            raise ResourceContractError("candidate rights restrictions are not canonical")
+        if candidate["evidence_sha256"] != canonical_digest(rights_evidence_seal_material(candidate)):
+            raise ResourceContractError("candidate rights evidence seal mismatch")
+        if value["request_sha256"] != canonical_digest(rights_eligibility_request_seal_material(value)):
+            raise ResourceContractError("rights eligibility request seal mismatch")
+    except ResourceContractError as exc:
+        raise ResourceContractError("rights_eligibility_request_invalid") from exc
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_rights_eligibility_reassessment_result(value, *, registry=None):
+    try:
+        value = _validate(value, "rights_eligibility_reassessment_result/1", registry)
+        classifications = {
+            "applicable_rights_unchanged": "eligible_unchanged",
+            "unrelated_rights_change_eligibility_unchanged": "eligible_unchanged",
+            "required_permission_removed": "ineligible_new_use",
+            "applicable_no_reuse_added": "ineligible_new_use",
+            "authoritative_rights_revoked": "ineligible_new_use",
+            "candidate_rights_unknown": "incomplete_fail_closed",
+            "candidate_rights_conflicting": "incomplete_fail_closed",
+            "authoritative_chain_incomplete": "incomplete_fail_closed",
+            "scope_mismatch": "incomplete_fail_closed",
+            "purpose_mismatch": "incomplete_fail_closed",
+            "candidate_subject_mismatch": "incomplete_fail_closed",
+            "rights_reference_mismatch": "incomplete_fail_closed",
+            "candidate_predecessor_mismatch": "incomplete_fail_closed",
+        }
+        if value["classification"] != classifications[value["reason_code"]]:
+            raise ResourceContractError("rights eligibility classification mismatch")
+        if value["result_sha256"] != canonical_digest(rights_eligibility_result_seal_material(value)):
+            raise ResourceContractError("rights eligibility result seal mismatch")
+        expected_id = "rights-eligibility-" + canonical_digest(
+            rights_eligibility_result_identity_material(value))[:32]
+        if value["assessment_id"] != expected_id:
+            raise ResourceContractError("rights eligibility result identity mismatch")
+    except ResourceContractError as exc:
+        raise ResourceContractError("rights_eligibility_result_invalid") from exc
     return ValidatedResourceArtifact._create(value)
 
 
