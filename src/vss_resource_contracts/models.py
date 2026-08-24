@@ -32,3 +32,25 @@ class ValidatedResourceArtifact:
 
     def to_json_value(self) -> dict[str, Any]:
         return thaw_json(self.value)
+
+
+_CREATIVE_DECISION_AUTHORITY_KEY = object()
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class AdmittedCreativeDecision:
+    value: Mapping[str, Any]
+    digest: str
+
+    def __init__(self, key: object, artifact: ValidatedResourceArtifact) -> None:
+        if key is not _CREATIVE_DECISION_AUTHORITY_KEY:
+            raise TypeError("creative decisions require authoritative movie admission")
+        object.__setattr__(self, "value", artifact.value)
+        object.__setattr__(self, "digest", artifact.digest)
+
+    def to_json_value(self) -> dict[str, Any]:
+        return thaw_json(self.value)
+
+
+def _admit_creative_decision(artifact: ValidatedResourceArtifact) -> AdmittedCreativeDecision:
+    return AdmittedCreativeDecision(_CREATIVE_DECISION_AUTHORITY_KEY, artifact)

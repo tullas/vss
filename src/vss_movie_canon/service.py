@@ -19,6 +19,7 @@ from vss_resource_contracts import (
     validate_creative_decision_revision,
     validate_production_canon_binding,
 )
+from vss_resource_contracts.models import AdmittedCreativeDecision, _admit_creative_decision
 
 
 DECISION_LIMITATIONS = [
@@ -83,8 +84,8 @@ def create_creative_decision_revision(
     option_set_data: dict[str, Any], breakdown_data: dict[str, Any], *,
     tenant_id: str, universe_id: str, revision: int = 1,
     status: str | None = None,
-    previous_revision: ValidatedResourceArtifact | None = None,
-) -> ValidatedResourceArtifact:
+    previous_revision: AdmittedCreativeDecision | None = None,
+) -> AdmittedCreativeDecision:
     raw, decision, packet, option_set, breakdown, scene, option = _authoritative_movie_inputs(
         decision_data, packet_data, option_set_data, breakdown_data)
     derived_status = "accepted" if raw["outcome"] == "accept" else "rejected"
@@ -129,17 +130,22 @@ def create_creative_decision_revision(
     value["decision_id"] = "decision-" + canonical_digest(
         creative_decision_identity_material(value))[:32]
     if previous_revision is not None:
+        if not isinstance(previous_revision, AdmittedCreativeDecision):
+            raise ResourceContractError("creative decision predecessor is not authoritative")
         checked = validate_creative_decision_revision(previous_revision.to_json_value())
         value["previous_revision"] = {key: checked.value[key] for key in (
             "decision_id", "revision", "decision_sha256")}
     value["decision_sha256"] = canonical_digest(creative_decision_seal_material(value))
-    return validate_creative_decision_revision(value)
+    artifact = validate_creative_decision_revision(value)
+    return _admit_creative_decision(artifact)
 
 
-def create_canon_snapshot(*, decisions: list[ValidatedResourceArtifact],
+def create_canon_snapshot(*, decisions: list[AdmittedCreativeDecision],
                           snapshot_version: int) -> ValidatedResourceArtifact:
     if not decisions:
         raise ResourceContractError("canon snapshot requires a decision revision")
+    if not all(isinstance(item, AdmittedCreativeDecision) for item in decisions):
+        raise ResourceContractError("canon snapshot requires authoritative decision revisions")
     checked = [validate_creative_decision_revision(item.to_json_value()) for item in decisions]
     scope = {key: checked[0].value["scope"][key]
              for key in ("tenant_id", "universe_id", "production_id")}
@@ -158,21 +164,23 @@ def create_canon_snapshot(*, decisions: list[ValidatedResourceArtifact],
     value["canon_snapshot_id"] = "canon-" + canonical_digest(
         canon_snapshot_identity_material(value))[:32]
     value["canon_sha256"] = canonical_digest(canon_snapshot_seal_material(value))
-    return validate_canon_snapshot(value, decisions=checked)
+    return validate_canon_snapshot(value, decisions=decisions)
 
 
 def bind_production_input_to_canon(
     decision_data: dict[str, Any], packet_data: dict[str, Any],
     option_set_data: dict[str, Any], breakdown_data: dict[str, Any], *,
-    tenant_id: str, universe_id: str, decisions: list[ValidatedResourceArtifact],
+    tenant_id: str, universe_id: str, decisions: list[AdmittedCreativeDecision],
     canon_snapshot: ValidatedResourceArtifact,
-    previous_revision: ValidatedResourceArtifact | None = None,
+    previous_revision: AdmittedCreativeDecision | None = None,
 ) -> ValidatedResourceArtifact:
     raw, decision, packet, option_set, breakdown, scene, _ = _authoritative_movie_inputs(
         decision_data, packet_data, option_set_data, breakdown_data)
     if len(decisions) != 1:
         raise ResourceContractError("scene input binding requires exactly one decision revision")
     candidate = decisions[0]
+    if not isinstance(candidate, AdmittedCreativeDecision):
+        raise ResourceContractError("production binding requires an authoritative decision revision")
     expected = create_creative_decision_revision(
         decision_data, packet_data, option_set_data, breakdown_data,
         tenant_id=tenant_id, universe_id=universe_id, revision=candidate.value["revision"],

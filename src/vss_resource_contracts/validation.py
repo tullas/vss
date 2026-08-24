@@ -4,7 +4,7 @@ from vss_reasoning_contracts import canonical_digest
 from vss_reasoning_contracts.canonicalization import thaw_json, validate_json_value
 
 from .errors import ResourceContractError
-from .models import ValidatedResourceArtifact
+from .models import AdmittedCreativeDecision, ValidatedResourceArtifact
 from .registry import ResourceContractRegistry
 
 
@@ -321,8 +321,8 @@ def _decision_binding(value):
 
 def validate_canon_snapshot(value, *, decisions, registry=None):
     value = _validate(value, "canon_snapshot/1", registry)
-    if not decisions or not all(isinstance(item, ValidatedResourceArtifact) for item in decisions):
-        raise ResourceContractError("canon snapshot requires validated decision revisions")
+    if not decisions or not all(isinstance(item, AdmittedCreativeDecision) for item in decisions):
+        raise ResourceContractError("canon snapshot requires authoritative decision revisions")
     checked = [validate_creative_decision_revision(item.to_json_value(), registry=registry)
                for item in decisions]
     if any(item.value["status"] != "accepted" for item in checked):
@@ -336,8 +336,8 @@ def validate_canon_snapshot(value, *, decisions, registry=None):
         raise ResourceContractError("canon decision scopes do not match")
     expected_decisions = sorted((_decision_binding(item.value) for item in checked),
                                 key=lambda item: (item["decision_id"], item["revision"]))
-    if len({(item["decision_id"], item["revision"]) for item in expected_decisions}) != len(expected_decisions):
-        raise ResourceContractError("canon decision revisions must be unique")
+    if len({item["decision_id"] for item in expected_decisions}) != len(expected_decisions):
+        raise ResourceContractError("canon snapshot permits only one revision per decision")
     if value["scope"] != expected_scope or value["decisions"] != expected_decisions:
         raise ResourceContractError("canon snapshot authoritative binding mismatch")
     expected_id = "canon-" + canonical_digest(canon_snapshot_identity_material(value))[:32]

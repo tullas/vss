@@ -14,7 +14,9 @@ from vss_resource_contracts import (
     ResourceContractError,
     canon_snapshot_identity_material,
     canon_snapshot_seal_material,
+    creative_decision_seal_material,
     validate_canon_snapshot,
+    validate_creative_decision_revision,
 )
 
 
@@ -137,16 +139,25 @@ class MovieCanonBindingTests(unittest.TestCase):
         with self.assertRaisesRegex(ResourceContractError, "authoritative binding mismatch"):
             validate_canon_snapshot(forged, decisions=[authoritative])
 
+        resealed = authoritative.to_json_value()
+        resealed["evidence_references"] = ["forged-evidence"]
+        resealed["decision_sha256"] = canonical_digest(creative_decision_seal_material(resealed))
+        seal_only = validate_creative_decision_revision(resealed)
+        with self.assertRaisesRegex(ResourceContractError, "authoritative"):
+            create_canon_snapshot(decisions=[seal_only], snapshot_version=1)
+
     def test_missing_duplicate_or_altered_bindings_fail(self):
         item = revision(self.prepared, self.decision)
         with self.assertRaisesRegex(ResourceContractError, "requires a decision"):
             create_canon_snapshot(decisions=[], snapshot_version=1)
         with self.assertRaises(ResourceContractError):
             create_canon_snapshot(decisions=[item, item], snapshot_version=1)
+        newer = revision(self.prepared, self.decision, revision=2, previous_revision=item)
+        with self.assertRaisesRegex(ResourceContractError, "one revision"):
+            create_canon_snapshot(decisions=[item, newer], snapshot_version=2)
         value = item.to_json_value()
         value["semantic_payload"]["option_content_digest"] = "f" * 64
         with self.assertRaisesRegex(ResourceContractError, "seal mismatch"):
-            from vss_resource_contracts import validate_creative_decision_revision
             validate_creative_decision_revision(value)
 
 
