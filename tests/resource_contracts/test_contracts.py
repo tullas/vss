@@ -36,11 +36,11 @@ class ResourceContractTests(unittest.TestCase):
         second = ResourceContractRegistry.built_in()
         self.assertEqual(first.digest, second.digest)
         self.assertEqual(
-            "9e88806d679c218c3ffaffd3055b4d3ebd9650458777245b2934e89e5b875a60",  # pragma: allowlist secret
+            "f2415f0c680ea154247821db68757f933bc47cfa0d4dd4a5fc5708bca82efa16",  # pragma: allowlist secret
             BUILT_IN_REGISTRY_SHA256,
         )
         self.assertEqual(BUILT_IN_REGISTRY_SHA256, first.digest)
-        self.assertEqual(5, len(first.registrations))
+        self.assertEqual(8, len(first.registrations))
         for invalid in ("reusable_asset/latest", "resource_resolution_request/latest",
                         "reusable_asset/*", "unknown/1"):
             with self.assertRaises(ResourceContractError):

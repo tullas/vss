@@ -257,3 +257,122 @@ def validate_resource_resolution_result(value, *, request, source_artifact, admi
     if value != expected:
         raise ResourceContractError("resource resolution authoritative binding mismatch")
     return ValidatedResourceArtifact._create(value)
+
+
+def creative_decision_identity_material(value):
+    return {"decision_kind": value["decision_kind"], "scope": value["scope"]}
+
+
+def creative_decision_seal_material(value):
+    return {**value, "decision_sha256": "0" * 64}
+
+
+def canon_snapshot_identity_material(value):
+    return {"snapshot_version": value["snapshot_version"], "scope": value["scope"],
+            "decisions": value["decisions"]}
+
+
+def canon_snapshot_seal_material(value):
+    return {**value, "canon_sha256": "0" * 64}
+
+
+def production_canon_binding_identity_material(value):
+    return {"operation_identity": value["operation_identity"],
+            "operation_version": value["operation_version"], "scope": value["scope"],
+            "purpose": value["purpose"], "canon_snapshot": value["canon_snapshot"],
+            "decisions": value["decisions"], "production_input": value["production_input"]}
+
+
+def production_canon_binding_seal_material(value):
+    return {**value, "result_sha256": "0" * 64}
+
+
+def validate_creative_decision_revision(value, *, registry=None):
+    value = _validate(value, "creative_decision_revision/1", registry)
+    expected_id = "decision-" + canonical_digest(creative_decision_identity_material(value))[:32]
+    if value["decision_id"] != expected_id:
+        raise ResourceContractError("creative decision identity mismatch")
+    prior = value["previous_revision"]
+    if value["revision"] == 1 and prior is not None:
+        raise ResourceContractError("first creative decision revision cannot have a predecessor")
+    if value["revision"] > 1 and (prior is None
+            or prior["decision_id"] != value["decision_id"]
+            or prior["revision"] != value["revision"] - 1):
+        raise ResourceContractError("creative decision revision predecessor mismatch")
+    outcome = value["semantic_payload"]["review_outcome"]
+    if ((value["status"] == "accepted" and outcome != "accept")
+            or (value["status"] == "rejected" and outcome not in ("reject", "defer"))
+            or (value["status"] in ("deprecated", "superseded") and outcome != "accept")):
+        raise ResourceContractError("creative decision status is not authoritative")
+    if value["dependencies"] != sorted(value["dependencies"], key=lambda item: item["kind"]):
+        raise ResourceContractError("creative decision dependencies are not canonical")
+    if value["evidence_references"] != sorted(value["evidence_references"]):
+        raise ResourceContractError("creative decision evidence is not canonical")
+    if value["decision_sha256"] != canonical_digest(creative_decision_seal_material(value)):
+        raise ResourceContractError("creative decision seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def _decision_binding(value):
+    return {"decision_id": value["decision_id"], "revision": value["revision"],
+            "decision_sha256": value["decision_sha256"], "status": value["status"],
+            "scene_id": value["scope"]["scene_id"]}
+
+
+def validate_canon_snapshot(value, *, decisions, registry=None):
+    value = _validate(value, "canon_snapshot/1", registry)
+    if not decisions or not all(isinstance(item, ValidatedResourceArtifact) for item in decisions):
+        raise ResourceContractError("canon snapshot requires validated decision revisions")
+    checked = [validate_creative_decision_revision(item.to_json_value(), registry=registry)
+               for item in decisions]
+    if any(item.value["status"] != "accepted" for item in checked):
+        raise ResourceContractError("canon snapshot requires accepted decision revisions")
+    scopes = [item.value["scope"] for item in checked]
+    expected_scope = {key: scopes[0][key] for key in ("tenant_id", "universe_id", "production_id")}
+    expected_scope["scope_kind"] = "production"
+    if any({key: scope[key] for key in ("tenant_id", "universe_id", "production_id")}
+           != {key: scopes[0][key] for key in ("tenant_id", "universe_id", "production_id")}
+           for scope in scopes):
+        raise ResourceContractError("canon decision scopes do not match")
+    expected_decisions = sorted((_decision_binding(item.value) for item in checked),
+                                key=lambda item: (item["decision_id"], item["revision"]))
+    if len({(item["decision_id"], item["revision"]) for item in expected_decisions}) != len(expected_decisions):
+        raise ResourceContractError("canon decision revisions must be unique")
+    if value["scope"] != expected_scope or value["decisions"] != expected_decisions:
+        raise ResourceContractError("canon snapshot authoritative binding mismatch")
+    expected_id = "canon-" + canonical_digest(canon_snapshot_identity_material(value))[:32]
+    if value["canon_snapshot_id"] != expected_id:
+        raise ResourceContractError("canon snapshot identity mismatch")
+    if value["canon_sha256"] != canonical_digest(canon_snapshot_seal_material(value)):
+        raise ResourceContractError("canon snapshot seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_production_canon_binding(value, *, canon_snapshot, decisions,
+                                      production_input, scope, registry=None):
+    value = _validate(value, "production_canon_binding/1", registry)
+    checked_canon = validate_canon_snapshot(
+        canon_snapshot.to_json_value(), decisions=decisions, registry=registry)
+    expected_decisions = thaw_json(checked_canon.value["decisions"])
+    expected = {
+        "schema_version": "1", "contract_identity": "production_canon_binding",
+        "contract_version": "1", "binding_id": "production-canon-binding-" + "0" * 32,
+        "operation_identity": "bind_scene_shot_plan_input_to_exact_canon",
+        "operation_version": "1", "scope": scope, "purpose": "scene_shot_plan_input",
+        "canon_snapshot": {key: checked_canon.value[key] for key in (
+            "canon_snapshot_id", "snapshot_version", "canon_sha256")},
+        "decisions": expected_decisions, "production_input": production_input,
+        "limitations": ["inert_production_input_binding", "not_production_approval",
+                        "not_runtime_authority", "not_provider_authority",
+                        "not_workflow_authority", "not_scheduling_authority",
+                        "not_regeneration_authority", "not_publication_authority",
+                        "no_storage_authority", "not_rights_authority",
+                        "exact_canon_and_decision_revisions_only"],
+        "result_sha256": "0" * 64,
+    }
+    expected["binding_id"] = "production-canon-binding-" + canonical_digest(
+        production_canon_binding_identity_material(expected))[:32]
+    expected["result_sha256"] = canonical_digest(production_canon_binding_seal_material(expected))
+    if value != expected:
+        raise ResourceContractError("production canon authoritative binding mismatch")
+    return ValidatedResourceArtifact._create(value)

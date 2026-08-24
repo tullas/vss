@@ -86,6 +86,21 @@ def finish_demo(prepared: DemoPrepared, *, option_id: str, reviewer_id: str,
         request_id=f"{correlation_id}-decision", correlation_id=correlation_id,
         environment="development",
     )
+    from vss_movie_canon import (
+        bind_production_input_to_canon,
+        create_canon_snapshot,
+        create_creative_decision_revision,
+    )
+    creative_decision = create_creative_decision_revision(
+        decision, prepared.review_packet, prepared.option_set, prepared.scene_breakdown,
+        tenant_id="tenant-local", universe_id="universe-local",
+    )
+    canon_snapshot = create_canon_snapshot(decisions=[creative_decision], snapshot_version=1)
+    canon_binding = bind_production_input_to_canon(
+        decision, prepared.review_packet, prepared.option_set, prepared.scene_breakdown,
+        tenant_id="tenant-local", universe_id="universe-local",
+        decisions=[creative_decision], canon_snapshot=canon_snapshot,
+    )
     draft = ReasoningGateway.built_in().execute_scene_shot_plan_draft(
         decision, prepared.review_packet, prepared.option_set, prepared.scene_breakdown,
         request_id=f"{correlation_id}-shot-plan", environment="development",
@@ -97,6 +112,9 @@ def finish_demo(prepared: DemoPrepared, *, option_id: str, reviewer_id: str,
         "scene_production_option_set": prepared.option_set,
         "review_packet": prepared.review_packet,
         "review_decision": decision,
+        "creative_decision_revision": creative_decision.to_json_value(),
+        "canon_snapshot": canon_snapshot.to_json_value(),
+        "production_canon_binding": canon_binding.to_json_value(),
         "scene_shot_plan_draft": draft,
     }
     if include_storyboard:
