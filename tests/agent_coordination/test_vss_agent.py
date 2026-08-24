@@ -262,6 +262,58 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertIn("vss-agent-checkpoint:v1", state.read_text(encoding="utf-8"))
         self.assertIn("vss-agent-checkpoint:v1", local.stdout)
 
+    def test_post_ignores_quoted_or_substring_checkpoint_markers(self) -> None:
+        canonical = self.agent(
+            "checkpoint", "--target", "pr:123", "--type", "implementation",
+            "--base", self.base, "--summary", "Ready.",
+        ).stdout.rstrip("\n")
+        marker = canonical.partition("\n")[0]
+        for existing in (f"> {marker}\nquoted checkpoint", f"prefix {marker} suffix"):
+            with self.subTest(existing=existing):
+                environment, state, log = self._fake_gh_environment()
+                state.write_text(json.dumps([{"body": existing}]), encoding="utf-8")
+                result = self.agent(
+                    "checkpoint", "--target", "pr:123", "--type", "implementation",
+                    "--base", self.base, "--summary", "Ready.", "--post", environment=environment,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["status"], "posted")
+                calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+                self.assertEqual(sum("POST" in call for call in calls), 1)
+
+    def test_post_rejects_malformed_envelope_with_copied_digest(self) -> None:
+        environment, state, log = self._fake_gh_environment()
+        canonical = self.agent(
+            "checkpoint", "--target", "pr:123", "--type", "implementation",
+            "--base", self.base, "--summary", "Ready.",
+        ).stdout.rstrip("\n")
+        marker = canonical.partition("\n")[0]
+        state.write_text(json.dumps([{"body": f"{marker}\nmalformed"}]), encoding="utf-8")
+        result = self.agent(
+            "checkpoint", "--target", "pr:123", "--type", "implementation",
+            "--base", self.base, "--summary", "Ready.", "--post", environment=environment,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, "vss-agent: checkpoint envelope is malformed\n")
+        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(sum("POST" in call for call in calls), 0)
+
+    def test_post_accepts_only_exact_valid_duplicate(self) -> None:
+        environment, state, log = self._fake_gh_environment()
+        canonical = self.agent(
+            "checkpoint", "--target", "pr:123", "--type", "implementation",
+            "--base", self.base, "--summary", "Ready.",
+        ).stdout.rstrip("\n")
+        state.write_text(json.dumps([{"body": canonical}]), encoding="utf-8")
+        result = self.agent(
+            "checkpoint", "--target", "pr:123", "--type", "implementation",
+            "--base", self.base, "--summary", "Ready.", "--post", environment=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "already_posted")
+        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(sum("POST" in call for call in calls), 0)
+
     def test_post_rejects_issue_pull_request_kind_mismatch_before_comment_write(self) -> None:
         environment, _, log = self._fake_gh_environment()
         result = self.agent(

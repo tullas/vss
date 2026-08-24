@@ -375,7 +375,11 @@ def post(payload: dict[str, Any], comment: str) -> None:
         for item in page:
             if type(item) is not dict or type(item.get("body")) is not str:
                 fail("GitHub comment is malformed")
-            if marker in item["body"]:
+            body = item["body"]
+            if not body.startswith(marker):
+                continue
+            existing, existing_digest = parse_document(body)
+            if existing_digest is not None and render(existing) == comment:
                 print(json.dumps({"status": "already_posted", "sha256": marker[len(MARKER_PREFIX):-4]}, sort_keys=True, separators=(",", ":")))
                 return
     run(["gh", "api", "--method", "POST", endpoint, "-f", f"body={comment}"])
