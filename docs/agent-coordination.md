@@ -87,6 +87,57 @@ scripts/vss-agent validate --input checkpoint.txt --require-current-head
 Malformed, oversized, secret-looking, ambiguous, stale, detached-HEAD, unsupported-origin, or
 unexpected-dirty states fail closed with bounded diagnostics.
 
+## Harness v2 routing and validation
+
+`config/agent-harness-v2.json` is the strict repository-owned navigation and impact map. It contains
+closed domain IDs, authoritative documentation/code/test paths, ordered exact-or-prefix impact
+rules, and validation profiles expressed only as fixed argument vectors. It is configuration, not
+executable authority: callers cannot supply commands, shell expressions, imports, or fallback
+profiles.
+
+Route a disposable session to paths without reading source contents:
+
+```bash
+scripts/vss-agent context --domain agent-coordination --domain security
+```
+
+Plan the current change against an explicit ancestor:
+
+```bash
+scripts/vss-agent impact --base <base-sha>
+```
+
+The plan deterministically unions every matching rule. Validation levels are `L0` for bounded
+syntax/schema/diff checks, `L1` for direct domain tests, `L2` for declared architecture/security
+dependencies, and `L3` for the canonical `scripts/validate-change.sh` repository gate. Lower levels
+speed up inner-loop work; L3 is always required for merge readiness. Unknown paths and changes to
+the map, helper, schemas, CI, or validation machinery fail closed to at least `shared` risk and L3.
+
+Risks are closed and ordered: `docs`, `isolated`, `shared`, `external-effect`, and
+`paid-authority`. Risk can only increase required validation, review, or human gates. It never
+authorizes Runtime, providers, payment, merge, or push. Existing explicit Runtime/provider
+authorization remains mandatory.
+
+Run the selected fixed profiles and write compact proof-carrying evidence:
+
+```bash
+scripts/vss-agent validate-change --base <base-sha> --level L3 --output /tmp/evidence.json
+scripts/vss-agent evidence --input /tmp/evidence.json --require-current-change
+```
+
+Successful evidence contains no command logs. It binds the repository, branch, base and HEAD SHA,
+canonical map digest, exact tracked diff plus bounded untracked-content identity, selected plan,
+fixed profile IDs, and pass results. Any HEAD, map, or worktree change makes it stale. Unexpected
+`.local/**`, sensitive-looking, or unclassified paths are not silently omitted; only
+`.local/secrets/development.auto.tfvars.example` retains its narrow protected-residue exception.
+Failure output is bounded and written only as diagnostic material.
+Evidence output paths must be absolute and outside the repository so writing evidence cannot make
+the evidence stale or turn a local artifact into repository authority.
+
+A reset session reconstructs state from the GitHub issue or PR, `AGENTS.md`, requested domain IDs,
+router output, and the latest fresh checkpoint/evidence digest. Hidden agent memory and local
+evidence files are never authoritative.
+
 ## Short handoff workflow
 
 1. Human or ChatGPT creates the milestone issue: `Work issue #N`.

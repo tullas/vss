@@ -34,6 +34,15 @@ validate_changed_secrets() {
 
 declare -a test_directories=()
 focused_validation=false
+validation_level=L3
+if (( $# > 0 )) && [[ $1 == --level ]]; then
+    if (( $# != 2 )) || [[ $2 != L0 ]]; then
+        printf 'Supported explicit validation level: L0\n' >&2
+        exit 2
+    fi
+    validation_level=$2
+    shift 2
+fi
 if (( $# > 0 )); then
     focused_validation=true
     for directory in "$@"; do
@@ -63,6 +72,10 @@ run_stage "shell syntax" bash -c \
 run_stage "changed-file secret scan" validate_changed_secrets
 run_stage "ADR validation" ./scripts/validate_adr.sh
 run_stage "supply-chain and workflow validation" python3 scripts/security/validate-supply-chain.py
+
+if [[ $validation_level == L0 ]]; then
+    exit 0
+fi
 
 for directory in "${test_directories[@]}"; do
     run_stage "unittest discovery: $directory" \

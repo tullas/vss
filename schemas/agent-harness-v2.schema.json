@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/agent-harness-v2.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "domains", "profiles", "impact_rules", "authority"],
+  "properties": {
+    "schema_version": {"const": "2"},
+    "domains": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/domain"}},
+    "profiles": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/profile"}},
+    "impact_rules": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/$defs/rule"}},
+    "authority": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runtime_execution", "provider_execution", "merge", "push"],
+      "properties": {"runtime_execution": {"const": false}, "provider_execution": {"const": false}, "merge": {"const": false}, "push": {"const": false}}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\x00-\\x1f\\x7f]+$"},
+    "paths": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
+    "level": {"enum": ["L0", "L1", "L2", "L3"]},
+    "risk": {"enum": ["docs", "isolated", "shared", "external-effect", "paid-authority"]},
+    "domain": {
+      "type": "object", "additionalProperties": false, "required": ["id", "docs", "code", "tests"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "docs": {"$ref": "#/$defs/paths"}, "code": {"$ref": "#/$defs/paths"}, "tests": {"$ref": "#/$defs/paths"}}
+    },
+    "profile": {
+      "type": "object", "additionalProperties": false, "required": ["id", "level", "argv"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "level": {"$ref": "#/$defs/level"}, "argv": {"oneOf": [
+        {"const": ["./scripts/validate-change.sh"]},
+        {"const": ["./scripts/validate-change.sh", "--level", "L0"]},
+        {"type": "array", "minItems": 8, "maxItems": 8, "prefixItems": [
+          {"const": "python"}, {"const": "-m"}, {"const": "unittest"}, {"const": "discover"},
+          {"const": "-s"}, {"type": "string", "pattern": "^tests/[A-Za-z0-9_/-]+$", "maxLength": 240},
+          {"const": "-p"}, {"const": "test_*.py"}
+        ], "items": false}
+      ]}}
+    },
+    "rule": {
+      "type": "object", "additionalProperties": false, "required": ["pattern", "domain", "minimum_level", "risk", "profiles"],
+      "properties": {"pattern": {"type": "string", "minLength": 1, "maxLength": 243}, "domain": {"$ref": "#/$defs/id"}, "minimum_level": {"$ref": "#/$defs/level"}, "risk": {"$ref": "#/$defs/risk"}, "profiles": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}
+    }
+  }
+}

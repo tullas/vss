@@ -34,6 +34,15 @@ operators/agents.
   injection, capability escalation or autonomous risk acceptance. Mitigation:
   argv execution, schemas, timeouts, explicit capability authorization,
   independent approval and deny-by-default future plugin admission.
+- Repository-owned agent harness map to local routing, impact selection, and
+  validation evidence. Abuse: path/rule ambiguity, validation downgrade,
+  executable configuration, stale evidence reuse, sensitive-path omission, or
+  evidence interpreted as execution authority. Mitigation: strict closed maps
+  and evidence, exact-or-prefix rules, fixed argv without a shell, highest-risk
+  union, unknown/shared-critical escalation to L3, HEAD/map/change digests,
+  narrow protected residue, bounded failure-only logs, constant-false authority,
+  and canonical L3 merge readiness. Reviewed repository code and configuration
+  remain trusted; evidence is integrity metadata, not a signature or approval.
 - Repository-controlled capability manifest to the M2.1 Runtime Kernel and
   built-in handler. Abuse: unsafe YAML construction, malformed or substituted
   manifests, path/symlink escape, arbitrary module import, permission
