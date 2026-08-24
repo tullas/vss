@@ -29,8 +29,10 @@ FILES = MappingProxyType({
     "dependency_impact_result/1": "dependency-impact-result-v1.schema.json",
     "media_provenance_request/1": "media-provenance-request-v1.schema.json",
     "media_provenance_view/1": "media-provenance-view-v1.schema.json",
+    "rights_eligibility_reassessment_request/1": "rights-eligibility-reassessment-request-v1.schema.json",
+    "rights_eligibility_reassessment_result/1": "rights-eligibility-reassessment-result-v1.schema.json",
 })
-BUILT_IN_REGISTRY_SHA256 = "13e9037cbab7e685c02ab8eaf620d0547d6b931d39b47b5758cba3aeb28d7a66"  # pragma: allowlist secret
+BUILT_IN_REGISTRY_SHA256 = "fdb3dbb9e9af22ff2a0b5aed7b2af3b1fea0d17fa0fccc888a9bab948d5a9d39"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 
