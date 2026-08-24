@@ -55,3 +55,26 @@ class PictorialFrameRequest:
 
 class PictorialFrameProvider(Protocol):
     def generate(self, request: PictorialFrameRequest) -> GeneratedMedia: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ControlledFrameRequest:
+    prompt: str
+    request_sha256: str
+    provider_request_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class ControlledFrameResult:
+    media: GeneratedMedia
+    latency_ms: int
+    usage: Mapping[str, int]
+    estimated_cost_usd: str
+    response_sha256: str
+    provider_created: int | None
+    request_id: str | None
+    content_credentials_present: bool
+
+
+class ControlledFrameProvider(Protocol):
+    def generate(self, request: ControlledFrameRequest, *, credential: str, transport: Any = None) -> ControlledFrameResult: ...

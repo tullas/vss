@@ -24,6 +24,8 @@ class RuntimePolicy:
         allowed_builtin_permissions: Iterable[str] = (),
         allowed_provider_identities: Iterable[str] = (),
         allowed_capability_permissions: Mapping[str, Iterable[str]] | None = None,
+        external_effects_killed: bool = False,
+        controlled_media_killed: bool = False,
     ) -> None:
         allowed = frozenset(allowed_builtin_permissions)
         if not allowed.issubset(KNOWN_PERMISSION_CATEGORIES):
@@ -34,6 +36,10 @@ class RuntimePolicy:
             identity: frozenset(permissions)
             for identity, permissions in (allowed_capability_permissions or {}).items()
         }
+        if type(external_effects_killed) is not bool or type(controlled_media_killed) is not bool:
+            raise ValueError("runtime kill switch state is invalid")
+        self.external_effects_killed = external_effects_killed
+        self.controlled_media_killed = controlled_media_killed
         if any(
             not permissions.issubset(KNOWN_PERMISSION_CATEGORIES)
             for permissions in self.allowed_capability_permissions.values()
@@ -63,3 +69,7 @@ class RuntimePolicy:
         if denied:
             raise ProviderAccessDenied(f"provider access denied: {sorted(denied)[0]}")
         return tuple(sorted(requested))
+
+    def authorize_controlled_media(self) -> None:
+        if self.external_effects_killed or self.controlled_media_killed:
+            raise PermissionDenied("controlled media execution is disabled")

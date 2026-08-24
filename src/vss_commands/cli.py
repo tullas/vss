@@ -178,6 +178,19 @@ def _parser() -> argparse.ArgumentParser:
     smoke_3_mode = movie_smoke_3.add_mutually_exclusive_group(required=True)
     smoke_3_mode.add_argument("--preflight", dest="smoke_mode", action="store_const", const="preflight")
     smoke_3_mode.add_argument("--generate", dest="smoke_mode", action="store_const", const="generate")
+    movie_controlled = movie_actions.add_parser("controlled-review-frame")
+    for flag in ("story", "decision", "review-packet", "option-set", "scene-breakdown",
+                 "creative-decision", "canon-snapshot", "canon-binding", "shot-plan", "storyboard"):
+        movie_controlled.add_argument(f"--{flag}", type=Path, required=True)
+    movie_controlled.add_argument("--frame-id", required=True)
+    movie_controlled.add_argument("--environment", required=True)
+    movie_controlled.add_argument("--correlation-id", required=True)
+    controlled_mode = movie_controlled.add_mutually_exclusive_group(required=True)
+    controlled_mode.add_argument("--preflight", dest="controlled_mode", action="store_const", const="preflight")
+    controlled_mode.add_argument("--approve", dest="controlled_mode", action="store_const", const="approve")
+    controlled_mode.add_argument("--generate", dest="controlled_mode", action="store_const", const="generate")
+    movie_controlled.add_argument("--approval", type=Path)
+    movie_controlled.add_argument("--recorded-by")
     for action in ("context-assemble-character-continuity", "analyze-character-continuity"):
         continuity = movie_actions.add_parser(action)
         continuity.add_argument("--input", type=Path, required=True)
@@ -401,6 +414,28 @@ def main(argv: list[str] | None = None) -> int:
                     "reviewer_id": args.reviewer_id, "outcome": args.outcome, "rationale": args.rationale,
                     "deferred_review_conditions": args.deferred_condition, "request_id": args.request_id,
                 }
+        elif args.movie_action == "controlled-review-frame":
+            names = ("story", "decision", "review_packet", "option_set", "scene_breakdown",
+                     "creative_decision", "canon_snapshot", "canon_binding", "shot_plan", "storyboard")
+            values = {}
+            input_error = None
+            for name in names:
+                value, value_error = _read_context_file(getattr(args, name))
+                input_error = input_error or value_error
+                values[name] = value
+            approval = None
+            if args.controlled_mode == "generate":
+                if args.approval is None:
+                    input_error = ExitCode.INVALID_INPUT
+                else:
+                    approval, approval_error = _read_context_file(args.approval)
+                    input_error = input_error or approval_error
+            if args.controlled_mode == "approve" and not args.recorded_by:
+                input_error = ExitCode.INVALID_INPUT
+            if input_error is None:
+                input_data = {**values, "frame_id": args.frame_id, "mode": args.controlled_mode}
+                if approval is not None: input_data["approval"] = approval
+                if args.controlled_mode == "approve": input_data["recorded_by"] = args.recorded_by
         elif args.movie_action in {"create-shot-plan-draft", "create-storyboard-specification", "render-storyboard", "generate-pictorial-frame", "m8-3-real-provider-smoke-2", "m8-3-real-provider-smoke-3"}:
             decision, input_error = _read_context_file(args.decision)
             packet, packet_error = _read_context_file(args.review_packet)
@@ -427,7 +462,7 @@ def main(argv: list[str] | None = None) -> int:
             input_data, input_error = _read_continuity_bundle(args.input)
         else:
             request, input_error = _read_context_file(args.request)
-        if args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity", "prepare-option-review", "record-option-review-decision", "create-shot-plan-draft", "create-storyboard-specification", "render-storyboard", "generate-pictorial-frame", "m8-3-real-provider-smoke-2", "m8-3-real-provider-smoke-3"}:
+        if args.movie_action in {"context-assemble-character-continuity", "analyze-character-continuity", "prepare-option-review", "record-option-review-decision", "create-shot-plan-draft", "create-storyboard-specification", "render-storyboard", "generate-pictorial-frame", "m8-3-real-provider-smoke-2", "m8-3-real-provider-smoke-3", "controlled-review-frame"}:
             pass
         elif args.movie_action in {"break-down-scenes","generate-scene-production-options"}:
             context, context_error = _read_context_file(args.context)
@@ -491,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.action == "context":
         command_name = f"context.{args.context_action}"
     elif args.action == "movie":
-        command_name = {"break-down-scenes":"movie.break-down-scenes","context-assemble-scene-breakdown":"movie.context-assemble-scene-breakdown","context-assemble-scene-production-options":"movie.context-assemble-scene-production-options","generate-scene-production-options":"movie.generate-scene-production-options","prepare-option-review":"movie.prepare-option-review","record-option-review-decision":"movie.record-option-review-decision","create-shot-plan-draft":"movie.create-shot-plan-draft","create-storyboard-specification":"movie.create-storyboard-specification","render-storyboard":"movie.render-storyboard","generate-pictorial-frame":"movie.generate-pictorial-frame","m8-3-real-provider-smoke-2":"movie.m8-3-real-provider-smoke-2","m8-3-real-provider-smoke-3":"movie.m8-3-real-provider-smoke-3","context-assemble-character-continuity":"movie.context-assemble-character-continuity","analyze-character-continuity":"movie.analyze-character-continuity"}[args.movie_action]
+        command_name = {"break-down-scenes":"movie.break-down-scenes","context-assemble-scene-breakdown":"movie.context-assemble-scene-breakdown","context-assemble-scene-production-options":"movie.context-assemble-scene-production-options","generate-scene-production-options":"movie.generate-scene-production-options","prepare-option-review":"movie.prepare-option-review","record-option-review-decision":"movie.record-option-review-decision","create-shot-plan-draft":"movie.create-shot-plan-draft","create-storyboard-specification":"movie.create-storyboard-specification","render-storyboard":"movie.render-storyboard","generate-pictorial-frame":"movie.generate-pictorial-frame","m8-3-real-provider-smoke-2":"movie.m8-3-real-provider-smoke-2","m8-3-real-provider-smoke-3":"movie.m8-3-real-provider-smoke-3","controlled-review-frame":"movie.controlled-review-frame","context-assemble-character-continuity":"movie.context-assemble-character-continuity","analyze-character-continuity":"movie.analyze-character-continuity"}[args.movie_action]
     else:
         command_name = f"{args.action}.{getattr(args, f'{args.action}_action')}"
     if args.action == "secrets" and args.secrets_action == "init":  # pragma: allowlist secret
@@ -503,6 +538,8 @@ def main(argv: list[str] | None = None) -> int:
     dry_run = getattr(args, "dry_run", False)
     if args.action == "movie" and args.movie_action == "m8-3-real-provider-smoke-3":
         dry_run = args.smoke_mode == "preflight"
+    if args.action == "movie" and args.movie_action == "controlled-review-frame":
+        dry_run = args.controlled_mode == "preflight"
     response, exit_code = CommandRunner().run(
         command_name,
         args.environment,

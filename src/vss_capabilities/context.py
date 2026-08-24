@@ -11,6 +11,7 @@ class ProviderAccessor(Protocol):
     def get_clock(self) -> ClockProvider: ...
     def get_storyboard_renderer(self) -> Any: ...
     def get_pictorial_frame_generator(self) -> Any: ...
+    def get_controlled_frame_generator(self) -> Any: ...
 
 
 class HostInspectionAccessor(Protocol):
@@ -32,6 +33,10 @@ class CreativeSmokeAccessor(Protocol):
 
 class CreativeSmokeArtifactPublisherAccessor(Protocol):
     def stage(self, admitted: Any, result: Any, attempt_id: str) -> Mapping[str, str]: ...
+
+
+class ControlledGenerationArtifactPublisherAccessor(Protocol):
+    def stage(self, result: Any) -> Mapping[str, str]: ...
 
 
 def _freeze(value: Any) -> Any:
@@ -62,6 +67,7 @@ class CapabilityExecutionContext:
     pictorial_artifact_publisher: PictorialArtifactPublisherAccessor | None = None
     creative_smoke_access: CreativeSmokeAccessor | None = None
     creative_smoke_artifact_publisher: CreativeSmokeArtifactPublisherAccessor | None = None
+    controlled_generation_artifact_publisher: ControlledGenerationArtifactPublisherAccessor | None = None
     admitted_request: object | None = None
 
     def __post_init__(self) -> None:
