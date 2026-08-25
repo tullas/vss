@@ -122,3 +122,9 @@ and data policy are part of the authoritative request and approval. There is no
 alias, fallback, retry, provider choice, or provider enumeration. This does not
 open the local `storyboard_image_generation` contract or create a general vendor
 catalog. See `docs/movie-controlled-generation.md`.
+
+The provider's version-1.1 output boundary independently reconstructs a bounded
+opaque PNG `caBX` summary from returned bytes. It preserves the complete PNG and
+records metadata presence without parsing, verifying, trusting, or converting
+an external provenance claim into VSS authority. A separate sealed terminal
+attempt outcome records sanitized evidence even when no candidate is admitted.

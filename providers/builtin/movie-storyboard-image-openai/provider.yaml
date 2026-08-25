@@ -2,9 +2,9 @@ schema_version: "1"
 provider_api_version: "1"
 provider_type: controlled_storyboard_image_generation
 name: openai
-version: 1.0.0
+version: 1.1.0
 identity: movie.storyboard-image.openai
 implementation: implementation.py:create_provider
-implementation_identity: vss.openai-gpt-image-2
+implementation_identity: vss.openai-gpt-image-2-opaque-cabx
 lifecycle_status: active
 source: trusted_builtin

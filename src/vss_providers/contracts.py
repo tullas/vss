@@ -73,7 +73,7 @@ class ControlledFrameResult:
     response_sha256: str
     provider_created: int | None
     request_id: str | None
-    content_credentials_present: bool
+    content_credentials: Mapping[str, Any]
 
 
 class ControlledFrameProvider(Protocol):

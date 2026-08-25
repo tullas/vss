@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import struct
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -17,8 +20,8 @@ from .contracts import validate_generation_request
 
 
 PROVIDER_IDENTITY = "movie.storyboard-image.openai"
-PROVIDER_VERSION = "1.0.0"
-IMPLEMENTATION_IDENTITY = "vss.openai-gpt-image-2"
+PROVIDER_VERSION = "1.1.0"
+IMPLEMENTATION_IDENTITY = "vss.openai-gpt-image-2-opaque-cabx"
 MODEL_SNAPSHOT = "gpt-image-2-2026-04-21"
 ENDPOINT = "https://api.openai.com/v1/images/generations"
 SECRET_NAME = "VSS_CONTROLLED_MEDIA_OPENAI_API_KEY"  # pragma: allowlist secret
@@ -27,6 +30,8 @@ DATA_POLICY_IDENTITY = "openai-images-generations-data-2026-08-24/1"
 MAXIMUM_COST_USD = "0.100000"
 MAXIMUM_ESTIMATED_COST_USD = "0.090000"
 MAXIMUM_OUTPUT_BYTES = 10 * 1024 * 1024
+MAXIMUM_CONTENT_CREDENTIALS_BYTES = 4 * 1024 * 1024
+OUTPUT_POLICY_IDENTITY = "vss.opaque-provider-content-credentials.png/1"
 RUNTIME_TIMEOUT_SECONDS = 150.0
 SETTINGS = MappingProxyType({
     "n": 1, "size": "1280x720", "quality": "medium", "output_format": "png",
@@ -38,6 +43,39 @@ PROMPT_PREFIX = (
     "watermarks, or control-plane text."
 )
 _ADMISSION_KEY = object()
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def content_credentials_summary(content: bytes) -> dict[str, Any]:
+    """Reconstruct bounded opaque caBX facts without parsing or trusting its payload."""
+    from vss_movie_creative_smoke.png import validate_openai_png
+
+    summary = validate_openai_png(content)
+    if not summary.content_credentials_present:
+        return {
+            "present": False, "container": "none", "chunk_count": 0, "chunk_bytes": 0,
+            "payload_sha256": None, "interpretation": "not_applicable",
+            "verification_status": "not_applicable", "trust_status": "not_applicable",
+            "grants_vss_authority": False,
+        }
+    offset = 8
+    while offset < len(content):
+        length = struct.unpack(">I", content[offset:offset + 4])[0]
+        kind = content[offset + 4:offset + 8]
+        if kind == b"caBX":
+            payload = content[offset + 8:offset + 8 + length]
+            return {
+                "present": True, "container": "png_cabx", "chunk_count": 1,
+                "chunk_bytes": length, "payload_sha256": hashlib.sha256(payload).hexdigest(),
+                "interpretation": "opaque_unparsed", "verification_status": "not_performed",
+                "trust_status": "untrusted_external", "grants_vss_authority": False,
+            }
+        offset += 12 + length
+    raise MovieContractError("validated content credentials summary is inconsistent")
 
 
 def provider_request_body(prompt: str) -> dict[str, Any]:
@@ -154,7 +192,7 @@ def admit_controlled_generation(
     provider_request_sha256 = _digest(provider_request_body(prompt))
     request = {
         "schema_version": "1", "contract_identity": "controlled_storyboard_frame_generation_request",
-        "contract_version": "1", "operation_identity": "generate_one_controlled_storyboard_review_frame",
+        "contract_version": "2", "operation_identity": "generate_one_controlled_storyboard_review_frame",
         "operation_version": "1", "environment": "development",
         "purpose": "development_storyboard_review_candidate",
         "scope": {"tenant_id": tenant_id, "universe_id": universe_id,
@@ -173,14 +211,28 @@ def admit_controlled_generation(
                         "permissions": ["external_provider_processing", "generate_development_review_media"],
                         "restrictions": [], "policy_identity": "vss.controlled-media-input-eligibility",
                         "policy_version": "1.0.0"},
+        "capability": {
+            "identity": "movie.controlled-review-frame", "version": "1.1.0",
+            "manifest_sha256": _file_sha256(
+                _REPOSITORY_ROOT / "capabilities/movie-controlled-review-frame/manifest.yaml"),
+            "handler_sha256": _file_sha256(
+                _REPOSITORY_ROOT / "capabilities/movie-controlled-review-frame/handler.py"),
+        },
         "provider": {"identity": PROVIDER_IDENTITY, "version": PROVIDER_VERSION,
                      "implementation_identity": IMPLEMENTATION_IDENTITY, "model_snapshot": MODEL_SNAPSHOT,
                      "endpoint": ENDPOINT, "method": "POST", "settings": dict(SETTINGS),
                      "price_policy_identity": PRICE_POLICY_IDENTITY, "data_policy_identity": DATA_POLICY_IDENTITY,
+                     "output_policy_identity": OUTPUT_POLICY_IDENTITY,
+                     "manifest_sha256": _file_sha256(
+                         _REPOSITORY_ROOT / "providers/builtin/movie-storyboard-image-openai/provider.yaml"),
+                     "implementation_sha256": _file_sha256(
+                         _REPOSITORY_ROOT / "providers/builtin/movie-storyboard-image-openai/implementation.py"),
                      "provider_request_sha256": provider_request_sha256},
         "projection": {"prompt": prompt, "projection_sha256": projection_sha256},
         "bounds": {"maximum_provider_attempts": 1, "maximum_images": 1,
-                   "maximum_output_bytes": MAXIMUM_OUTPUT_BYTES, "maximum_cost_usd": MAXIMUM_COST_USD},
+                   "maximum_output_bytes": MAXIMUM_OUTPUT_BYTES,
+                   "maximum_content_credentials_bytes": MAXIMUM_CONTENT_CREDENTIALS_BYTES,
+                   "maximum_cost_usd": MAXIMUM_COST_USD},
         "request_sha256": "0" * 64,
     }
     request["request_sha256"] = _digest(request)

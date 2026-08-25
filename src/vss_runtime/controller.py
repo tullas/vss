@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import subprocess
 import time
 import uuid
@@ -302,6 +303,25 @@ class RuntimeController:
                 )
                 from vss_reasoning_contracts import canonical_digest
                 import os
+                request_capability = admitted_request.request["capability"]
+                request_provider = admitted_request.request["provider"]
+                handler_filename = capability.manifest.entry_point.split(":", 1)[0]
+                try:
+                    handler_sha256 = hashlib.sha256(
+                        (capability.capability_root / handler_filename).read_bytes()).hexdigest()
+                except OSError as exc:
+                    raise RuntimeInternalFailure("controlled generation handler integrity is unavailable") from exc
+                if (request_capability != {
+                        "identity": capability.manifest.identity,
+                        "version": capability.manifest.version,
+                        "manifest_sha256": capability.manifest_sha256,
+                        "handler_sha256": handler_sha256,
+                    } or request_provider["manifest_sha256"] != controlled_registration.manifest_sha256
+                        or request_provider["implementation_sha256"] != controlled_registration.implementation_sha256
+                        or request_provider["version"] != controlled_registration.metadata.version
+                        or request_provider["implementation_identity"]
+                        != controlled_registration.metadata.implementation_identity):
+                    raise InvalidCapabilityInput("controlled generation code binding drifted")
                 authoritative_request_digest = canonical_digest(provider_request_body(admitted_request.prompt))
                 controlled_generation_artifact_publisher = ControlledGenerationArtifactPublisher(
                     self.root, admitted_request.request, admitted_request.approval,

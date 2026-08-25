@@ -125,7 +125,8 @@ class ProviderSelector:
         provider = self.registry.resolve(expected_identity)
         if requirement["api_version"] != PROVIDER_API_VERSION:
             raise ProviderIncompatible("capability requires an unsupported provider API version")
-        if provider.metadata.version != "1.0.0":
+        expected_version = "1.1.0" if requirement["type"] == CONTROLLED_FRAME_PROVIDER_TYPE else "1.0.0"
+        if provider.metadata.version != expected_version:
             raise ProviderIncompatible("selected provider version is not approved")
         if (
             provider.metadata.implementation_identity != (LOCAL_CLOCK_IMPLEMENTATION_IDENTITY if requirement["type"] == CLOCK_PROVIDER_TYPE else

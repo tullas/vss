@@ -2,6 +2,7 @@ from .access import ProviderAccess, SafeClockHandle, SafeControlledFrameHandle, 
 from .constants import CONTROLLED_FRAME_PROVIDER_IDENTITY, LOCAL_CLOCK_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, PROVIDER_API_VERSION
 from .contracts import ClockProvider, ControlledFrameProvider, ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
 from .errors import (
+    ControlledFrameProviderFailure,
     ProviderAccessDenied,
     ProviderExecutionFailure,
     ProviderFailure,
@@ -15,6 +16,7 @@ from .registry import ProviderRegistry, ProviderSelector
 __all__ = (
     "ClockProvider",
     "CONTROLLED_FRAME_PROVIDER_IDENTITY",
+    "ControlledFrameProviderFailure",
     "ControlledFrameProvider",
     "ControlledFrameRequest",
     "ControlledFrameResult",
