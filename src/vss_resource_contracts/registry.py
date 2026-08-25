@@ -32,12 +32,15 @@ FILES = MappingProxyType({
     "rights_eligibility_reassessment_request/1": "rights-eligibility-reassessment-request-v1.schema.json",
     "rights_eligibility_reassessment_result/1": "rights-eligibility-reassessment-result-v1.schema.json",
     "controlled_storyboard_frame_generation_request/1": "controlled-storyboard-frame-generation-request-v1.schema.json",
+    "controlled_storyboard_frame_generation_request/2": "controlled-storyboard-frame-generation-request-v2.schema.json",
     "controlled_media_generation_approval/1": "controlled-media-generation-approval-v1.schema.json",
     "controlled_media_generation_attempt/1": "controlled-media-generation-attempt-v1.schema.json",
+    "controlled_media_generation_attempt_outcome/1": "controlled-media-generation-attempt-outcome-v1.schema.json",
     "generated_review_candidate/1": "generated-review-candidate-v1.schema.json",
+    "generated_review_candidate/2": "generated-review-candidate-v2.schema.json",
     "generated_review_candidate_review/1": "generated-review-candidate-review-v1.schema.json",
 })
-BUILT_IN_REGISTRY_SHA256 = "81b4e2315ea878a0ac0689769c57ead719e71ea0a54671b26af91e6515b5110d"  # pragma: allowlist secret
+BUILT_IN_REGISTRY_SHA256 = "41b7435377fcb430548d349168dad65619c5bbb0759da8fa37e387bb34aebe35"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 

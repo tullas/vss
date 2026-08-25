@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 
 from .contracts import ClockProvider, ControlledFrameProvider, ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
-from .errors import ProviderAccessDenied, ProviderExecutionFailure
+from .errors import ControlledFrameProviderFailure, ProviderAccessDenied, ProviderExecutionFailure
 from .png import validate_pictorial_png
 
 UTC_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
@@ -198,7 +198,7 @@ class SafeControlledFrameHandle:
                 or result.media.media_type != "image/png" or result.media.width != 1280
                 or result.media.height != 720 or len(result.media.content) > 10 * 1024 * 1024
                 or result.media.content_sha256 != hashlib.sha256(result.media.content).hexdigest()
-                or result.content_credentials_present is not False
+                or not isinstance(result.content_credentials, Mapping)
                 or not isinstance(result.latency_ms, int) or not 0 <= result.latency_ms <= 600000
                 or not isinstance(result.estimated_cost_usd, str)
                 or not re.fullmatch(r"[0-9]+\.[0-9]{6}", result.estimated_cost_usd)
@@ -219,8 +219,27 @@ class SafeControlledFrameHandle:
                 raise ProviderExecutionFailure("controlled frame provider exceeded its cost ceiling")
         except InvalidOperation as exc:
             raise ProviderExecutionFailure("controlled frame provider returned invalid cost") from exc
-        from vss_movie_creative_smoke.png import validate_openai_png
-        summary = validate_openai_png(result.media.content)
-        if summary.content_credentials_present:
-            raise ProviderExecutionFailure("controlled frame provider output asserted untrusted credentials")
+        from vss_movie_controlled_generation import content_credentials_summary
+        reconstructed = content_credentials_summary(result.media.content)
+        if dict(result.content_credentials) != reconstructed:
+            evidence = {
+                "response": {
+                    "availability": "available", "response_sha256": result.response_sha256,
+                    "provider_created": result.provider_created, "request_id": result.request_id,
+                    "latency_ms": result.latency_ms,
+                },
+                "usage_and_cost": {
+                    "availability": "available", "input_tokens": result.usage["input_tokens"],
+                    "output_tokens": result.usage["output_tokens"], "total_tokens": result.usage["total_tokens"],
+                    "estimated_cost_usd": result.estimated_cost_usd,
+                },
+                "media": {
+                    "availability": "available", "content_sha256": result.media.content_sha256,
+                    "byte_count": len(result.media.content), "content_credentials": reconstructed,
+                },
+            }
+            raise ControlledFrameProviderFailure(
+                "controlled frame provider metadata summary disagrees with returned bytes",
+                classification="output_invalid", evidence=evidence,
+            )
         return result

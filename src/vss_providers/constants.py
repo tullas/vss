@@ -15,4 +15,4 @@ LOCAL_PICTORIAL_FRAME_IMPLEMENTATION_IDENTITY = "vss.local-deterministic-pictori
 
 CONTROLLED_FRAME_PROVIDER_TYPE = "controlled_storyboard_image_generation"
 CONTROLLED_FRAME_PROVIDER_IDENTITY = "movie.storyboard-image.openai"
-CONTROLLED_FRAME_IMPLEMENTATION_IDENTITY = "vss.openai-gpt-image-2"
+CONTROLLED_FRAME_IMPLEMENTATION_IDENTITY = "vss.openai-gpt-image-2-opaque-cabx"

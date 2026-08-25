@@ -1,7 +1,7 @@
 schema_version: "1"
 namespace: movie
 name: controlled-review-frame
-version: 1.0.0
+version: 1.1.0
 description: Runtime-governed one-frame external storyboard review candidate
 runtime_api_version: "1"
 sdk_api_version: "1"
@@ -23,7 +23,7 @@ commands:
     output_schema:
       type: object
       additionalProperties: false
-      required: [status, request_sha256, provider_call_count, attempt_reserved, artifact_root, image, candidate, review, estimated_cost_usd, authority]
+      required: [status, request_sha256, provider_call_count, attempt_reserved, artifact_root, image, candidate, review, attempt_outcome, estimated_cost_usd, authority]
       properties:
         status: {enum: [ready_for_approval, generated_awaiting_human_review]}
         request_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
@@ -33,6 +33,7 @@ commands:
         image: {type: [string, "null"], maxLength: 512}
         candidate: {type: [string, "null"], maxLength: 512}
         review: {type: [string, "null"], maxLength: 512}
+        attempt_outcome: {type: [string, "null"], maxLength: 512}
         estimated_cost_usd: {type: [string, "null"], pattern: "^[0-9]+\\.[0-9]{6}$"}
         authority:
           type: object

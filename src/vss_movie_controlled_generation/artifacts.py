@@ -13,7 +13,11 @@ from vss_reasoning_contracts.canonicalization import thaw_json
 from vss_runtime.errors import CapabilityExecutionFailure, RuntimeInternalFailure
 
 from .approval import approval_digest
-from .contracts import validate_attempt, validate_candidate, validate_empty_review, validate_generation_request
+from .contracts import (
+    validate_attempt, validate_attempt_outcome, validate_candidate_media, validate_empty_review,
+    validate_generation_request,
+)
+from .service import content_credentials_summary
 
 
 class ControlledGenerationArtifactPublisher:
@@ -28,6 +32,9 @@ class ControlledGenerationArtifactPublisher:
         self._reserved = False
         self._staged: list[tuple[Path, Path]] = []
         self._attempt: dict[str, Any] | None = None
+        self._pending_evidence: dict[str, Any] | None = None
+        self._pending_candidate_sha256: str | None = None
+        self._outcome_written = False
         self._validate_root(create=False)
 
     def _validate_root(self, *, create: bool) -> None:
@@ -126,12 +133,87 @@ class ControlledGenerationArtifactPublisher:
             raise
         return path
 
+    @staticmethod
+    def _unavailable_evidence() -> dict[str, Any]:
+        return {
+            "response": {"availability": "unavailable", "response_sha256": None,
+                         "provider_created": None, "request_id": None, "latency_ms": None},
+            "usage_and_cost": {"availability": "unavailable", "input_tokens": None,
+                               "output_tokens": None, "total_tokens": None,
+                               "estimated_cost_usd": None},
+            "media": {"availability": "unavailable", "content_sha256": None,
+                      "byte_count": None, "content_credentials": None},
+        }
+
+    def _build_outcome(self, *, terminal_status: str, classification: str,
+                       evidence: Mapping[str, Any] | None,
+                       candidate_sha256: str | None) -> dict[str, Any]:
+        if self._attempt is None or self.approval is None:
+            raise CapabilityExecutionFailure("controlled generation outcome lacks its reservation")
+        material = dict(evidence or self._unavailable_evidence())
+        outcome = {
+            "schema_version": "1", "contract_identity": "controlled_media_generation_attempt_outcome",
+            "contract_version": "1", "request_sha256": self.request["request_sha256"],
+            "approval_sha256": approval_digest(self.approval),
+            "attempt_sha256": self._attempt["attempt_sha256"],
+            "terminal_status": terminal_status, "classification": classification,
+            "provider": {
+                "identity": self.request["provider"]["identity"],
+                "version": self.request["provider"]["version"],
+                "implementation_identity": self.request["provider"]["implementation_identity"],
+                "model_snapshot": self.request["provider"]["model_snapshot"],
+            },
+            "provider_call_count": 1,
+            "response": dict(material["response"]),
+            "usage_and_cost": dict(material["usage_and_cost"]),
+            "media": dict(material["media"]),
+            "candidate_sha256": candidate_sha256,
+            "authority": {key: False for key in (
+                "production", "asset", "publication", "export", "workflow", "scheduling",
+                "provider_execution", "runtime_execution",
+            )},
+            "outcome_sha256": "0" * 64,
+        }
+        outcome["outcome_sha256"] = canonical_digest(outcome)
+        return validate_attempt_outcome(outcome)
+
+    def _record_outcome(self, outcome: dict[str, Any]) -> None:
+        if self._outcome_written:
+            return
+        destination = self.root / "attempt-outcome.json"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(destination, flags, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(self._json(outcome)); stream.flush(); os.fsync(stream.fileno())
+        except OSError as exc:
+            raise RuntimeInternalFailure("controlled generation attempt outcome failed") from exc
+        self._outcome_written = True
+
+    def record_provider_failure(self, failure: Exception) -> None:
+        classification = getattr(failure, "classification", "provider_failed")
+        if classification not in {"response_invalid", "output_invalid", "cost_exceeded", "provider_failed"}:
+            classification = "provider_failed"
+        evidence = getattr(failure, "evidence", None)
+        terminal = "output_rejected" if classification in {
+            "response_invalid", "output_invalid", "cost_exceeded",
+        } else "provider_failed"
+        self._record_outcome(self._build_outcome(
+            terminal_status=terminal, classification=classification,
+            evidence=evidence if isinstance(evidence, Mapping) else None,
+            candidate_sha256=None,
+        ))
+
     def stage(self, result: ControlledFrameResult) -> Mapping[str, str]:
-        if not self._reserved or self._attempt is None or self.approval is None or self._staged:
+        if (not self._reserved or self._attempt is None or self.approval is None
+                or self._staged or self._outcome_written):
             raise CapabilityExecutionFailure("controlled generation staging is invalid")
         scope = self.request["scope"]
+        credentials = content_credentials_summary(result.media.content)
+        if dict(result.content_credentials) != credentials:
+            raise CapabilityExecutionFailure("controlled generation metadata reconstruction mismatch")
         candidate = {
-            "schema_version": "1", "contract_identity": "generated_review_candidate", "contract_version": "1",
+            "schema_version": "1", "contract_identity": "generated_review_candidate", "contract_version": "2",
             "candidate_id": "generated-review-" + "0" * 32, "status": "development_review_quarantined",
             "request_sha256": self.request["request_sha256"], "approval_sha256": approval_digest(self.approval),
             "attempt_sha256": self._attempt["attempt_sha256"],
@@ -139,19 +221,24 @@ class ControlledGenerationArtifactPublisher:
             "scope": {key: scope[key] for key in (
                 "tenant_id", "universe_id", "production_id", "project_id", "scene_id", "frame_id",
             )},
+            "capability": dict(self.request["capability"]),
             "provider": {"identity": self.request["provider"]["identity"], "version": self.request["provider"]["version"],
+                         "implementation_identity": self.request["provider"]["implementation_identity"],
                          "model_snapshot": self.request["provider"]["model_snapshot"], "endpoint": self.request["provider"]["endpoint"],
                          "settings": dict(self.request["provider"]["settings"]),
                          "provider_request_sha256": self.request["provider"]["provider_request_sha256"],
                          "projection_sha256": self.request["projection"]["projection_sha256"],
                          "price_policy_identity": self.request["provider"]["price_policy_identity"],
-                         "data_policy_identity": self.request["provider"]["data_policy_identity"]},
+                         "data_policy_identity": self.request["provider"]["data_policy_identity"],
+                         "output_policy_identity": self.request["provider"]["output_policy_identity"],
+                         "manifest_sha256": self.request["provider"]["manifest_sha256"],
+                         "implementation_sha256": self.request["provider"]["implementation_sha256"]},
             "response": {"response_sha256": result.response_sha256, "provider_created": result.provider_created,
                          "request_id": result.request_id, "latency_ms": result.latency_ms,
                          "usage": dict(result.usage), "estimated_cost_usd": result.estimated_cost_usd},
             "media": {"content_sha256": result.media.content_sha256, "media_type": result.media.media_type,
                       "width": result.media.width, "height": result.media.height,
-                      "byte_count": len(result.media.content), "content_credentials_present": False},
+                      "byte_count": len(result.media.content), "content_credentials": credentials},
             "eligibility": {"input": "eligible_public_external_processing",
                             "output": "quarantined_development_review_only"},
             "preservation": {"policy": "disposable_local", "durable": False,
@@ -160,14 +247,15 @@ class ControlledGenerationArtifactPublisher:
                           "workflow": False, "scheduling": False, "provider_execution": False,
                           "runtime_execution": False},
             "limitations": ["development_review_media_only", "not_a_final_selection", "not_a_production_asset",
-                            "not_reproducible_pixels", "no_retention_guarantee"],
+                            "not_reproducible_pixels", "content_credentials_not_verified",
+                            "no_retention_guarantee"],
             "candidate_sha256": "0" * 64,
         }
         candidate["candidate_id"] = "generated-review-" + canonical_digest({
             key: item for key, item in candidate.items() if key not in {"candidate_id", "candidate_sha256"}
         })[:32]
         candidate["candidate_sha256"] = canonical_digest(candidate)
-        validate_candidate(candidate)
+        validate_candidate_media(candidate, result.media.content)
         review = {
             "schema_version": "1", "contract_identity": "generated_review_candidate_review", "contract_version": "1",
             "candidate_sha256": candidate["candidate_sha256"],
@@ -178,6 +266,17 @@ class ControlledGenerationArtifactPublisher:
         }
         review["review_sha256"] = canonical_digest(review)
         validate_empty_review(review)
+        evidence = {
+            "response": {"availability": "available", "response_sha256": result.response_sha256,
+                         "provider_created": result.provider_created, "request_id": result.request_id,
+                         "latency_ms": result.latency_ms},
+            "usage_and_cost": {"availability": "available", **dict(result.usage),
+                               "estimated_cost_usd": result.estimated_cost_usd},
+            "media": {"availability": "available", "content_sha256": result.media.content_sha256,
+                      "byte_count": len(result.media.content), "content_credentials": credentials},
+        }
+        self._pending_evidence = evidence
+        self._pending_candidate_sha256 = candidate["candidate_sha256"]
         self._staged = [
             (self._temporary(result.media.content), self.root / "image.png"),
             (self._temporary(self._json(review)), self.root / "review.json"),
@@ -186,15 +285,34 @@ class ControlledGenerationArtifactPublisher:
         return {"artifact_root": str(self.root.relative_to(self.repository_root)),
                 "image": str((self.root / "image.png").relative_to(self.repository_root)),
                 "candidate": str((self.root / "generated-review-candidate.json").relative_to(self.repository_root)),
-                "review": str((self.root / "review.json").relative_to(self.repository_root))}
+                "review": str((self.root / "review.json").relative_to(self.repository_root)),
+                "attempt_outcome": str((self.root / "attempt-outcome.json").relative_to(self.repository_root))}
 
     def publish(self) -> None:
+        linked: list[Path] = []
         try:
             for source, destination in self._staged:
                 os.link(source, destination, follow_symlinks=False)
                 source.unlink()
-        except OSError as exc:
-            self.abort()
+                linked.append(destination)
+            outcome = self._build_outcome(
+                terminal_status="admitted", classification="admitted",
+                evidence=self._pending_evidence,
+                candidate_sha256=self._pending_candidate_sha256,
+            )
+            self._record_outcome(outcome)
+        except (OSError, RuntimeInternalFailure) as exc:
+            for destination in reversed(linked):
+                destination.unlink(missing_ok=True)
+            self._staged = []
+            if not self._outcome_written:
+                try:
+                    self._record_outcome(self._build_outcome(
+                        terminal_status="output_rejected", classification="publication_failed",
+                        evidence=self._pending_evidence, candidate_sha256=None,
+                    ))
+                except RuntimeInternalFailure:
+                    pass
             raise RuntimeInternalFailure("controlled generation artifact publication failed") from exc
         self._staged = []
 
@@ -202,3 +320,9 @@ class ControlledGenerationArtifactPublisher:
         for source, _ in self._staged:
             source.unlink(missing_ok=True)
         self._staged = []
+        if self._reserved and not self._outcome_written:
+            self._record_outcome(self._build_outcome(
+                terminal_status="output_rejected" if self._pending_evidence is not None else "ambiguous",
+                classification="runtime_or_audit_failed" if self._pending_evidence is not None else "ambiguous",
+                evidence=self._pending_evidence, candidate_sha256=None,
+            ))

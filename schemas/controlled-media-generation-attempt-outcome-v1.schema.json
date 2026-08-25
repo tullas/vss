@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vss.resource.controlled_media_generation_attempt_outcome/1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "contract_identity", "contract_version", "request_sha256", "approval_sha256", "attempt_sha256", "terminal_status", "classification", "provider", "provider_call_count", "response", "usage_and_cost", "media", "candidate_sha256", "authority", "outcome_sha256"],
+  "properties": {
+    "schema_version": {"const": "1"}, "contract_identity": {"const": "controlled_media_generation_attempt_outcome"}, "contract_version": {"const": "1"},
+    "request_sha256": {"$ref": "#/$defs/digest"}, "approval_sha256": {"$ref": "#/$defs/digest"}, "attempt_sha256": {"$ref": "#/$defs/digest"},
+    "terminal_status": {"enum": ["admitted", "output_rejected", "provider_failed", "ambiguous"]},
+    "classification": {"enum": ["admitted", "response_invalid", "output_invalid", "cost_exceeded", "provider_failed", "runtime_or_audit_failed", "publication_failed", "ambiguous"]},
+    "provider": {"type": "object", "additionalProperties": false, "required": ["identity", "version", "implementation_identity", "model_snapshot"], "properties": {"identity": {"const": "movie.storyboard-image.openai"}, "version": {"const": "1.1.0"}, "implementation_identity": {"const": "vss.openai-gpt-image-2-opaque-cabx"}, "model_snapshot": {"const": "gpt-image-2-2026-04-21"}}},
+    "provider_call_count": {"const": 1},
+    "response": {"type": "object", "additionalProperties": false, "required": ["availability", "response_sha256", "provider_created", "request_id", "latency_ms"], "properties": {"availability": {"enum": ["available", "unavailable"]}, "response_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "provider_created": {"type": ["integer", "null"], "minimum": 0}, "request_id": {"type": ["string", "null"], "maxLength": 128}, "latency_ms": {"type": ["integer", "null"], "minimum": 0, "maximum": 600000}}},
+    "usage_and_cost": {"type": "object", "additionalProperties": false, "required": ["availability", "input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd"], "properties": {"availability": {"enum": ["available", "unavailable"]}, "input_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 10000000}, "output_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 10000000}, "total_tokens": {"type": ["integer", "null"], "minimum": 0, "maximum": 20000000}, "estimated_cost_usd": {"type": ["string", "null"], "pattern": "^[0-9]+\\.[0-9]{6}$"}}},
+    "media": {"type": "object", "additionalProperties": false, "required": ["availability", "content_sha256", "byte_count", "content_credentials"], "properties": {"availability": {"enum": ["available", "unavailable"]}, "content_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "byte_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 10485760}, "content_credentials": {"anyOf": [{"$ref": "#/$defs/contentCredentials"}, {"type": "null"}]}}},
+    "candidate_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "authority": {"type": "object", "additionalProperties": false, "required": ["production", "asset", "publication", "export", "workflow", "scheduling", "provider_execution", "runtime_execution"], "properties": {"production": {"const": false}, "asset": {"const": false}, "publication": {"const": false}, "export": {"const": false}, "workflow": {"const": false}, "scheduling": {"const": false}, "provider_execution": {"const": false}, "runtime_execution": {"const": false}}},
+    "outcome_sha256": {"$ref": "#/$defs/digest"}
+  },
+  "oneOf": [
+    {"properties": {"terminal_status": {"const": "admitted"}, "classification": {"const": "admitted"}, "candidate_sha256": {"$ref": "#/$defs/digest"}}},
+    {"properties": {"terminal_status": {"const": "output_rejected"}, "classification": {"enum": ["response_invalid", "output_invalid", "cost_exceeded", "runtime_or_audit_failed", "publication_failed"]}, "candidate_sha256": {"type": "null"}}},
+    {"properties": {"terminal_status": {"const": "provider_failed"}, "classification": {"const": "provider_failed"}, "candidate_sha256": {"type": "null"}}},
+    {"properties": {"terminal_status": {"const": "ambiguous"}, "classification": {"const": "ambiguous"}, "candidate_sha256": {"type": "null"}}}
+  ],
+  "allOf": [
+    {"if": {"properties": {"response": {"properties": {"availability": {"const": "unavailable"}}}}}, "then": {"properties": {"response": {"properties": {"response_sha256": {"type": "null"}, "provider_created": {"type": "null"}, "request_id": {"type": "null"}, "latency_ms": {"type": "null"}}}}}},
+    {"if": {"properties": {"response": {"properties": {"availability": {"const": "available"}}}}}, "then": {"properties": {"response": {"properties": {"response_sha256": {"$ref": "#/$defs/digest"}, "latency_ms": {"type": "integer"}}}}}},
+    {"if": {"properties": {"usage_and_cost": {"properties": {"availability": {"const": "unavailable"}}}}}, "then": {"properties": {"usage_and_cost": {"properties": {"input_tokens": {"type": "null"}, "output_tokens": {"type": "null"}, "total_tokens": {"type": "null"}, "estimated_cost_usd": {"type": "null"}}}}}},
+    {"if": {"properties": {"usage_and_cost": {"properties": {"availability": {"const": "available"}}}}}, "then": {"properties": {"usage_and_cost": {"properties": {"input_tokens": {"type": "integer"}, "output_tokens": {"type": "integer"}, "total_tokens": {"type": "integer"}, "estimated_cost_usd": {"type": "string"}}}}}},
+    {"if": {"properties": {"media": {"properties": {"availability": {"const": "unavailable"}}}}}, "then": {"properties": {"media": {"properties": {"content_sha256": {"type": "null"}, "byte_count": {"type": "null"}, "content_credentials": {"type": "null"}}}}}}
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "contentCredentials": {
+      "type": "object", "additionalProperties": false,
+      "required": ["present", "container", "chunk_count", "chunk_bytes", "payload_sha256", "interpretation", "verification_status", "trust_status", "grants_vss_authority"],
+      "properties": {"present": {"type": "boolean"}, "container": {"enum": ["none", "png_cabx"]}, "chunk_count": {"type": "integer", "minimum": 0, "maximum": 1}, "chunk_bytes": {"type": "integer", "minimum": 0, "maximum": 4194304}, "payload_sha256": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}, "interpretation": {"enum": ["not_applicable", "opaque_unparsed"]}, "verification_status": {"enum": ["not_applicable", "not_performed"]}, "trust_status": {"enum": ["not_applicable", "untrusted_external"]}, "grants_vss_authority": {"const": false}},
+      "oneOf": [
+        {"properties": {"present": {"const": false}, "container": {"const": "none"}, "chunk_count": {"const": 0}, "chunk_bytes": {"const": 0}, "payload_sha256": {"type": "null"}, "interpretation": {"const": "not_applicable"}, "verification_status": {"const": "not_applicable"}, "trust_status": {"const": "not_applicable"}}},
+        {"properties": {"present": {"const": true}, "container": {"const": "png_cabx"}, "chunk_count": {"const": 1}, "chunk_bytes": {"minimum": 1}, "payload_sha256": {"$ref": "#/$defs/digest"}, "interpretation": {"const": "opaque_unparsed"}, "verification_status": {"const": "not_performed"}, "trust_status": {"const": "untrusted_external"}}}
+      ]
+    }
+  }
+}

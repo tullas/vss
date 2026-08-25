@@ -37,6 +37,7 @@ class CreativeSmokeArtifactPublisherAccessor(Protocol):
 
 class ControlledGenerationArtifactPublisherAccessor(Protocol):
     def stage(self, result: Any) -> Mapping[str, str]: ...
+    def record_provider_failure(self, failure: Exception) -> None: ...
 
 
 def _freeze(value: Any) -> Any:

@@ -114,8 +114,8 @@ class ProviderAbstractionTests(unittest.TestCase):
             "type": "controlled_storyboard_image_generation",
             "identity": CONTROLLED_FRAME_PROVIDER_IDENTITY, "api_version": "1",
         })
-        self.assertEqual(registration.metadata.version, "1.0.0")
-        self.assertEqual(registration.metadata.implementation_identity, "vss.openai-gpt-image-2")
+        self.assertEqual(registration.metadata.version, "1.1.0")
+        self.assertEqual(registration.metadata.implementation_identity, "vss.openai-gpt-image-2-opaque-cabx")
         with self.assertRaises(Exception):
             ProviderSelector(registry).registration({
                 "type": "controlled_storyboard_image_generation",
