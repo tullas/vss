@@ -63,7 +63,8 @@ def response(content: bytes) -> SmokeHTTPResponse:
         "created": 42,
         "data": [{"b64_json": base64.b64encode(content).decode("ascii"), "revised_prompt": None}],
         "usage": {"input_tokens": 325, "output_tokens": 1200, "total_tokens": 1525,
-                  "input_tokens_details": {"text_tokens": 325, "image_tokens": 0}},
+                  "input_tokens_details": {"text_tokens": 325, "image_tokens": 0},
+                  "output_tokens_details": {"text_tokens": 0, "image_tokens": 1200}},
         "background": "opaque", "output_format": "png", "quality": "medium", "size": "1280x720",
     }
     return SmokeHTTPResponse(json.dumps(value).encode("utf-8"), 200, "req_m10_safe")
@@ -276,8 +277,36 @@ class M100ControlledGenerationTests(unittest.TestCase):
         def excessive_cost(value):
             value["usage"].update({"output_tokens": 4_000_000, "total_tokens": 4_000_325})
 
+        def unexpected_usage_field(value):
+            value["usage"]["unexpected"] = 0
+
+        def output_details_not_object(value):
+            value["usage"]["output_tokens_details"] = []
+
+        def output_details_missing_field(value):
+            value["usage"]["output_tokens_details"] = {"image_tokens": 1200}
+
+        def output_details_extra_field(value):
+            value["usage"]["output_tokens_details"]["unexpected"] = 0
+
+        def output_details_boolean(value):
+            value["usage"]["output_tokens_details"]["text_tokens"] = True
+
+        def output_details_negative(value):
+            value["usage"]["output_tokens_details"]["image_tokens"] = -1
+
+        def output_details_overflow(value):
+            value["usage"]["output_tokens_details"]["image_tokens"] = 10_000_001
+
         for label, mutate in (("unexpected-field", unexpected_field),
-                              ("extra-image", extra_image), ("excessive-cost", excessive_cost)):
+                              ("extra-image", extra_image), ("excessive-cost", excessive_cost),
+                              ("unexpected-usage-field", unexpected_usage_field),
+                              ("output-details-not-object", output_details_not_object),
+                              ("output-details-missing-field", output_details_missing_field),
+                              ("output-details-extra-field", output_details_extra_field),
+                              ("output-details-boolean", output_details_boolean),
+                              ("output-details-negative", output_details_negative),
+                              ("output-details-overflow", output_details_overflow)):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
                 isolated_root = Path(directory)
                 for name in ("capabilities", "providers", "schemas"):
