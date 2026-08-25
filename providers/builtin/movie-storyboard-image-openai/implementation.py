@@ -95,7 +95,8 @@ class OpenAIControlledFrameProvider:
                 )
         raw_usage = value["usage"]
         if not isinstance(raw_usage, dict) or set(raw_usage) - {
-                "input_tokens", "output_tokens", "total_tokens", "input_tokens_details"}:
+                "input_tokens", "output_tokens", "total_tokens", "input_tokens_details",
+                "output_tokens_details"}:
             raise ControlledFrameProviderFailure(
                 "controlled frame provider usage is invalid", classification="response_invalid",
                 evidence=_evidence(response, value, started),
@@ -116,6 +117,16 @@ class OpenAIControlledFrameProvider:
                 raise ControlledFrameProviderFailure(
                     "controlled frame provider usage details are invalid", classification="response_invalid",
                     evidence=_evidence(response, value, started),
+                )
+        output_details = raw_usage.get("output_tokens_details")
+        if output_details is not None:
+            if (not isinstance(output_details, dict)
+                    or set(output_details) != {"text_tokens", "image_tokens"}
+                    or any(type(item) is not int or not 0 <= item <= 10_000_000
+                           for item in output_details.values())):
+                raise ControlledFrameProviderFailure(
+                    "controlled frame provider output usage details are invalid",
+                    classification="response_invalid", evidence=_evidence(response, value, started),
                 )
         estimated = (Decimal(usage["input_tokens"]) * Decimal("5")
                      + Decimal(usage["output_tokens"]) * Decimal("30")) / Decimal(1_000_000)
