@@ -75,6 +75,16 @@ def _parser() -> argparse.ArgumentParser:
     for action in ("status", "next"):
         parser_action = milestone_actions.add_parser(action)
         parser_action.add_argument("--milestone-id")
+    milestone_transition = milestone_actions.add_parser("transition-branch")
+    milestone_transition.add_argument("--milestone-id", required=True)
+    milestone_transition.add_argument("--from-branch", required=True)
+    milestone_transition.add_argument("--to-branch", required=True)
+    milestone_transition.add_argument("--summary", required=True)
+    milestone_transition.add_argument("--expected-generation", required=True, type=int)
+    milestone_identity = milestone_actions.add_parser("recover-state-identity")
+    milestone_identity.add_argument("--milestone-id", required=True)
+    milestone_identity.add_argument("--summary", required=True)
+    milestone_identity.add_argument("--expected-generation", required=True, type=int)
     milestone_checkpoint = milestone_actions.add_parser("checkpoint")
     milestone_checkpoint.add_argument("--milestone-id")
     milestone_checkpoint.add_argument("--type", required=True, choices=("checkpointed", "repair_started", "repair_completed", "blocked", "completed"))
@@ -392,6 +402,13 @@ def main(argv: list[str] | None = None) -> int:
                 value = controller.load(args.milestone_id)
                 if args.milestone_action == "next":
                     value = {"milestone_id": value["milestone_id"], "status": value["status"], "next": value["next"], "authority": value["authority"]}
+            elif args.milestone_action == "transition-branch":
+                value = controller.transition_branch(
+                    args.milestone_id, args.from_branch, args.to_branch,
+                    args.summary, args.expected_generation)
+            elif args.milestone_action == "recover-state-identity":
+                value = controller.recover_state_identity(
+                    args.milestone_id, args.summary, args.expected_generation)
             elif args.milestone_action == "checkpoint":
                 data = {"stop_reason": args.stop_reason} if args.stop_reason else None
                 value = controller.checkpoint(args.milestone_id, args.type, args.summary, data, args.expected_generation)

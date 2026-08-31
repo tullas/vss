@@ -14,6 +14,16 @@ references, lifecycle, reviewer accountability metadata, and a canonical seal.
 least one complete group. `not_required` profiles contain no groups and preserve
 the existing generic M8/M10 semantics.
 
+M10.1 adds `production_visual_grounding_profile/2` for one bounded revision
+cycle. A human authors the complete next opaque profile; VSS never derives or
+mutates it from review evidence. The sealed revision binds the immediately prior
+same-profile revision and one sealed `REGENERATE` or `REJECT` grounding review,
+including its candidate and frame digests. The existing v3 route carries the
+revised profile digest unchanged, so every separately approved candidate binds
+the exact human-authored revision and its predecessor evidence. This adds no
+profile, prompt, approval, reservation, Runtime, provider, product, canon, or
+rights authority.
+
 The grounded route is additive and versioned:
 
 ```text

@@ -7,6 +7,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 dist/
+.vss/
 
 # Ansible inventories and vaults are environment-specific and may contain secrets.
 ansible/inventories/*/hosts.yml

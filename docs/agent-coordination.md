@@ -150,7 +150,7 @@ its materialized `state.json` hold compact local milestone state. GitHub CI is
 an exact-HEAD external observation and GitHub issue/PR comments remain an
 audit mirror.
 
-Use `init`, `status`, `next`, `checkpoint`, `validate`, and `ci`; `pr` is
+Use `init`, `transition-branch`, `status`, `next`, `checkpoint`, `validate`, and `ci`; `pr` is
 status-only in this first slice. State/history corruption, a changed HEAD,
 stale CI, security/infrastructure/unknown classification, writer conflict,
 or repair-budget exhaustion fails closed. The controller may classify routine
@@ -164,6 +164,21 @@ the active model nor changes validation, review, or authority requirements.
 
 Only the repository-defined protected local residue is excluded from state
 change identity. No other `.local` or sensitive path is accepted.
+
+After initialization, one explicit branch transition may bind the milestone to
+exactly `feature/<milestone-id>`. The append-only transition event records the
+initial and target branch plus the unchanged base, requires the current and
+initial branches to point at the stored HEAD, and uses expected-generation
+optimistic concurrency. It preserves the prior change identity so an existing
+worktree delta remains visible as work. Replays, a second transition, arbitrary
+branch names, changed ancestry/HEAD, later branch switching, or modified history
+fail closed; the event grants no execution, push, merge, or product authority.
+Every newly appended controller event also seals its exact worktree change
+identity. A narrowly explicit `recover-state-identity` action may upgrade one
+legacy unbound validation tail only by appending `validation_invalidated`,
+clearing reusable evidence, and routing back to affected validation. It never
+rewrites the legacy event, grandfathers its evidence, or recovers semantic
+conflicts automatically.
 
 1. Human or ChatGPT creates the milestone issue: `Work issue #N`.
 2. Codex reads `AGENTS.md`, this protocol, and the issue, then posts a `design` checkpoint.

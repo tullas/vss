@@ -518,7 +518,12 @@ def validate_creative_decision_revision(value, *, registry=None):
 
 
 def validate_production_visual_grounding_profile(value, *, registry=None):
-    value = _validate(value, "production_visual_grounding_profile/1", registry)
+    if not isinstance(value, dict) or value.get("contract_identity") != "production_visual_grounding_profile":
+        raise ResourceContractError("visual grounding profile identity is invalid")
+    version = value.get("contract_version")
+    if version not in {"1", "2"}:
+        raise ResourceContractError("visual grounding profile version is invalid")
+    value = _validate(value, f"production_visual_grounding_profile/{version}", registry)
     applicability = value["applicability"]
     if (applicability["scene_ids"] != sorted(applicability["scene_ids"])
             or applicability["character_ids"] != sorted(applicability["character_ids"])):
@@ -536,6 +541,14 @@ def validate_production_visual_grounding_profile(value, *, registry=None):
             raise ResourceContractError("visual grounding profile metadata is not canonical")
     if value["profile_sha256"] != canonical_digest(visual_grounding_profile_seal_material(value)):
         raise ResourceContractError("visual grounding profile seal mismatch")
+    if version == "2":
+        predecessor = value["predecessor"]
+        predecessor_review = validate_production_visual_grounding_review(predecessor["review"], registry=registry)
+        if (predecessor["profile_id"] != value["profile_id"]
+                or predecessor["revision"] != value["revision"] - 1
+                or predecessor_review.value["visual_grounding_profile_sha256"] != predecessor["profile_sha256"]
+                or predecessor_review.value["disposition"] not in {"REGENERATE", "REJECT"}):
+            raise ResourceContractError("visual grounding profile predecessor mismatch")
     return ValidatedResourceArtifact._create(value)
 
 
