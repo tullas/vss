@@ -15,10 +15,16 @@ from unittest.mock import patch
 
 from vss_commands import CommandRunner, ExitCode
 from vss_movie_controlled_generation import (
-    APPROVER_SECRET_NAME, SECRET_NAME, admit_controlled_generation, issue_approval,
+    APPROVER_SECRET_NAME, SECRET_NAME, admit_controlled_generation,
+    admit_grounded_controlled_generation, issue_approval,
 )
 from vss_movie_controlled_generation.contracts import validate_candidate_media
 from vss_movie_demo import finish_demo, prepare_demo
+from vss_movie_visual_grounding import (
+    create_grounded_movie_route,
+    create_production_visual_grounding_profile,
+    record_production_visual_grounding_review,
+)
 from vss_movie_creative_smoke.provider import SmokeHTTPResponse
 from vss_runtime import RuntimeController, RuntimePolicy
 from vss_runtime.audit import AuditLogger
@@ -91,6 +97,40 @@ class M100ControlledGenerationTests(unittest.TestCase):
             "storyboard": finished["scene_storyboard_specification"],
             "frame_id": finished["scene_storyboard_specification"]["payload"]["ordered_frames"][0]["frame_id"],
         }
+        scene = finished["scene_breakdown"]["payload"]["ordered_scenes"][0]
+        cls.grounding_profile = create_production_visual_grounding_profile(
+            profile_id="visual-grounding-production-alpha", revision=1,
+            tenant_id="tenant-local", universe_id="universe-local",
+            production_id=prepared.story["project_id"], mode="required",
+            scene_ids=[scene["scene_id"]], character_ids=list(scene["declared_characters"]),
+            groups=[{
+                "ordinal": 1, "group_id": "production.group-alpha",
+                "positive_constraints": ["Apply production-defined visual token ALPHA-POSITIVE."],
+                "negative_constraints": ["Exclude production-defined visual token ALPHA-NEGATIVE."],
+                "explicit_unknowns": ["Production-defined visual token ALPHA-UNKNOWN remains unresolved."],
+                "limitations": ["Opaque production test constraint; VSS assigns no domain meaning."],
+                "source_reference_digests": [canonical_digest({"source": "opaque-alpha"})],
+            }],
+            uncertainty=["The opaque production constraint is not independently verified."],
+            limitations=["Opaque production-owned test data."],
+            evidence_references=["evidence.opaque-alpha"],
+            reviewer_accountability_id="reviewer-grounding",
+        ).to_json_value()
+        route = create_grounded_movie_route(
+            finished["review_decision"], finished["review_packet"],
+            finished["scene_production_option_set"], finished["scene_breakdown"],
+            finished["creative_decision_revision"], finished["canon_snapshot"],
+            finished["production_canon_binding"], finished["scene_shot_plan_draft"],
+            finished["scene_storyboard_specification"], profile_data=cls.grounding_profile,
+        )
+        cls.grounded_payload = {
+            **cls.base_payload, "profile": cls.grounding_profile,
+            "grounded_creative_decision": route.creative_decision.to_json_value(),
+            "grounded_canon_snapshot": route.canon_snapshot.to_json_value(),
+            "grounded_canon_binding": route.canon_binding.to_json_value(),
+            "grounded_shot_plan": route.shot_plan.to_json_value(),
+            "grounded_storyboard": route.storyboard.to_json_value(),
+        }
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -112,6 +152,166 @@ class M100ControlledGenerationTests(unittest.TestCase):
             value["canon_binding"], value["shot_plan"], value["storyboard"],
             frame_id=value["frame_id"], environment="development", approval=approval,
         )
+
+    def admit_grounded(self, payload=None, approval=None):
+        value = payload or self.grounded_payload
+        return admit_grounded_controlled_generation(
+            value["story"], value["decision"], value["review_packet"], value["option_set"],
+            value["scene_breakdown"], value["creative_decision"], value["canon_snapshot"],
+            value["canon_binding"], value["shot_plan"], value["storyboard"],
+            profile_data=value["profile"],
+            grounded_creative_decision_data=value["grounded_creative_decision"],
+            grounded_canon_snapshot_data=value["grounded_canon_snapshot"],
+            grounded_canon_binding_data=value["grounded_canon_binding"],
+            grounded_shot_plan_data=value["grounded_shot_plan"],
+            grounded_storyboard_data=value["grounded_storyboard"],
+            frame_id=value["frame_id"], environment="development", approval=approval,
+        )
+
+    def test_domain_neutral_grounded_route_is_deterministic_and_minimal(self):
+        first = self.admit_grounded()
+        second = self.admit_grounded()
+        self.assertEqual(first.request_json(), second.request_json())
+        self.assertEqual(first.request["contract_version"], "3")
+        self.assertIn("ALPHA-POSITIVE", first.prompt)
+        self.assertIn("ALPHA-NEGATIVE", first.prompt)
+        self.assertIn("ALPHA-UNKNOWN", first.prompt)
+        for hidden in ("production.group-alpha", "reviewer-grounding", "evidence.opaque-alpha"):
+            self.assertNotIn(hidden, first.prompt)
+        self.assertEqual(
+            first.request["projection"]["visual_grounding_profile_sha256"],
+            self.grounding_profile["profile_sha256"],
+        )
+        self.assertEqual(self.admit().request["contract_version"], "2")
+
+    def test_grounded_real_path_fake_provider_admits_candidate(self):
+        base = self.admit_grounded()
+        admitted = self.admit_grounded(approval=self.approval(base))
+        result, code = self.runtime(admitted, mode="generate")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(len(self.calls), 1)
+        provider_request = json.loads(self.calls[0][1])
+        self.assertIn("ALPHA-POSITIVE", provider_request["prompt"])
+        candidate = json.loads((self.root / result["output"]["candidate"]).read_text())
+        self.assertEqual(
+            candidate["lineage"]["storyboard_specification"],
+            admitted.request["lineage"]["storyboard_specification"],
+        )
+        self.assertTrue(all(value is False for value in candidate["authority"].values()))
+
+    def test_grounding_substitution_and_scope_mismatch_fail_before_effect(self):
+        substituted = copy.deepcopy(self.grounded_payload)
+        substituted["profile"]["groups"][0]["positive_constraints"][0] = "RESEALED-SUBSTITUTION"
+        substituted["profile"]["profile_sha256"] = canonical_digest({
+            **substituted["profile"], "profile_sha256": "0" * 64,
+        })
+        with self.assertRaises(Exception):
+            self.admit_grounded(substituted)
+
+        cross_tenant = copy.deepcopy(self.grounded_payload)
+        cross_tenant["profile"]["scope"]["tenant_id"] = "tenant-other"
+        cross_tenant["profile"]["profile_sha256"] = canonical_digest({
+            **cross_tenant["profile"], "profile_sha256": "0" * 64,
+        })
+        with self.assertRaises(Exception):
+            self.admit_grounded(cross_tenant)
+
+        resealed_overlay = copy.deepcopy(self.grounded_payload)
+        overlay = resealed_overlay["grounded_storyboard"]
+        frame = overlay["ordered_frame_grounding"][0]
+        frame["positive_constraints"][0] = "RESEALED-OVERLAY-SUBSTITUTION"
+        frame["frame_grounding_sha256"] = canonical_digest({
+            key: item for key, item in frame.items() if key != "frame_grounding_sha256"
+        })
+        semantic = {key: item for key, item in overlay.items()
+                    if key not in {"schema_version", "result_family", "result_version",
+                                   "project_id", "scene_id", "integrity"}}
+        overlay["integrity"]["payload_sha256"] = canonical_digest(semantic)
+        overlay["integrity"]["complete_result_sha256"] = canonical_digest({
+            **overlay, "integrity": {"payload_sha256": overlay["integrity"]["payload_sha256"]},
+        })
+        with self.assertRaises(Exception):
+            self.admit_grounded(resealed_overlay)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.provider_secret_reads, [])
+        self.assertEqual(self.approver_secret_reads, [])
+
+    def test_conflicting_or_revoked_required_grounding_fails_closed(self):
+        common = {
+            "profile_id": "visual-grounding-unavailable", "revision": 1,
+            "tenant_id": "tenant-local", "universe_id": "universe-local",
+            "production_id": self.base_payload["story"]["project_id"], "mode": "required",
+            "groups": [{
+                "ordinal": 1, "group_id": "production.group-unavailable",
+                "positive_constraints": ["Opaque positive value."],
+                "negative_constraints": ["Opaque exclusion value."],
+                "explicit_unknowns": [], "limitations": ["Opaque limitation."],
+                "source_reference_digests": [canonical_digest({"source": "unavailable"})],
+            }], "reviewer_accountability_id": "reviewer-grounding",
+        }
+        profiles = (
+            create_production_visual_grounding_profile(
+                **common, conflicts=["Production reports an unresolved conflict."]).to_json_value(),
+            create_production_visual_grounding_profile(
+                **common, lifecycle="revoked").to_json_value(),
+        )
+        for profile in profiles:
+            with self.subTest(profile=profile["lifecycle"],), self.assertRaises(Exception):
+                create_grounded_movie_route(
+                    self.base_payload["decision"], self.base_payload["review_packet"],
+                    self.base_payload["option_set"], self.base_payload["scene_breakdown"],
+                    self.base_payload["creative_decision"], self.base_payload["canon_snapshot"],
+                    self.base_payload["canon_binding"], self.base_payload["shot_plan"],
+                    self.base_payload["storyboard"], profile_data=profile,
+                )
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.provider_secret_reads, [])
+
+    def test_required_grounding_cannot_be_replaced_by_not_required_profile(self):
+        profile = create_production_visual_grounding_profile(
+            profile_id="visual-grounding-not-required", revision=1,
+            tenant_id="tenant-local", universe_id="universe-local",
+            production_id=self.base_payload["story"]["project_id"], mode="not_required",
+            groups=[], reviewer_accountability_id="reviewer-grounding",
+        ).to_json_value()
+        route = create_grounded_movie_route(
+            self.base_payload["decision"], self.base_payload["review_packet"],
+            self.base_payload["option_set"], self.base_payload["scene_breakdown"],
+            self.base_payload["creative_decision"], self.base_payload["canon_snapshot"],
+            self.base_payload["canon_binding"], self.base_payload["shot_plan"],
+            self.base_payload["storyboard"], profile_data=profile,
+        )
+        payload = {
+            **self.base_payload, "profile": profile,
+            "grounded_creative_decision": route.creative_decision.to_json_value(),
+            "grounded_canon_snapshot": route.canon_snapshot.to_json_value(),
+            "grounded_canon_binding": route.canon_binding.to_json_value(),
+            "grounded_shot_plan": route.shot_plan.to_json_value(),
+            "grounded_storyboard": route.storyboard.to_json_value(),
+        }
+        with self.assertRaisesRegex(Exception, "requires declared required grounding"):
+            self.admit_grounded(payload)
+        self.assertEqual(self.admit().request["contract_version"], "2")
+
+    def test_grounding_review_defects_are_production_defined_and_inert(self):
+        base = self.admit_grounded()
+        admitted = self.admit_grounded(approval=self.approval(base))
+        result, code = self.runtime(admitted, mode="generate")
+        self.assertEqual(code, 0, result)
+        candidate = json.loads((self.root / result["output"]["candidate"]).read_text())
+        calls = len(self.calls)
+        review = record_production_visual_grounding_review(
+            candidate_data=candidate, request_data=admitted.request_json(),
+            profile_data=self.grounding_profile, disposition="REJECT",
+            defects=[{
+                "defect_code": "production.defect-alpha", "group_id": "production.group-alpha",
+                "rationale": "Production-owned review evidence with opaque semantics.",
+            }], reviewer_accountability_id="reviewer-grounding",
+        )
+        self.assertEqual(review.value["defects"][0]["defect_code"], "production.defect-alpha")
+        self.assertTrue(all(value is False for value in review.value["authority"].values()))
+        self.assertNotIn("approval", review.value["defects"][0])
+        self.assertEqual(len(self.calls), calls)
 
     def approval(self, admitted):
         return issue_approval(
@@ -535,6 +735,31 @@ class M100ControlledGenerationTests(unittest.TestCase):
         )
         self.assertEqual(generated_code, 0, generated)
         self.assertEqual(generated["output"]["provider_call_count"], 1)
+
+    def test_command_runner_grounded_preflight_is_zero_call(self):
+        payload = {
+            **self.base_payload,
+            "visual_grounding_profile": self.grounded_payload["profile"],
+            "grounded_creative_decision": self.grounded_payload["grounded_creative_decision"],
+            "grounded_canon_snapshot": self.grounded_payload["grounded_canon_snapshot"],
+            "grounded_canon_binding": self.grounded_payload["grounded_canon_binding"],
+            "grounded_shot_plan": self.grounded_payload["grounded_shot_plan"],
+            "grounded_storyboard": self.grounded_payload["grounded_storyboard"],
+            "mode": "preflight",
+        }
+        result, code = CommandRunner(runtime_controller=self.controller()).run(
+            "movie.controlled-review-frame", "development", payload, "m10-grounded-runner")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["output"]["request"]["contract_version"], "3")
+        self.assertEqual(result["output"]["provider_call_count"], 0)
+        self.assertEqual(self.calls, [])
+        incomplete = copy.deepcopy(payload)
+        incomplete.pop("grounded_storyboard")
+        result, code = CommandRunner(runtime_controller=self.controller()).run(
+            "movie.controlled-review-frame", "development", incomplete,
+            "m10-grounded-runner-incomplete")
+        self.assertEqual(code, ExitCode.INVALID_INPUT, result)
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == "__main__":

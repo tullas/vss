@@ -287,22 +287,46 @@ class CommandRunner:
                     base = {"story", "decision", "review_packet", "option_set", "scene_breakdown",
                             "creative_decision", "canon_snapshot", "canon_binding", "shot_plan",
                             "storyboard", "frame_id", "mode"}
+                    grounding = {
+                        "visual_grounding_profile", "grounded_creative_decision",
+                        "grounded_canon_snapshot", "grounded_canon_binding",
+                        "grounded_shot_plan", "grounded_storyboard",
+                    }
                     mode = payload.get("mode")
-                    required = base | ({"recorded_by"} if mode == "approve" else
-                                       {"approval"} if mode == "generate" else set())
-                    if frozenset(payload) != required or mode not in {"preflight", "approve", "generate"}:
+                    authority = ({"recorded_by"} if mode == "approve" else
+                                 {"approval"} if mode == "generate" else set())
+                    supplied_grounding = grounding & set(payload)
+                    required = base | authority | (grounding if supplied_grounding else set())
+                    if (frozenset(payload) != required
+                            or supplied_grounding not in (set(), grounding)
+                            or mode not in {"preflight", "approve", "generate"}):
                         return finish("error", ExitCode.INVALID_INPUT, {}, ["controlled frame input is invalid"])
                     from vss_movie_controlled_generation import (
                         APPROVER_SECRET_NAME, RUNTIME_TIMEOUT_SECONDS, admit_controlled_generation,
-                        issue_approval,
+                        admit_grounded_controlled_generation, issue_approval,
                     )
-                    admitted = admit_controlled_generation(
-                        payload["story"], payload["decision"], payload["review_packet"], payload["option_set"],
-                        payload["scene_breakdown"], payload["creative_decision"], payload["canon_snapshot"],
+                    common = (
+                        payload["story"], payload["decision"], payload["review_packet"],
+                        payload["option_set"], payload["scene_breakdown"],
+                        payload["creative_decision"], payload["canon_snapshot"],
                         payload["canon_binding"], payload["shot_plan"], payload["storyboard"],
-                        frame_id=payload["frame_id"], environment=environment,
-                        approval=payload.get("approval"),
                     )
+                    if supplied_grounding:
+                        admitted = admit_grounded_controlled_generation(
+                            *common, profile_data=payload["visual_grounding_profile"],
+                            grounded_creative_decision_data=payload["grounded_creative_decision"],
+                            grounded_canon_snapshot_data=payload["grounded_canon_snapshot"],
+                            grounded_canon_binding_data=payload["grounded_canon_binding"],
+                            grounded_shot_plan_data=payload["grounded_shot_plan"],
+                            grounded_storyboard_data=payload["grounded_storyboard"],
+                            frame_id=payload["frame_id"], environment=environment,
+                            approval=payload.get("approval"),
+                        )
+                    else:
+                        admitted = admit_controlled_generation(
+                            *common, frame_id=payload["frame_id"], environment=environment,
+                            approval=payload.get("approval"),
+                        )
                     if mode == "approve":
                         import os
                         secret = os.environ.get(APPROVER_SECRET_NAME)

@@ -1,10 +1,17 @@
 # Controlled external storyboard review frame
 
 M10.0 adds one development-only operation,
-`generate_one_controlled_storyboard_review_frame/1`. Its version-2 request and
+`generate_one_controlled_storyboard_review_frame/1`. Its version-2 generic request and
 candidate contracts extend the real movie
 demo artifacts through an exact Runtime/provider boundary and admits at most one
 external PNG as quarantined local review media.
+
+Version 3 adds an optional domain-neutral production visual-grounding route. It
+does not change version-2 behavior. The grounded route requires all six additional
+artifacts together: a `production_visual_grounding_profile/1`, grounded creative
+decision and canon artifacts, and grounded shot-plan and storyboard overlays.
+Partial grounding input is rejected. See
+[Domain-neutral production visual grounding](movie-visual-grounding.md).
 
 The ordinary `vss movie demo` command remains non-paid. The separate command is:
 

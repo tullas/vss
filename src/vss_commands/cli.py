@@ -182,6 +182,10 @@ def _parser() -> argparse.ArgumentParser:
     for flag in ("story", "decision", "review-packet", "option-set", "scene-breakdown",
                  "creative-decision", "canon-snapshot", "canon-binding", "shot-plan", "storyboard"):
         movie_controlled.add_argument(f"--{flag}", type=Path, required=True)
+    for flag in ("visual-grounding-profile", "grounded-creative-decision",
+                 "grounded-canon-snapshot", "grounded-canon-binding",
+                 "grounded-shot-plan", "grounded-storyboard"):
+        movie_controlled.add_argument(f"--{flag}", type=Path)
     movie_controlled.add_argument("--frame-id", required=True)
     movie_controlled.add_argument("--environment", required=True)
     movie_controlled.add_argument("--correlation-id", required=True)
@@ -423,6 +427,20 @@ def main(argv: list[str] | None = None) -> int:
                 value, value_error = _read_context_file(getattr(args, name))
                 input_error = input_error or value_error
                 values[name] = value
+            grounding_names = (
+                "visual_grounding_profile", "grounded_creative_decision",
+                "grounded_canon_snapshot", "grounded_canon_binding",
+                "grounded_shot_plan", "grounded_storyboard",
+            )
+            grounding_paths = [getattr(args, name) for name in grounding_names]
+            if any(path is not None for path in grounding_paths):
+                if not all(path is not None for path in grounding_paths):
+                    input_error = ExitCode.INVALID_INPUT
+                else:
+                    for name in grounding_names:
+                        value, value_error = _read_context_file(getattr(args, name))
+                        input_error = input_error or value_error
+                        values[name] = value
             approval = None
             if args.controlled_mode == "generate":
                 if args.approval is None:

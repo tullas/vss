@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"vss.resource.creative_decision_revision/2",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","contract_identity","contract_version","decision_id","revision","decision_kind","scope","status","base_decision","visual_grounding","limitations","decision_sha256"],
+  "properties":{
+    "schema_version":{"const":"1"},"contract_identity":{"const":"creative_decision_revision"},"contract_version":{"const":"2"},
+    "decision_id":{"type":"string","pattern":"^decision-[0-9a-f]{32}$"},"revision":{"type":"integer","minimum":1,"maximum":2147483647},
+    "decision_kind":{"const":"scene_production_option_selection_with_visual_grounding"},"scope":{"$ref":"#/$defs/scope"},"status":{"const":"accepted"},
+    "base_decision":{"$ref":"#/$defs/base"},"visual_grounding":{"$ref":"#/$defs/grounding"},
+    "limitations":{"type":"array","const":["inert_creative_decision","production_owned_visual_grounding","opaque_constraint_semantics","not_production_approval","not_runtime_authority","not_provider_authority","not_workflow_authority","not_rights_authority","exact_revision_only"]},
+    "decision_sha256":{"$ref":"#/$defs/digest"}
+  },
+  "$defs":{
+    "id":{"type":"string","minLength":3,"maxLength":128,"pattern":"^[a-z][a-z0-9._:-]*$"},"digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "scope":{"type":"object","additionalProperties":false,"required":["tenant_id","universe_id","production_id","scene_id","scope_kind"],"properties":{"tenant_id":{"$ref":"#/$defs/id"},"universe_id":{"$ref":"#/$defs/id"},"production_id":{"$ref":"#/$defs/id"},"scene_id":{"$ref":"#/$defs/id"},"scope_kind":{"const":"production_scene"}}},
+    "base":{"type":"object","additionalProperties":false,"required":["decision_id","revision","decision_sha256"],"properties":{"decision_id":{"type":"string","pattern":"^decision-[0-9a-f]{32}$"},"revision":{"type":"integer","minimum":1,"maximum":2147483647},"decision_sha256":{"$ref":"#/$defs/digest"}}},
+    "grounding":{"type":"object","additionalProperties":false,"required":["profile_id","revision","profile_sha256","mode"],"properties":{"profile_id":{"type":"string","pattern":"^visual-grounding-[a-z0-9][a-z0-9._-]{0,63}$"},"revision":{"type":"integer","minimum":1,"maximum":2147483647},"profile_sha256":{"$ref":"#/$defs/digest"},"mode":{"enum":["not_required","required"]}}}
+  }
+}
