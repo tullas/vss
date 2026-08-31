@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/dev-milestone-policy-v1.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "protocol", "limits", "protected_patterns", "classification", "model_routing", "authority"],
+  "properties": {
+    "schema_version": {"const": "1"}, "protocol": {"const": "vss.dev-milestone-policy"},
+    "limits": {"type": "object", "additionalProperties": false, "required": ["max_events", "max_event_bytes", "max_state_bytes", "max_repair_attempts", "max_repair_files", "max_repair_line_delta"], "properties": {"max_events": {"type": "integer", "minimum": 1, "maximum": 256}, "max_event_bytes": {"type": "integer", "minimum": 256, "maximum": 8192}, "max_state_bytes": {"type": "integer", "minimum": 1024, "maximum": 65536}, "max_repair_attempts": {"type": "integer", "minimum": 1, "maximum": 3}, "max_repair_files": {"type": "integer", "minimum": 1, "maximum": 64}, "max_repair_line_delta": {"type": "integer", "minimum": 1, "maximum": 10000}}},
+    "protected_patterns": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 243, "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./*-]+$"}},
+    "classification": {"type": "object", "additionalProperties": false, "required": ["security_terms", "infrastructure_terms", "fixture_terms", "flaky_terms"], "properties": {"security_terms": {"$ref": "#/$defs/terms"}, "infrastructure_terms": {"$ref": "#/$defs/terms"}, "fixture_terms": {"$ref": "#/$defs/terms"}, "flaky_terms": {"$ref": "#/$defs/terms"}}},
+    "model_routing": {"type": "object", "additionalProperties": false, "required": ["architecture_security", "bounded_implementation", "maintenance", "advisory"], "properties": {"architecture_security": {"const": "gpt-5.6-sol-high"}, "bounded_implementation": {"const": "gpt-5.6-terra-medium"}, "maintenance": {"const": "gpt-5.6-terra-low"}, "advisory": {"const": true}}},
+    "authority": {"$ref": "#/$defs/authority"}
+  },
+  "$defs": {"terms": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9 -]+$"}}, "authority": {"type": "object", "additionalProperties": false, "required": ["runtime_execution", "provider_execution", "production", "publication", "workflow_activation", "security_exception", "product_authority", "merge", "push"], "properties": {"runtime_execution": {"const": false}, "provider_execution": {"const": false}, "production": {"const": false}, "publication": {"const": false}, "workflow_activation": {"const": false}, "security_exception": {"const": false}, "product_authority": {"const": false}, "merge": {"const": false}, "push": {"const": false}}}}
+}

@@ -140,6 +140,31 @@ evidence files are never authoritative.
 
 ## Short handoff workflow
 
+## DEV-WF-1 repository milestone controller
+
+`vss dev milestone` is repository-development coordination only. It does not
+use Runtime, providers, production authority, GitHub approval as execution
+authority, or arbitrary commands. It reuses the strict harness-v2 impact and
+fixed-profile evidence route, while `.vss/milestones/<id>/history.ndjson` and
+its materialized `state.json` hold compact local milestone state. GitHub CI is
+an exact-HEAD external observation and GitHub issue/PR comments remain an
+audit mirror.
+
+Use `init`, `status`, `next`, `checkpoint`, `validate`, and `ci`; `pr` is
+status-only in this first slice. State/history corruption, a changed HEAD,
+stale CI, security/infrastructure/unknown classification, writer conflict,
+or repair-budget exhaustion fails closed. The controller may classify routine
+code or registered-fixture failure but never authorizes the repair, push, PR,
+merge, paid call, or Runtime/provider execution.
+
+The compact state may recommend GPT-5.6 Sol High for architecture/security
+stops, GPT-5.6 Terra Medium for bounded repairs, and GPT-5.6 Terra Low for
+status/maintenance. This is advisory routing metadata only: it neither proves
+the active model nor changes validation, review, or authority requirements.
+
+Only the repository-defined protected local residue is excluded from state
+change identity. No other `.local` or sensitive path is accepted.
+
 1. Human or ChatGPT creates the milestone issue: `Work issue #N`.
 2. Codex reads `AGENTS.md`, this protocol, and the issue, then posts a `design` checkpoint.
 3. After issue review, Codex implements and posts `implementation`: user says `Continue #N`.
