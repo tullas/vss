@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 from vss_commands import CommandRunner, ExitCode
 from vss_movie_controlled_generation import (
-    APPROVER_SECRET_NAME, SECRET_NAME, admit_controlled_generation,
+    APPROVER_SECRET_NAME, SECRET_NAME, admit_controlled_generation, admit_generated_candidate,
     admit_grounded_controlled_generation, issue_approval,
 )
 from vss_movie_controlled_generation.contracts import validate_candidate_media
@@ -298,11 +298,10 @@ class M100ControlledGenerationTests(unittest.TestCase):
         admitted = self.admit_grounded(approval=self.approval(base))
         result, code = self.runtime(admitted, mode="generate")
         self.assertEqual(code, 0, result)
-        candidate = json.loads((self.root / result["output"]["candidate"]).read_text())
+        candidate = admit_generated_candidate(self.root, admitted)
         calls = len(self.calls)
         review = record_production_visual_grounding_review(
-            candidate_data=candidate, request_data=admitted.request_json(),
-            profile_data=self.grounding_profile, disposition="REJECT",
+            generation=admitted, candidate=candidate, disposition="REJECT",
             defects=[{
                 "defect_code": "production.defect-alpha", "group_id": "production.group-alpha",
                 "rationale": "Production-owned review evidence with opaque semantics.",
@@ -312,6 +311,43 @@ class M100ControlledGenerationTests(unittest.TestCase):
         self.assertTrue(all(value is False for value in review.value["authority"].values()))
         self.assertNotIn("approval", review.value["defects"][0])
         self.assertEqual(len(self.calls), calls)
+
+    def test_grounding_review_rejects_resealed_caller_evidence(self):
+        base = self.admit_grounded()
+        admitted = self.admit_grounded(approval=self.approval(base))
+        result, code = self.runtime(admitted, mode="generate")
+        self.assertEqual(code, 0, result)
+        raw_candidate = json.loads((self.root / result["output"]["candidate"]).read_text())
+        with self.assertRaisesRegex(ResourceContractError, "authoritative admitted evidence"):
+            record_production_visual_grounding_review(
+                generation=admitted.request_json(), candidate=raw_candidate, disposition="REJECT",
+                defects=[], reviewer_accountability_id="reviewer-grounding",
+            )
+        raw_candidate["lineage"]["storyboard_frame"] = "0" * 64
+        raw_candidate["candidate_id"] = "generated-review-" + canonical_digest({
+            key: value for key, value in raw_candidate.items()
+            if key not in {"candidate_id", "candidate_sha256"}
+        })[:32]
+        raw_candidate["candidate_sha256"] = "0" * 64
+        raw_candidate["candidate_sha256"] = canonical_digest(raw_candidate)
+        (self.root / result["output"]["candidate"]).write_text(json.dumps(raw_candidate))
+        with self.assertRaisesRegex(ResourceContractError, "authoritative binding mismatch"):
+            admit_generated_candidate(self.root, admitted)
+
+    def test_grounding_review_rejects_defect_group_absent_from_bound_profile(self):
+        base = self.admit_grounded()
+        admitted = self.admit_grounded(approval=self.approval(base))
+        result, code = self.runtime(admitted, mode="generate")
+        self.assertEqual(code, 0, result)
+        candidate = admit_generated_candidate(self.root, admitted)
+        with self.assertRaisesRegex(ResourceContractError, "defect group is absent"):
+            record_production_visual_grounding_review(
+                generation=admitted, candidate=candidate, disposition="REJECT",
+                defects=[{
+                    "defect_code": "production.defect-alpha", "group_id": "production.group-missing",
+                    "rationale": "Production-owned review evidence with opaque semantics.",
+                }], reviewer_accountability_id="reviewer-grounding",
+            )
 
     def approval(self, admitted):
         return issue_approval(

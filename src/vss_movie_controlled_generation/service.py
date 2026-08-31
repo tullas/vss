@@ -123,20 +123,27 @@ class AdmittedControlledGeneration:
     request: Mapping[str, Any]
     prompt: str
     approval: Mapping[str, Any] | None
+    grounding_profile: Mapping[str, Any] | None
 
     def __init__(self, key: object, *, request: dict[str, Any], prompt: str,
-                 approval: dict[str, Any] | None) -> None:
+                 approval: dict[str, Any] | None,
+                 grounding_profile: dict[str, Any] | None = None) -> None:
         if key is not _ADMISSION_KEY:
             raise TypeError("controlled generation requires authoritative admission")
         object.__setattr__(self, "request", freeze_json(request))
         object.__setattr__(self, "prompt", prompt)
         object.__setattr__(self, "approval", freeze_json(approval) if approval is not None else None)
+        object.__setattr__(self, "grounding_profile",
+                           freeze_json(grounding_profile) if grounding_profile is not None else None)
 
     def request_json(self) -> dict[str, Any]:
         return thaw_json(self.request)
 
     def approval_json(self) -> dict[str, Any] | None:
         return thaw_json(self.approval) if self.approval is not None else None
+
+    def grounding_profile_json(self) -> dict[str, Any] | None:
+        return thaw_json(self.grounding_profile) if self.grounding_profile is not None else None
 
 
 def admit_controlled_generation(
@@ -316,4 +323,5 @@ def admit_grounded_controlled_generation(
     request["request_sha256"] = _digest(request)
     validate_generation_request(request)
     return AdmittedControlledGeneration(
-        _ADMISSION_KEY, request=request, prompt=prompt, approval=approval)
+        _ADMISSION_KEY, request=request, prompt=prompt, approval=approval,
+        grounding_profile=route.profile.to_json_value())

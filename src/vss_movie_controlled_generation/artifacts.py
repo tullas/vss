@@ -4,20 +4,94 @@ import json
 import os
 import stat
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from vss_providers import ControlledFrameResult
 from vss_reasoning_contracts import canonical_digest
-from vss_reasoning_contracts.canonicalization import thaw_json
+from vss_reasoning_contracts.canonicalization import freeze_json, thaw_json
+from vss_resource_contracts import ResourceContractError
 from vss_runtime.errors import CapabilityExecutionFailure, RuntimeInternalFailure
 
 from .approval import approval_digest
 from .contracts import (
-    validate_attempt, validate_attempt_outcome, validate_candidate_media, validate_empty_review,
+    validate_attempt, validate_attempt_outcome, validate_candidate, validate_candidate_media, validate_empty_review,
     validate_generation_request,
 )
-from .service import content_credentials_summary
+from .service import AdmittedControlledGeneration, content_credentials_summary
+
+
+_CANDIDATE_ADMISSION_KEY = object()
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class AdmittedGeneratedCandidate:
+    candidate: Mapping[str, Any]
+
+    def __init__(self, key: object, *, candidate: dict[str, Any]) -> None:
+        if key is not _CANDIDATE_ADMISSION_KEY:
+            raise TypeError("generated review candidate requires authoritative admission")
+        object.__setattr__(self, "candidate", freeze_json(candidate))
+
+    def candidate_json(self) -> dict[str, Any]:
+        return thaw_json(self.candidate)
+
+
+def _read_admitted_json(path: Path) -> dict[str, Any]:
+    try:
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise ResourceContractError("controlled generation evidence is unsafe")
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(descriptor, "rb") as stream:
+            content = stream.read(131073)
+    except OSError as exc:
+        raise ResourceContractError("controlled generation evidence is unavailable") from exc
+    if len(content) > 131072:
+        raise ResourceContractError("controlled generation evidence exceeds its bound")
+    try:
+        value = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ResourceContractError("controlled generation evidence is invalid") from exc
+    if not isinstance(value, dict):
+        raise ResourceContractError("controlled generation evidence is invalid")
+    return value
+
+
+def _admitted_artifact_root(repository_root: Path, request_sha256: str) -> Path:
+    current = repository_root
+    for name in (".local", "movie", "m10-0-controlled-review-frame", request_sha256):
+        current = current / name
+        try:
+            info = current.lstat()
+        except OSError as exc:
+            raise ResourceContractError("controlled generation evidence is unavailable") from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise ResourceContractError("controlled generation evidence is unsafe")
+    return current
+
+
+def admit_generated_candidate(
+    repository_root: Path, generation: AdmittedControlledGeneration,
+) -> AdmittedGeneratedCandidate:
+    """Bind a published candidate to an opaque, authoritative generation admission."""
+    if type(generation) is not AdmittedControlledGeneration:
+        raise ResourceContractError("generated review candidate requires authoritative generation admission")
+    request = validate_generation_request(generation.request_json())
+    root = repository_root.resolve(strict=True)
+    artifact_root = _admitted_artifact_root(root, request["request_sha256"])
+    candidate = _read_admitted_json(artifact_root / "generated-review-candidate.json")
+    outcome = _read_admitted_json(artifact_root / "attempt-outcome.json")
+    candidate = validate_candidate(candidate)
+    outcome = validate_attempt_outcome(outcome)
+    if (outcome["terminal_status"] != "admitted"
+            or outcome["request_sha256"] != request["request_sha256"]
+            or outcome["candidate_sha256"] != candidate["candidate_sha256"]
+            or candidate["request_sha256"] != request["request_sha256"]
+            or candidate["lineage"] != request["lineage"]):
+        raise ResourceContractError("generated review candidate authoritative binding mismatch")
+    return AdmittedGeneratedCandidate(_CANDIDATE_ADMISSION_KEY, candidate=candidate)
 
 
 class ControlledGenerationArtifactPublisher:

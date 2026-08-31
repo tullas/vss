@@ -109,27 +109,36 @@ def create_production_visual_grounding_profile(
 
 
 def record_production_visual_grounding_review(
-    *, candidate_data: dict[str, Any], request_data: dict[str, Any],
-    profile_data: dict[str, Any], disposition: str, defects: list[dict[str, Any]],
+    *, generation: Any, candidate: Any, disposition: str, defects: list[dict[str, Any]],
     reviewer_accountability_id: str,
 ) -> ValidatedResourceArtifact:
-    from vss_movie_controlled_generation.contracts import validate_candidate, validate_generation_request
+    from vss_movie_controlled_generation import AdmittedControlledGeneration, AdmittedGeneratedCandidate
+    from vss_movie_controlled_generation.contracts import validate_generation_request
 
-    candidate = validate_candidate(candidate_data)
-    request = validate_generation_request(request_data)
+    if type(generation) is not AdmittedControlledGeneration or type(candidate) is not AdmittedGeneratedCandidate:
+        raise ResourceContractError("visual grounding review requires authoritative admitted evidence")
+    request = validate_generation_request(generation.request_json())
+    profile_data = generation.grounding_profile_json()
+    if profile_data is None:
+        raise ResourceContractError("visual grounding review requires a grounded generation admission")
     profile = validate_production_visual_grounding_profile(profile_data)
+    candidate_data = candidate.candidate_json()
     if (request["contract_version"] != "3"
-            or candidate["request_sha256"] != request["request_sha256"]
-            or candidate["lineage"] != request["lineage"]
+            or candidate_data["request_sha256"] != request["request_sha256"]
+            or candidate_data["lineage"] != request["lineage"]
             or request["projection"]["visual_grounding_profile_sha256"]
             != profile.value["profile_sha256"]
             or request["projection"]["frame_grounding_sha256"]
             != request["lineage"]["storyboard_frame"]):
         raise ResourceContractError("visual grounding review authoritative binding mismatch")
+    group_ids = {group["group_id"] for group in profile.value["groups"]}
+    if any(defect.get("group_id") is not None and defect["group_id"] not in group_ids
+           for defect in defects if isinstance(defect, dict)):
+        raise ResourceContractError("visual grounding review defect group is absent from its bound profile")
     value = {
         "schema_version": "1", "contract_identity": "production_visual_grounding_review",
         "contract_version": "1", "review_id": "visual-grounding-review-" + "0" * 32,
-        "candidate_sha256": candidate["candidate_sha256"],
+        "candidate_sha256": candidate_data["candidate_sha256"],
         "frame_grounding_sha256": request["projection"]["frame_grounding_sha256"],
         "visual_grounding_profile_sha256": profile.value["profile_sha256"],
         "disposition": disposition,
