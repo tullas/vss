@@ -132,7 +132,7 @@ def validate_images(root: Path) -> None:
         raise PolicyFailure("acceptance image is not admitted")
     if acceptance_match.group(1) == "ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:0bf90cab657a2eea89ebe33bc8c3d5b68279e4645f08457b874f668f5a699295":  # pragma: allowlist secret -- deterministic image digest
         acceptance_sha256 = hashlib.sha256(acceptance.encode("utf-8")).hexdigest()
-        if acceptance_sha256 != "5a4f2e173011d7dd8e552c19b4794f12d4a75814cfc34b16252788163ff4dc60":  # pragma: allowlist secret -- deterministic script digest
+        if acceptance_sha256 != "5b3f9676eba92dd8c3cec9996f0dad1d6ba155e0d29b415f5e09b1cd0373fea7":  # pragma: allowlist secret -- deterministic script digest
             raise PolicyFailure("approved acceptance execution boundary changed")
     prohibited_acceptance_options = ("--privileged", "/var/run/docker.sock", "--device", "--cap-add")
     if any(option in acceptance for option in prohibited_acceptance_options) or 'target=/source,readonly' not in acceptance:
@@ -245,8 +245,8 @@ def validate_opentofu(root: Path) -> None:
 def validate_derivative_build_preparation(root: Path) -> None:
     expected = {
         "containers/versitygw/Dockerfile": "f49973c801193127638ee55ff42a03fc9058d77a1e3f7e986729dd4281fee364",  # pragma: allowlist secret -- deterministic build-definition digest
-        "containers/ubuntu-26.04-acceptance/Dockerfile": "a81f1a9763825f78eba22e97edf1d93beb108cdc7238ff5ff1ce78ea9c8aff04",  # pragma: allowlist secret -- deterministic build-definition digest
-        ".github/workflows/build-versitygw-derivative.yml": "4a9919ed1996dd9e30dc63cffdf6e6b89811e95eb11f6d89cc4dd4bea8301ea6",  # pragma: allowlist secret -- deterministic workflow digest
+        "containers/ubuntu-26.04-acceptance/Dockerfile": "7682cb2d8c8795164b8be1c9546106870389dc0fe8d30cc19cc8b03defd4a182",  # pragma: allowlist secret -- deterministic build-definition digest
+        ".github/workflows/build-versitygw-derivative.yml": "734ff91c14efb7e8aac211bb0f7f59efc29826131f16e6b7996c5e1c0451f894",  # pragma: allowlist secret -- deterministic workflow digest
     }
     for relative, expected_sha256 in expected.items():
         path = root / relative

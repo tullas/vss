@@ -62,7 +62,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           repository='ghcr.io/tullas/vss/ubuntu-26.04-acceptance'
-          image="$repository:26.04-2026-08-17-no-pebble-r1"
+          image="$repository:26.04-2026-08-17-no-pebble-r2"
           metadata="$RUNNER_TEMP/ubuntu-acceptance-build-metadata.json"
           docker buildx build \
             --file containers/ubuntu-26.04-acceptance/Dockerfile \
