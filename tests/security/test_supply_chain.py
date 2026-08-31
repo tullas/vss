@@ -44,6 +44,33 @@ def component(component_id: str, name: str, ecosystem: str, version: str, licens
 
 
 class SupplyChainPolicyTests(unittest.TestCase):
+    def test_security_derivative_build_preparation_is_exact_and_fail_closed(self) -> None:
+        paths = (
+            "containers/versitygw/Dockerfile",
+            "containers/ubuntu-26.04-acceptance/Dockerfile",
+            ".github/workflows/build-versitygw-derivative.yml",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in paths:
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, destination)
+            SC.validate_derivative_build_preparation(root)
+            substitutions = {
+                paths[0]: ("libssl3=3.5.8-r0", "libssl3=3.5.7-r0"),
+                paths[1]: ("test ! -e /usr/bin/pebble", "test -e /usr/bin/pebble"),
+                paths[2]: ("--provenance=mode=max", "--provenance=false"),
+            }
+            for relative, (expected, replacement) in substitutions.items():
+                with self.subTest(relative=relative):
+                    destination = root / relative
+                    original = destination.read_text(encoding="utf-8")
+                    destination.write_text(original.replace(expected, replacement, 1), encoding="utf-8")
+                    with self.assertRaisesRegex(SC.PolicyFailure, "security derivative build preparation drift"):
+                        SC.validate_derivative_build_preparation(root)
+                    destination.write_text(original, encoding="utf-8")
+
     def test_python_lock_audit_covers_every_lock_and_propagates_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -161,9 +161,9 @@ def validate_images(root: Path) -> None:
         raise PolicyFailure("production image is not admitted")
     if acceptance_match.group(1) not in admitted:
         raise PolicyFailure("acceptance image is not admitted")
-    if acceptance_match.group(1) == "docker.io/library/ubuntu@sha256:7b202b0e2e0028c6250f5fcf41d04df492d145a1654c6995a6553f0c1f6f1960":
+    if acceptance_match.group(1) == "docker.io/library/ubuntu@sha256:7b202b0e2e0028c6250f5fcf41d04df492d145a1654c6995a6553f0c1f6f1960":  # pragma: allowlist secret -- deterministic image digest
         acceptance_sha256 = hashlib.sha256(acceptance.encode("utf-8")).hexdigest()
-        if acceptance_sha256 != "a47e4ccec9bdb230d757bd8be74e69a83a20bdf9f460a7d96ed6506d44c40ce4" or "pebble" in acceptance.lower():
+        if acceptance_sha256 != "a47e4ccec9bdb230d757bd8be74e69a83a20bdf9f460a7d96ed6506d44c40ce4" or "pebble" in acceptance.lower():  # pragma: allowlist secret -- deterministic script digest
             raise PolicyFailure("approved acceptance execution boundary changed")
     prohibited_acceptance_options = ("--privileged", "/var/run/docker.sock", "--device", "--cap-add")
     if any(option in acceptance for option in prohibited_acceptance_options) or 'target=/source,readonly' not in acceptance:
@@ -273,6 +273,19 @@ def validate_opentofu(root: Path) -> None:
         raise PolicyFailure("OpenTofu provider checksum lock is missing")
 
 
+def validate_derivative_build_preparation(root: Path) -> None:
+    expected = {
+        "containers/versitygw/Dockerfile": "3dfcba106d39064bf3d14014ca0af1f87e152bd71958a2a585f5fa4b13f5cdd4",  # pragma: allowlist secret -- deterministic build-definition digest
+        "containers/ubuntu-26.04-acceptance/Dockerfile": "a81f1a9763825f78eba22e97edf1d93beb108cdc7238ff5ff1ce78ea9c8aff04",  # pragma: allowlist secret -- deterministic build-definition digest
+        ".github/workflows/build-versitygw-derivative.yml": "dc2d505b6e76a2eafdb935706eb7d9cd00cdd6b5f6340fb03e3f22c56b3b48bf",  # pragma: allowlist secret -- deterministic workflow digest
+    }
+    for relative, expected_sha256 in expected.items():
+        path = root / relative
+        actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "missing"
+        if actual_sha256 != expected_sha256:
+            raise PolicyFailure(f"security derivative build preparation drift: {relative}")
+
+
 def validate_workflow_invariants(root: Path) -> None:
     path = root / ".github/workflows/security.yml"
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
@@ -315,7 +328,7 @@ def validate_workflow_invariants(root: Path) -> None:
             raise PolicyFailure(f"canonical security validation step is missing: {job_name}")
     installer = root / "scripts/security/install-trivy.sh"
     installer_sha256 = hashlib.sha256(installer.read_bytes()).hexdigest() if installer.is_file() else "missing"
-    if installer_sha256 != "f3cdfce62d05a0eaf8ec12b54bcc37ba9c94f4ea883381e599ad4ebe5bdd3774":
+    if installer_sha256 != "f3cdfce62d05a0eaf8ec12b54bcc37ba9c94f4ea883381e599ad4ebe5bdd3774":  # pragma: allowlist secret -- deterministic installer digest
         raise PolicyFailure("security scanner installer is not checksum pinned")
     expected_scans = {
         "container-scan": '"$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json" \'${{ matrix.image }}\'',
@@ -352,7 +365,7 @@ def validate_workflow_invariants(root: Path) -> None:
 
 def validate_all(root: Path) -> list[str]:
     checks = [
-        validate_licenses, validate_exceptions, validate_component_admission, validate_actions, validate_images,
+        validate_derivative_build_preparation, validate_licenses, validate_exceptions, validate_component_admission, validate_actions, validate_images,
         validate_locks, validate_manifest_alignment, validate_direct_dependencies, validate_vulnerability_admission, validate_opentofu,
         validate_workflow_invariants,
     ]

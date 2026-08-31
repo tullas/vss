@@ -1,4 +1,4 @@
-name: Build VersityGW security derivative
+name: Build VSS security derivatives
 
 on:
   workflow_dispatch:
@@ -23,23 +23,62 @@ jobs:
         run: >-
           docker buildx create --name vss-security-builder --use --bootstrap
           --driver docker-container
-          --driver-opt image=moby/buildkit@sha256:040d34121c27906c4ff9ac152a30d52bf2c5d328d3bb748916bb3d2743c02528
-      - name: Build and publish the exact reviewed derivative
+          --driver-opt image=moby/buildkit@sha256:040d34121c27906c4ff9ac152a30d52bf2c5d328d3bb748916bb3d2743c02528 # pragma: allowlist secret -- deterministic image digest
+      - name: Build, verify, and publish the exact reviewed VersityGW derivative
         env:
           SOURCE_DATE_EPOCH: '1784082912'
-        run: |
+        run: | # pragma: allowlist secret -- deterministic binary digest below
           set -Eeuo pipefail
-          image='ghcr.io/tullas/vss/versitygw:v1.7.0-go1.25.13-r2'
+          repository='ghcr.io/tullas/vss/versitygw'
+          image="$repository:v1.7.0-go1.25.13-r3"
+          metadata="$RUNNER_TEMP/versitygw-build-metadata.json"
           docker buildx build \
             --file containers/versitygw/Dockerfile \
             --platform linux/amd64 \
             --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
             --provenance=mode=max \
             --sbom=true \
+            --metadata-file "$metadata" \
             --tag "$image" \
             --push \
             containers/versitygw
-          docker buildx imagetools inspect "$image"
+          digest=$(jq -er '.["containerimage.digest"] | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata")
+          reference="$repository@$digest"
+          docker buildx imagetools inspect "$reference"
+          docker buildx imagetools inspect --raw "$image"
+          observed_binary=$(docker run --rm --platform linux/amd64 --entrypoint sha256sum \
+            "$reference" /usr/local/bin/versitygw | awk '{print $1}')
+          test "$observed_binary" = '7ec13c1c2b8169e67c0b840039b3a06d085ea4f48657cbb4dd1cad31643e75b8'
+          jq -cer '{containerimage_digest: .["containerimage.digest"], config_digest: .["containerimage.config.digest"]}
+            | select(.containerimage_digest | test("^sha256:[0-9a-f]{64}$"))
+            | select(.config_digest | test("^sha256:[0-9a-f]{64}$"))' "$metadata"
+      - name: Build, verify, and publish the exact reviewed Ubuntu acceptance derivative
+        env:
+          SOURCE_DATE_EPOCH: '1786957365'
+        run: |
+          set -Eeuo pipefail
+          repository='ghcr.io/tullas/vss/ubuntu-26.04-acceptance'
+          image="$repository:26.04-2026-08-17-no-pebble-r1"
+          metadata="$RUNNER_TEMP/ubuntu-acceptance-build-metadata.json"
+          docker buildx build \
+            --file containers/ubuntu-26.04-acceptance/Dockerfile \
+            --platform linux/amd64 \
+            --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
+            --provenance=mode=max \
+            --sbom=true \
+            --metadata-file "$metadata" \
+            --tag "$image" \
+            --push \
+            containers/ubuntu-26.04-acceptance
+          digest=$(jq -er '.["containerimage.digest"] | select(test("^sha256:[0-9a-f]{64}$"))' "$metadata")
+          reference="$repository@$digest"
+          docker buildx imagetools inspect "$reference"
+          docker buildx imagetools inspect --raw "$image"
+          docker run --rm --platform linux/amd64 --entrypoint /bin/bash \
+            "$reference" -ceu 'test ! -e /usr/bin/pebble'
+          jq -cer '{containerimage_digest: .["containerimage.digest"], config_digest: .["containerimage.config.digest"]}
+            | select(.containerimage_digest | test("^sha256:[0-9a-f]{64}$"))
+            | select(.config_digest | test("^sha256:[0-9a-f]{64}$"))' "$metadata"
       - name: Remove the ephemeral builder
         if: always()
         run: docker buildx rm vss-security-builder

@@ -13,14 +13,20 @@ RUN go build -trimpath -buildvcs=false \
 
 FROM alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f
 
+RUN apk add --no-cache --upgrade \
+    libcrypto3=3.5.8-r0 \
+    libssl3=3.5.8-r0
+
 LABEL org.opencontainers.image.title="VSS-maintained VersityGW"
 LABEL org.opencontainers.image.description="VersityGW v1.7.0 rebuilt with the patched Go 1.25.13 toolchain for bounded VSS local S3 acceptance"
 LABEL org.opencontainers.image.source="https://github.com/tullas/vss"
 LABEL org.opencontainers.image.url="https://github.com/tullas/vss"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.version="v1.7.0-go1.25.13-r1"
+LABEL org.opencontainers.image.version="v1.7.0-go1.25.13-r3"
 LABEL dev.vss.upstream.source="https://github.com/versity/versitygw/archive/refs/tags/v1.7.0.tar.gz"
 LABEL dev.vss.go.toolchain="go1.25.13"
+LABEL dev.vss.alpine.libcrypto3="3.5.8-r0"
+LABEL dev.vss.alpine.libssl3="3.5.8-r0"
 
 COPY --from=build /out/versitygw /usr/local/bin/versitygw
 COPY --from=build /src/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
