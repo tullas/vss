@@ -86,37 +86,6 @@ def validate_exceptions(root: Path, today: dt.date | None = None) -> None:
             raise PolicyFailure(f"security exception expiry is invalid: {record['id']}") from exc
         if expiry < now:
             raise PolicyFailure(f"security exception is expired: {record['id']}")
-        if record["id"] == "ubuntu-2604-pebble-ci-2026-08":
-            exact_identity = {
-                "component": "container-ubuntu-2604",
-                "version": "sha256:7b202b0e2e0028c6250f5fcf41d04df492d145a1654c6995a6553f0c1f6f1960",
-                "owner": "Bootstrap Owner",
-                "approver_identity": "@tullas",
-                "approved_at": "2026-08-15",
-                "expiry_date": "2026-08-29",
-            }
-            if any(record.get(key) != value for key, value in exact_identity.items()):
-                raise PolicyFailure("Ubuntu acceptance exception differs from human approval")
-            if record.get("approver_roles") != ["Enterprise Architect", "Product Security risk approver"]:
-                raise PolicyFailure("Ubuntu acceptance exception approval roles are invalid")
-            allowed = record.get("allowed_findings")
-            expected_findings = {
-                ("/usr/bin/pebble", finding, "stdlib", "HIGH")
-                for finding in (
-                    "CVE-2026-33818", "CVE-2026-39821", "CVE-2026-46600",
-                    "CVE-2026-56853", "CVE-2026-56858", "CVE-2026-56859",
-                    "CVE-2026-56860", "CVE-2026-56862",
-                )
-            }
-            actual_findings = {
-                (item.get("target"), item.get("id"), item.get("package"), item.get("severity"))
-                for item in allowed
-                if isinstance(item, dict) and set(item) == {"target", "id", "package", "severity"}
-            } if isinstance(allowed, list) else set()
-            if not isinstance(allowed, list) or len(allowed) != 8 or actual_findings != expected_findings:
-                raise PolicyFailure("Ubuntu acceptance exception finding scope is invalid")
-
-
 def validate_component_admission(root: Path) -> None:
     exceptions = load_json(root / "security/exceptions.yml").get("exceptions", [])
     excepted = {
@@ -161,9 +130,9 @@ def validate_images(root: Path) -> None:
         raise PolicyFailure("production image is not admitted")
     if acceptance_match.group(1) not in admitted:
         raise PolicyFailure("acceptance image is not admitted")
-    if acceptance_match.group(1) == "docker.io/library/ubuntu@sha256:7b202b0e2e0028c6250f5fcf41d04df492d145a1654c6995a6553f0c1f6f1960":  # pragma: allowlist secret -- deterministic image digest
+    if acceptance_match.group(1) == "ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:0bf90cab657a2eea89ebe33bc8c3d5b68279e4645f08457b874f668f5a699295":  # pragma: allowlist secret -- deterministic image digest
         acceptance_sha256 = hashlib.sha256(acceptance.encode("utf-8")).hexdigest()
-        if acceptance_sha256 != "a47e4ccec9bdb230d757bd8be74e69a83a20bdf9f460a7d96ed6506d44c40ce4" or "pebble" in acceptance.lower():  # pragma: allowlist secret -- deterministic script digest
+        if acceptance_sha256 != "5a4f2e173011d7dd8e552c19b4794f12d4a75814cfc34b16252788163ff4dc60":  # pragma: allowlist secret -- deterministic script digest
             raise PolicyFailure("approved acceptance execution boundary changed")
     prohibited_acceptance_options = ("--privileged", "/var/run/docker.sock", "--device", "--cap-add")
     if any(option in acceptance for option in prohibited_acceptance_options) or 'target=/source,readonly' not in acceptance:

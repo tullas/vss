@@ -323,9 +323,26 @@ class KnowledgePackageTests(unittest.TestCase):
         value=json.loads((ROOT/"tests/fixtures/knowledge/knowledge-package-valid.json").read_text())
         self.assertEqual(validate_package(value,self.registry,validation_time=VALIDATION_TIME).value["classification"],"internal")
 
-    def test_secrets_baseline_contains_only_seven_enforced_fixture_digests(self):
+    def test_secrets_baseline_contains_only_enforced_public_digests(self):
         baseline=json.loads((ROOT/".secrets.baseline").read_text())
-        self.assertEqual(set(baseline["results"]),{"tests/fixtures/knowledge/knowledge-package-valid.json"})
+        self.assertEqual(set(baseline["results"]),{
+            "security/components.yml",
+            "tests/fixtures/knowledge/knowledge-package-valid.json",
+        })
+        public_action_digests={
+            "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",  # pragma: allowlist secret -- public GitHub Action commit
+            "ece7cb06caefa5fff74198d8649806c4678c61a1",  # pragma: allowlist secret -- public GitHub Action commit
+            "ea165f8d65b6e75b540449e92b4886f43607fa02",  # pragma: allowlist secret -- public GitHub Action commit
+            "dcedce43c6f43de0b836d1fe38946645c9c638dc",  # pragma: allowlist secret -- public GitHub Action commit
+            "9d84900f3238fab8cd84ce47d658d25dd008be2f",  # pragma: allowlist secret -- public GitHub Action commit
+            "2031cfc080254a8a887f58cffee85186f0e49e48",  # pragma: allowlist secret -- public GitHub Action commit
+            "3b0bd1d116c0bde30213346b22d4f634d96a2fb0",  # pragma: allowlist secret -- public GitHub Action commit
+            "4eaacf0543bb3f2c246792bd56e8cdeffafb205a",  # pragma: allowlist secret -- public GitHub Action commit
+        }
+        self.assertEqual(
+            {finding["hashed_secret"] for finding in baseline["results"]["security/components.yml"]},
+            {hashlib.sha1(value.encode()).hexdigest() for value in public_action_digests},
+        )
         findings=baseline["results"]["tests/fixtures/knowledge/knowledge-package-valid.json"]
         self.assertEqual(len(findings),7)
         package=json.loads((ROOT/"tests/fixtures/knowledge/knowledge-package-valid.json").read_text())
