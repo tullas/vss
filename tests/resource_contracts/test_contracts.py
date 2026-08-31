@@ -10,7 +10,10 @@ from vss_resource_contracts import (
     validate_production_resource_artifact,
     validate_reusable_asset_admission,
     validate_resource_resolution_request,
+    validate_production_visual_grounding_profile,
 )
+from vss_movie_visual_grounding import create_production_visual_grounding_profile
+from vss_reasoning_contracts import canonical_digest
 
 
 CONTENT = pictorial_png()
@@ -36,11 +39,11 @@ class ResourceContractTests(unittest.TestCase):
         second = ResourceContractRegistry.built_in()
         self.assertEqual(first.digest, second.digest)
         self.assertEqual(
-            "41b7435377fcb430548d349168dad65619c5bbb0759da8fa37e387bb34aebe35",  # pragma: allowlist secret
+            "4b6d43e240c92c2c4e7dfe04fa84eee22d03a13204561125b5b6ba95a4fb55ae",  # pragma: allowlist secret
             BUILT_IN_REGISTRY_SHA256,
         )
         self.assertEqual(BUILT_IN_REGISTRY_SHA256, first.digest)
-        self.assertEqual(22, len(first.registrations))
+        self.assertEqual(28, len(first.registrations))
         for invalid in ("reusable_asset/latest", "resource_resolution_request/latest",
                         "reusable_asset/*", "unknown/1"):
             with self.assertRaises(ResourceContractError):
@@ -112,6 +115,48 @@ class ResourceContractTests(unittest.TestCase):
         duplicate["lineage"]["ancestors"] = [ancestor_a, ancestor_a]
         with self.assertRaises(ResourceContractError):
             validate_production_resource_artifact(duplicate)
+
+    def test_visual_grounding_profile_is_closed_canonical_and_resealed(self):
+        profile = create_production_visual_grounding_profile(
+            profile_id="visual-grounding-contract-test", revision=1,
+            tenant_id="tenant-one", universe_id="universe-one", production_id="production-one",
+            mode="required", scene_ids=["scene-two", "scene-one"],
+            character_ids=["subject-two", "subject-one"],
+            groups=[{
+                "ordinal": 2, "group_id": "production.group-two",
+                "positive_constraints": ["Second opaque positive value."],
+                "negative_constraints": ["Second opaque exclusion value."],
+                "explicit_unknowns": [],
+                "limitations": ["Second production-owned opaque semantics."],
+                "source_reference_digests": [canonical_digest({"source": "two"})],
+            }, {
+                "ordinal": 1, "group_id": "production.group-one",
+                "positive_constraints": ["Opaque positive value."],
+                "negative_constraints": ["Opaque exclusion value."],
+                "explicit_unknowns": ["Opaque unresolved value."],
+                "limitations": ["Production-owned opaque semantics."],
+                "source_reference_digests": [canonical_digest({"source": "one"})],
+            }], reviewer_accountability_id="reviewer-one",
+        )
+        self.assertEqual(
+            list(profile.value["applicability"]["scene_ids"]), ["scene-one", "scene-two"])
+        self.assertEqual(
+            [item["group_id"] for item in profile.value["groups"]],
+            ["production.group-one", "production.group-two"],
+        )
+        open_value = profile.to_json_value()
+        open_value["groups"][0]["domain"] = "platform-must-not-interpret"
+        with self.assertRaises(ResourceContractError):
+            validate_production_visual_grounding_profile(open_value)
+        resealed = profile.to_json_value()
+        resealed["groups"][0]["positive_constraints"][0] = "Substituted opaque value."
+        resealed["profile_sha256"] = canonical_digest({
+            **resealed, "profile_sha256": "0" * 64,
+        })
+        self.assertEqual(
+            validate_production_visual_grounding_profile(resealed).value["groups"][0]["positive_constraints"][0],
+            "Substituted opaque value.",
+        )
 
 
 if __name__ == "__main__":

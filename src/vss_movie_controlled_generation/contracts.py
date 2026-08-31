@@ -27,7 +27,14 @@ def validate_contract(value: Any, identity: str, seal_field: str) -> dict[str, A
 
 
 def validate_generation_request(value: Any) -> dict[str, Any]:
-    return validate_contract(value, "controlled_storyboard_frame_generation_request/2", "request_sha256")
+    if (not isinstance(value, dict)
+            or value.get("contract_identity") != "controlled_storyboard_frame_generation_request"):
+        raise ResourceContractError("controlled media generation request identity is invalid")
+    version = value.get("contract_version")
+    if version not in {"2", "3"}:
+        raise ResourceContractError("controlled media generation request version is invalid")
+    return validate_contract(
+        value, f"controlled_storyboard_frame_generation_request/{version}", "request_sha256")
 
 
 def validate_attempt(value: Any) -> dict[str, Any]:

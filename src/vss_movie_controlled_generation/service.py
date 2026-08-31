@@ -102,25 +102,48 @@ def _build_prompt(frame: Mapping[str, Any]) -> str:
     return prompt
 
 
+def _build_grounded_prompt(frame: Mapping[str, Any], grounding: Mapping[str, Any]) -> str:
+    sections = [_build_prompt(frame)]
+    for label, key in (
+        ("Production visual grounding constraints", "positive_constraints"),
+        ("Production visual exclusions", "negative_constraints"),
+        ("Grounding unknowns that must remain unresolved", "explicit_unknowns"),
+    ):
+        values = grounding[key]
+        if values:
+            sections.append(label + ": " + "; ".join(values))
+    prompt = "\n".join(sections)
+    if len(prompt.encode("utf-8")) > 4096:
+        raise MovieContractError("grounded provider projection exceeds its bound")
+    return prompt
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class AdmittedControlledGeneration:
     request: Mapping[str, Any]
     prompt: str
     approval: Mapping[str, Any] | None
+    grounding_profile: Mapping[str, Any] | None
 
     def __init__(self, key: object, *, request: dict[str, Any], prompt: str,
-                 approval: dict[str, Any] | None) -> None:
+                 approval: dict[str, Any] | None,
+                 grounding_profile: dict[str, Any] | None = None) -> None:
         if key is not _ADMISSION_KEY:
             raise TypeError("controlled generation requires authoritative admission")
         object.__setattr__(self, "request", freeze_json(request))
         object.__setattr__(self, "prompt", prompt)
         object.__setattr__(self, "approval", freeze_json(approval) if approval is not None else None)
+        object.__setattr__(self, "grounding_profile",
+                           freeze_json(grounding_profile) if grounding_profile is not None else None)
 
     def request_json(self) -> dict[str, Any]:
         return thaw_json(self.request)
 
     def approval_json(self) -> dict[str, Any] | None:
         return thaw_json(self.approval) if self.approval is not None else None
+
+    def grounding_profile_json(self) -> dict[str, Any] | None:
+        return thaw_json(self.grounding_profile) if self.grounding_profile is not None else None
 
 
 def admit_controlled_generation(
@@ -238,3 +261,67 @@ def admit_controlled_generation(
     request["request_sha256"] = _digest(request)
     validate_generation_request(request)
     return AdmittedControlledGeneration(_ADMISSION_KEY, request=request, prompt=prompt, approval=approval)
+
+
+def admit_grounded_controlled_generation(
+    story_data: Any, decision_data: Any, packet_data: Any, option_set_data: Any,
+    breakdown_data: Any, base_creative_decision_data: Any, base_canon_snapshot_data: Any,
+    base_canon_binding_data: Any, base_shot_plan_data: Any, base_storyboard_data: Any, *,
+    profile_data: dict[str, Any], grounded_creative_decision_data: dict[str, Any],
+    grounded_canon_snapshot_data: dict[str, Any], grounded_canon_binding_data: dict[str, Any],
+    grounded_shot_plan_data: dict[str, Any], grounded_storyboard_data: dict[str, Any],
+    frame_id: str, environment: str, approval: dict[str, Any] | None = None,
+) -> AdmittedControlledGeneration:
+    """Admit the versioned grounded route without weakening the generic route."""
+    from vss_movie_visual_grounding import admit_grounded_movie_route
+
+    base = admit_controlled_generation(
+        story_data, decision_data, packet_data, option_set_data, breakdown_data,
+        base_creative_decision_data, base_canon_snapshot_data, base_canon_binding_data,
+        base_shot_plan_data, base_storyboard_data, frame_id=frame_id,
+        environment=environment,
+    )
+    route = admit_grounded_movie_route(
+        decision_data, packet_data, option_set_data, breakdown_data,
+        base_creative_decision_data, base_canon_snapshot_data, base_canon_binding_data,
+        base_shot_plan_data, base_storyboard_data, profile_data=profile_data,
+        grounded_creative_decision_data=grounded_creative_decision_data,
+        grounded_canon_snapshot_data=grounded_canon_snapshot_data,
+        grounded_canon_binding_data=grounded_canon_binding_data,
+        grounded_shot_plan_data=grounded_shot_plan_data,
+        grounded_storyboard_data=grounded_storyboard_data, environment=environment,
+    )
+    if route.profile.value["mode"] != "required":
+        raise MovieContractError("grounded controlled generation requires declared required grounding")
+    frames = [item for item in base_storyboard_data["payload"]["ordered_frames"]
+              if item["frame_id"] == frame_id]
+    grounding_frames = [item for item in route.storyboard.value["ordered_frame_grounding"]
+                        if item["frame_id"] == frame_id]
+    if len(frames) != 1 or len(grounding_frames) != 1:
+        raise MovieContractError("grounded controlled frame is not present exactly once")
+    prompt = _build_grounded_prompt(frames[0], grounding_frames[0])
+    request = base.request_json()
+    request["contract_version"] = "3"
+    request["lineage"].update({
+        "creative_decision_revision": route.creative_decision.digest,
+        "canon_snapshot": route.canon_snapshot.digest,
+        "production_canon_binding": route.canon_binding.digest,
+        "shot_plan_draft": route.shot_plan.digest,
+        "storyboard_specification": route.storyboard.digest,
+        "storyboard_frame": grounding_frames[0]["frame_grounding_sha256"],
+    })
+    projection_material = {
+        "prompt": prompt,
+        "visual_grounding_profile_sha256": route.profile.value["profile_sha256"],
+        "frame_grounding_sha256": grounding_frames[0]["frame_grounding_sha256"],
+    }
+    request["projection"] = {
+        **projection_material, "projection_sha256": _digest(projection_material),
+    }
+    request["provider"]["provider_request_sha256"] = _digest(provider_request_body(prompt))
+    request["request_sha256"] = "0" * 64
+    request["request_sha256"] = _digest(request)
+    validate_generation_request(request)
+    return AdmittedControlledGeneration(
+        _ADMISSION_KEY, request=request, prompt=prompt, approval=approval,
+        grounding_profile=route.profile.to_json_value())

@@ -86,37 +86,6 @@ def validate_exceptions(root: Path, today: dt.date | None = None) -> None:
             raise PolicyFailure(f"security exception expiry is invalid: {record['id']}") from exc
         if expiry < now:
             raise PolicyFailure(f"security exception is expired: {record['id']}")
-        if record["id"] == "ubuntu-2604-pebble-ci-2026-08":
-            exact_identity = {
-                "component": "container-ubuntu-2604",
-                "version": "sha256:7b202b0e2e0028c6250f5fcf41d04df492d145a1654c6995a6553f0c1f6f1960",
-                "owner": "Bootstrap Owner",
-                "approver_identity": "@tullas",
-                "approved_at": "2026-08-15",
-                "expiry_date": "2026-08-29",
-            }
-            if any(record.get(key) != value for key, value in exact_identity.items()):
-                raise PolicyFailure("Ubuntu acceptance exception differs from human approval")
-            if record.get("approver_roles") != ["Enterprise Architect", "Product Security risk approver"]:
-                raise PolicyFailure("Ubuntu acceptance exception approval roles are invalid")
-            allowed = record.get("allowed_findings")
-            expected_findings = {
-                ("/usr/bin/pebble", finding, "stdlib", "HIGH")
-                for finding in (
-                    "CVE-2026-33818", "CVE-2026-39821", "CVE-2026-46600",
-                    "CVE-2026-56853", "CVE-2026-56858", "CVE-2026-56859",
-                    "CVE-2026-56860", "CVE-2026-56862",
-                )
-            }
-            actual_findings = {
-                (item.get("target"), item.get("id"), item.get("package"), item.get("severity"))
-                for item in allowed
-                if isinstance(item, dict) and set(item) == {"target", "id", "package", "severity"}
-            } if isinstance(allowed, list) else set()
-            if not isinstance(allowed, list) or len(allowed) != 8 or actual_findings != expected_findings:
-                raise PolicyFailure("Ubuntu acceptance exception finding scope is invalid")
-
-
 def validate_component_admission(root: Path) -> None:
     exceptions = load_json(root / "security/exceptions.yml").get("exceptions", [])
     excepted = {
@@ -161,9 +130,9 @@ def validate_images(root: Path) -> None:
         raise PolicyFailure("production image is not admitted")
     if acceptance_match.group(1) not in admitted:
         raise PolicyFailure("acceptance image is not admitted")
-    if acceptance_match.group(1) == "docker.io/library/ubuntu@sha256:7b202b0e2e0028c6250f5fcf41d04df492d145a1654c6995a6553f0c1f6f1960":
+    if acceptance_match.group(1) == "ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:a4693923c263447a4a63e8a2c5920d0ebbfe29428e83c5971e749bf5ee06a0ee":  # pragma: allowlist secret -- deterministic image digest
         acceptance_sha256 = hashlib.sha256(acceptance.encode("utf-8")).hexdigest()
-        if acceptance_sha256 != "a47e4ccec9bdb230d757bd8be74e69a83a20bdf9f460a7d96ed6506d44c40ce4" or "pebble" in acceptance.lower():
+        if acceptance_sha256 != "5b1486e5b1de2beedd213962117aa8b270add6afd70b4dac98b271852bb5e9e7":  # pragma: allowlist secret -- deterministic script digest
             raise PolicyFailure("approved acceptance execution boundary changed")
     prohibited_acceptance_options = ("--privileged", "/var/run/docker.sock", "--device", "--cap-add")
     if any(option in acceptance for option in prohibited_acceptance_options) or 'target=/source,readonly' not in acceptance:
@@ -273,6 +242,19 @@ def validate_opentofu(root: Path) -> None:
         raise PolicyFailure("OpenTofu provider checksum lock is missing")
 
 
+def validate_derivative_build_preparation(root: Path) -> None:
+    expected = {
+        "containers/versitygw/Dockerfile": "f49973c801193127638ee55ff42a03fc9058d77a1e3f7e986729dd4281fee364",  # pragma: allowlist secret -- deterministic build-definition digest
+        "containers/ubuntu-26.04-acceptance/Dockerfile": "7682cb2d8c8795164b8be1c9546106870389dc0fe8d30cc19cc8b03defd4a182",  # pragma: allowlist secret -- deterministic build-definition digest
+        ".github/workflows/build-versitygw-derivative.yml": "734ff91c14efb7e8aac211bb0f7f59efc29826131f16e6b7996c5e1c0451f894",  # pragma: allowlist secret -- deterministic workflow digest
+    }
+    for relative, expected_sha256 in expected.items():
+        path = root / relative
+        actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "missing"
+        if actual_sha256 != expected_sha256:
+            raise PolicyFailure(f"security derivative build preparation drift: {relative}")
+
+
 def validate_workflow_invariants(root: Path) -> None:
     path = root / ".github/workflows/security.yml"
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
@@ -315,7 +297,7 @@ def validate_workflow_invariants(root: Path) -> None:
             raise PolicyFailure(f"canonical security validation step is missing: {job_name}")
     installer = root / "scripts/security/install-trivy.sh"
     installer_sha256 = hashlib.sha256(installer.read_bytes()).hexdigest() if installer.is_file() else "missing"
-    if installer_sha256 != "f3cdfce62d05a0eaf8ec12b54bcc37ba9c94f4ea883381e599ad4ebe5bdd3774":
+    if installer_sha256 != "f3cdfce62d05a0eaf8ec12b54bcc37ba9c94f4ea883381e599ad4ebe5bdd3774":  # pragma: allowlist secret -- deterministic installer digest
         raise PolicyFailure("security scanner installer is not checksum pinned")
     expected_scans = {
         "container-scan": '"$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json" \'${{ matrix.image }}\'',
@@ -352,7 +334,7 @@ def validate_workflow_invariants(root: Path) -> None:
 
 def validate_all(root: Path) -> list[str]:
     checks = [
-        validate_licenses, validate_exceptions, validate_component_admission, validate_actions, validate_images,
+        validate_derivative_build_preparation, validate_licenses, validate_exceptions, validate_component_admission, validate_actions, validate_images,
         validate_locks, validate_manifest_alignment, validate_direct_dependencies, validate_vulnerability_admission, validate_opentofu,
         validate_workflow_invariants,
     ]

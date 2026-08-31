@@ -287,6 +287,35 @@ def production_canon_binding_seal_material(value):
     return {**value, "result_sha256": "0" * 64}
 
 
+def visual_grounding_profile_seal_material(value):
+    return {**value, "profile_sha256": "0" * 64}
+
+
+def visual_grounding_review_seal_material(value):
+    return {**value, "review_sha256": "0" * 64}
+
+
+def grounded_creative_decision_identity_material(value):
+    return {
+        "decision_kind": value["decision_kind"], "scope": value["scope"],
+        "base_decision": value["base_decision"],
+        "visual_grounding": value["visual_grounding"],
+    }
+
+
+def grounded_canon_snapshot_identity_material(value):
+    return {
+        "snapshot_version": value["snapshot_version"], "scope": value["scope"],
+        "base_canon_snapshot": value["base_canon_snapshot"],
+        "decision": value["decision"], "visual_grounding": value["visual_grounding"],
+    }
+
+
+def grounded_production_canon_binding_identity_material(value):
+    return {key: item for key, item in value.items()
+            if key not in {"binding_id", "limitations", "result_sha256"}}
+
+
 def dependency_impact_request_seal_material(value):
     return {**value, "request_sha256": "0" * 64}
 
@@ -485,6 +514,137 @@ def validate_creative_decision_revision(value, *, registry=None):
         raise ResourceContractError("creative decision evidence is not canonical")
     if value["decision_sha256"] != canonical_digest(creative_decision_seal_material(value)):
         raise ResourceContractError("creative decision seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_production_visual_grounding_profile(value, *, registry=None):
+    value = _validate(value, "production_visual_grounding_profile/1", registry)
+    applicability = value["applicability"]
+    if (applicability["scene_ids"] != sorted(applicability["scene_ids"])
+            or applicability["character_ids"] != sorted(applicability["character_ids"])):
+        raise ResourceContractError("visual grounding applicability is not canonical")
+    group_ids = [item["group_id"] for item in value["groups"]]
+    ordinals = [item["ordinal"] for item in value["groups"]]
+    if (ordinals != list(range(1, len(ordinals) + 1))
+            or len(group_ids) != len(set(group_ids))):
+        raise ResourceContractError("visual grounding groups are not canonical")
+    for group in value["groups"]:
+        if group["source_reference_digests"] != sorted(group["source_reference_digests"]):
+            raise ResourceContractError("visual grounding source references are not canonical")
+    for field in ("uncertainty", "conflicts", "limitations", "evidence_references"):
+        if value[field] != sorted(value[field]):
+            raise ResourceContractError("visual grounding profile metadata is not canonical")
+    if value["profile_sha256"] != canonical_digest(visual_grounding_profile_seal_material(value)):
+        raise ResourceContractError("visual grounding profile seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_production_visual_grounding_review(value, *, registry=None):
+    value = _validate(value, "production_visual_grounding_review/1", registry)
+    defect_keys = [(item["defect_code"], item["group_id"]) for item in value["defects"]]
+    if defect_keys != sorted(defect_keys, key=lambda item: (item[0], item[1] or "")):
+        raise ResourceContractError("visual grounding review defects are not canonical")
+    if len(defect_keys) != len(set(defect_keys)):
+        raise ResourceContractError("visual grounding review defect is duplicated")
+    expected_id = "visual-grounding-review-" + canonical_digest({
+        key: item for key, item in value.items() if key not in {"review_id", "review_sha256"}
+    })[:32]
+    if value["review_id"] != expected_id:
+        raise ResourceContractError("visual grounding review identity mismatch")
+    if value["review_sha256"] != canonical_digest(visual_grounding_review_seal_material(value)):
+        raise ResourceContractError("visual grounding review seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_grounded_creative_decision_revision(value, *, base_decision, profile,
+                                                  registry=None):
+    value = _validate(value, "creative_decision_revision/2", registry)
+    if not isinstance(base_decision, AdmittedCreativeDecision):
+        raise ResourceContractError("grounded creative decision requires authoritative base decision")
+    checked_base = validate_creative_decision_revision(base_decision.to_json_value(), registry=registry)
+    checked_profile = validate_production_visual_grounding_profile(
+        profile.to_json_value() if isinstance(profile, ValidatedResourceArtifact) else profile,
+        registry=registry,
+    )
+    expected_base = {key: checked_base.value[key] for key in (
+        "decision_id", "revision", "decision_sha256")}
+    expected_grounding = {key: checked_profile.value[key] for key in (
+        "profile_id", "revision", "profile_sha256", "mode")}
+    if (value["scope"] != checked_base.value["scope"] or value["status"] != "accepted"
+            or value["base_decision"] != expected_base
+            or value["visual_grounding"] != expected_grounding):
+        raise ResourceContractError("grounded creative decision authoritative binding mismatch")
+    expected_id = "decision-" + canonical_digest(
+        grounded_creative_decision_identity_material(value))[:32]
+    if value["decision_id"] != expected_id:
+        raise ResourceContractError("grounded creative decision identity mismatch")
+    if value["decision_sha256"] != canonical_digest(creative_decision_seal_material(value)):
+        raise ResourceContractError("grounded creative decision seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_grounded_canon_snapshot(value, *, base_canon_snapshot, decision, profile,
+                                     registry=None):
+    value = _validate(value, "canon_snapshot/2", registry)
+    if not all(isinstance(item, ValidatedResourceArtifact)
+               for item in (base_canon_snapshot, decision, profile)):
+        raise ResourceContractError("grounded canon requires validated artifacts")
+    checked_profile = validate_production_visual_grounding_profile(
+        profile.to_json_value(), registry=registry)
+    expected_base = {key: base_canon_snapshot.value[key] for key in (
+        "canon_snapshot_id", "snapshot_version", "canon_sha256")}
+    expected_decision = {key: decision.value[key] for key in (
+        "decision_id", "revision", "decision_sha256")}
+    expected_decision["scene_id"] = decision.value["scope"]["scene_id"]
+    expected_grounding = {key: checked_profile.value[key] for key in (
+        "profile_id", "revision", "profile_sha256", "mode")}
+    expected_scope = {key: decision.value["scope"][key]
+                      for key in ("tenant_id", "universe_id", "production_id")}
+    expected_scope["scope_kind"] = "production"
+    if (value["scope"] != expected_scope or value["base_canon_snapshot"] != expected_base
+            or value["decision"] != expected_decision
+            or value["visual_grounding"] != expected_grounding):
+        raise ResourceContractError("grounded canon authoritative binding mismatch")
+    expected_id = "canon-" + canonical_digest(
+        grounded_canon_snapshot_identity_material(value))[:32]
+    if value["canon_snapshot_id"] != expected_id:
+        raise ResourceContractError("grounded canon identity mismatch")
+    if value["canon_sha256"] != canonical_digest(canon_snapshot_seal_material(value)):
+        raise ResourceContractError("grounded canon seal mismatch")
+    return ValidatedResourceArtifact._create(value)
+
+
+def validate_grounded_production_canon_binding(
+    value, *, base_binding, canon_snapshot, decision, profile, applicability, registry=None,
+):
+    value = _validate(value, "production_canon_binding/2", registry)
+    if not all(isinstance(item, ValidatedResourceArtifact)
+               for item in (base_binding, canon_snapshot, decision, profile)):
+        raise ResourceContractError("grounded production binding requires validated artifacts")
+    checked_profile = validate_production_visual_grounding_profile(
+        profile.to_json_value(), registry=registry)
+    expected = {
+        "base_binding": {key: base_binding.value[key] for key in ("binding_id", "result_sha256")},
+        "canon_snapshot": {key: canon_snapshot.value[key] for key in (
+            "canon_snapshot_id", "snapshot_version", "canon_sha256")},
+        "decision": {key: decision.value[key] for key in (
+            "decision_id", "revision", "decision_sha256")},
+        "visual_grounding": {key: checked_profile.value[key] for key in (
+            "profile_id", "revision", "profile_sha256", "mode")},
+    }
+    if (value["scope"] != base_binding.value["scope"]
+            or value["base_binding"] != expected["base_binding"]
+            or value["canon_snapshot"] != expected["canon_snapshot"]
+            or value["decision"] != expected["decision"]
+            or value["visual_grounding"] != expected["visual_grounding"]
+            or value["applicability"] != applicability):
+        raise ResourceContractError("grounded production binding authoritative binding mismatch")
+    expected_id = "production-canon-binding-" + canonical_digest(
+        grounded_production_canon_binding_identity_material(value))[:32]
+    if value["binding_id"] != expected_id:
+        raise ResourceContractError("grounded production binding identity mismatch")
+    if value["result_sha256"] != canonical_digest(production_canon_binding_seal_material(value)):
+        raise ResourceContractError("grounded production binding seal mismatch")
     return ValidatedResourceArtifact._create(value)
 
 

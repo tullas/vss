@@ -23,6 +23,17 @@ immutable validated artifacts, exact Movie Registry admission, original
 fictional fixtures, and adversarial tests. Registration means structurally
 known only. Runtime remains the sole authorization and execution authority.
 
+## Deterministic fixture evidence
+
+CI independently recomputes the M5.1 acceptance tuple. Its current Movie
+Registry element is
+`011c1bcfcbd5442c8f6fe452b7858e043ac18d6c9a18ddc28c4f8dd2175da34b`.
+That element intentionally covers every registered movie contract, so adding a
+new contract changes it without changing the M5.1 fixture semantics. The
+remaining fixture-derived tuple elements are pinned separately and must remain
+unchanged; any update requires an independent recomputation rather than a
+weakened assertion.
+
 ## Identity boundaries
 
 `character_reference/1` records an explicit source declaration. Its

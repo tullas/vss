@@ -318,5 +318,33 @@ class CharacterContinuityContractTests(unittest.TestCase):
         self.assertEqual(results.count("rejected"),32)
         self.assertEqual(len(set(results)-{"rejected"}),1)
 
+    def test_m5_1_fixture_acceptance_tuple_is_stable_across_registry_expansion(self):
+        reference_value=reference()
+        admitted_reference=validate_character_reference(reference_value,self.registry)
+        admitted_identity=validate_character_identity(identity([reference_value]),[admitted_reference],self.registry)
+        sequence_value=sequence(self.breakdown)
+        admitted_sequence=validate_continuity_sequence(sequence_value,self.breakdown,self.registry)
+        values=[observation(sequence_value,category,ordinal) for category,ordinal in (("presence",1),("possession",1),("physical_state",3))]
+        observations=[validate_character_observation(value,admitted_identity,admitted_sequence,self.registry) for value in values]
+        admitted_task=validate_character_continuity_task(task(sequence_value),admitted_sequence,[admitted_identity],self.registry)
+        admitted_result=validate_character_continuity_observation_set(result(sequence_value,values),observations,admitted_sequence,admitted_task,self.registry)
+        self.assertEqual((
+            self.registry.digest,
+            admitted_reference.value["content_digest"],
+            admitted_identity.value["content_digest"],
+            admitted_sequence.value["content_digest"],
+            admitted_task.value["task_content_digest"],
+            admitted_result.value["payload"]["semantic_result_digest"],
+            admitted_result.value["integrity"]["complete_result_sha256"],
+        ),(
+            "011c1bcfcbd5442c8f6fe452b7858e043ac18d6c9a18ddc28c4f8dd2175da34b",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
+            "f58e461dfa72934457109b301c00faac53df3efe7f5e4c99c6e2356fa95a301b",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
+            "23f6062d723c948e2f1f5c64717d0e0d7f7afa019e5ef60f3052099aefe1f6d9",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
+            "0b182656c967875794fce9489b9e0f29095f219c39f5d1f79d642eba66745a6f",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
+            "6364ed22b81f711f9db631ebeab01b12f11cfeb1f80f2113ba1f8eefa85490c4",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
+            "6b08807f038fe6d073ecfd5db2518aabc0599397aa0740f8bc6e7499283a3976",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
+            "472ed146c7b0bd6334ab8db4c831971ce0df256ab8aab3751bc33fd4c396c295",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
+        ))
+
 
 if __name__ == "__main__": unittest.main()

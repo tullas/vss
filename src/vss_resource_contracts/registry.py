@@ -23,8 +23,13 @@ FILES = MappingProxyType({
     "resource_resolution_request/1": "resource-resolution-request-v1.schema.json",
     "resource_resolution_result/1": "resource-resolution-result-v1.schema.json",
     "creative_decision_revision/1": "creative-decision-revision-v1.schema.json",
+    "creative_decision_revision/2": "creative-decision-revision-v2.schema.json",
     "canon_snapshot/1": "canon-snapshot-v1.schema.json",
+    "canon_snapshot/2": "canon-snapshot-v2.schema.json",
     "production_canon_binding/1": "production-canon-binding-v1.schema.json",
+    "production_canon_binding/2": "production-canon-binding-v2.schema.json",
+    "production_visual_grounding_profile/1": "production-visual-grounding-profile-v1.schema.json",
+    "production_visual_grounding_review/1": "production-visual-grounding-review-v1.schema.json",
     "dependency_impact_request/1": "dependency-impact-request-v1.schema.json",
     "dependency_impact_result/1": "dependency-impact-result-v1.schema.json",
     "media_provenance_request/1": "media-provenance-request-v1.schema.json",
@@ -33,6 +38,7 @@ FILES = MappingProxyType({
     "rights_eligibility_reassessment_result/1": "rights-eligibility-reassessment-result-v1.schema.json",
     "controlled_storyboard_frame_generation_request/1": "controlled-storyboard-frame-generation-request-v1.schema.json",
     "controlled_storyboard_frame_generation_request/2": "controlled-storyboard-frame-generation-request-v2.schema.json",
+    "controlled_storyboard_frame_generation_request/3": "controlled-storyboard-frame-generation-request-v3.schema.json",
     "controlled_media_generation_approval/1": "controlled-media-generation-approval-v1.schema.json",
     "controlled_media_generation_attempt/1": "controlled-media-generation-attempt-v1.schema.json",
     "controlled_media_generation_attempt_outcome/1": "controlled-media-generation-attempt-outcome-v1.schema.json",
@@ -40,7 +46,7 @@ FILES = MappingProxyType({
     "generated_review_candidate/2": "generated-review-candidate-v2.schema.json",
     "generated_review_candidate_review/1": "generated-review-candidate-review-v1.schema.json",
 })
-BUILT_IN_REGISTRY_SHA256 = "41b7435377fcb430548d349168dad65619c5bbb0759da8fa37e387bb34aebe35"  # pragma: allowlist secret
+BUILT_IN_REGISTRY_SHA256 = "4b6d43e240c92c2c4e7dfe04fa84eee22d03a13204561125b5b6ba95a4fb55ae"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 
