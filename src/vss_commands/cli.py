@@ -61,6 +61,36 @@ def _parser() -> argparse.ArgumentParser:
     workflow_run.add_argument("workflow_name")
     workflow_run.add_argument("--environment", required=True)
     workflow_run.add_argument("--correlation-id")
+    dev = subparsers.add_parser("dev")
+    dev_actions = dev.add_subparsers(dest="dev_action", required=True)
+    milestone = dev_actions.add_parser("milestone")
+    milestone_actions = milestone.add_subparsers(dest="milestone_action", required=True)
+    milestone_init = milestone_actions.add_parser("init")
+    milestone_init.add_argument("--milestone-id", required=True)
+    milestone_init.add_argument("--base", required=True)
+    milestone_init.add_argument("--issue", required=True, type=int)
+    milestone_init.add_argument("--domain", action="append", default=[])
+    milestone_init.add_argument("--path", action="append", default=[])
+    milestone_init.add_argument("--summary", required=True)
+    for action in ("status", "next"):
+        parser_action = milestone_actions.add_parser(action)
+        parser_action.add_argument("--milestone-id")
+    milestone_checkpoint = milestone_actions.add_parser("checkpoint")
+    milestone_checkpoint.add_argument("--milestone-id")
+    milestone_checkpoint.add_argument("--type", required=True, choices=("checkpointed", "repair_started", "repair_completed", "blocked", "completed"))
+    milestone_checkpoint.add_argument("--summary", required=True)
+    milestone_checkpoint.add_argument("--expected-generation", type=int)
+    milestone_checkpoint.add_argument("--stop-reason")
+    milestone_validate = milestone_actions.add_parser("validate")
+    milestone_validate.add_argument("--milestone-id")
+    milestone_validate.add_argument("--tier", required=True, choices=("affected", "subsystem", "canonical"))
+    milestone_ci = milestone_actions.add_parser("ci")
+    milestone_ci.add_argument("--milestone-id")
+    ci_source = milestone_ci.add_mutually_exclusive_group(required=True)
+    ci_source.add_argument("--input", type=Path)
+    ci_source.add_argument("--refresh", action="store_true")
+    milestone_pr = milestone_actions.add_parser("pr")
+    milestone_pr.add_argument("--milestone-id")
     reasoning = subparsers.add_parser("reasoning")
     reasoning_actions = reasoning.add_subparsers(dest="reasoning_action", required=True)
     generate_options = reasoning_actions.add_parser("generate-options")
@@ -351,6 +381,38 @@ def main(argv: list[str] | None = None) -> int:
         except WorkflowFailure as exc:
             print(json.dumps({"error": str(exc)}, sort_keys=True, separators=(",", ":")))
             return int(exc.exit_code)
+
+    if args.action == "dev":
+        from vss_dev import MilestoneController, MilestoneFailure
+        try:
+            controller = MilestoneController()
+            if args.milestone_action == "init":
+                value = controller.initialize(args.milestone_id, args.base, args.issue, args.domain, args.path, args.summary)
+            elif args.milestone_action in {"status", "next"}:
+                value = controller.load(args.milestone_id)
+                if args.milestone_action == "next":
+                    value = {"milestone_id": value["milestone_id"], "status": value["status"], "next": value["next"], "authority": value["authority"]}
+            elif args.milestone_action == "checkpoint":
+                data = {"stop_reason": args.stop_reason} if args.stop_reason else None
+                value = controller.checkpoint(args.milestone_id, args.type, args.summary, data, args.expected_generation)
+            elif args.milestone_action == "validate":
+                value = controller.validate(args.tier, args.milestone_id)
+            elif args.milestone_action == "ci":
+                if args.refresh:
+                    value = controller.ci_refresh(args.milestone_id)
+                else:
+                    try:
+                        value = controller.ingest_ci(json.loads(args.input.read_text(encoding="utf-8")), args.milestone_id)
+                    except (OSError, UnicodeError, json.JSONDecodeError):
+                        raise MilestoneFailure("CI observation is malformed")
+            else:
+                state = controller.load(args.milestone_id)
+                value = {"milestone_id": state["milestone_id"], "status": state["status"], "pr_action": "status_only", "next": state["next"], "authority": state["authority"]}
+            print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+            return int(ExitCode.SUCCESS)
+        except MilestoneFailure as exc:
+            print(json.dumps({"error": str(exc)}, sort_keys=True, separators=(",", ":")))
+            return int(ExitCode.INVALID_INPUT)
 
     if args.action == "movie":
         if args.movie_action == "demo":

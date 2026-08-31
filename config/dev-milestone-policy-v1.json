@@ -1,0 +1,14 @@
+{
+  "schema_version": "1",
+  "protocol": "vss.dev-milestone-policy",
+  "limits": {"max_events": 256, "max_event_bytes": 2048, "max_state_bytes": 16384, "max_repair_attempts": 3, "max_repair_files": 32, "max_repair_line_delta": 2000},
+  "protected_patterns": [".github/**", "AGENTS.md", "config/**", "docs/adr/**", "schemas/**", "scripts/vss-agent", "security/**", "src/vss_providers/**", "src/vss_runtime/**"],
+  "classification": {
+    "security_terms": ["security", "secret", "supply-chain", "vulnerability", "license", "permission", "policy"],
+    "infrastructure_terms": ["runner", "network", "registry", "quota", "timeout", "service unavailable"],
+    "fixture_terms": ["fixture", "golden", "snapshot", "digest"],
+    "flaky_terms": ["flaky", "intermittent", "retry"]
+  },
+  "model_routing": {"architecture_security": "gpt-5.6-sol-high", "bounded_implementation": "gpt-5.6-terra-medium", "maintenance": "gpt-5.6-terra-low", "advisory": true},
+  "authority": {"runtime_execution": false, "provider_execution": false, "production": false, "publication": false, "workflow_activation": false, "security_exception": false, "product_authority": false, "merge": false, "push": false}
+}
