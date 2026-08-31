@@ -130,9 +130,9 @@ def validate_images(root: Path) -> None:
         raise PolicyFailure("production image is not admitted")
     if acceptance_match.group(1) not in admitted:
         raise PolicyFailure("acceptance image is not admitted")
-    if acceptance_match.group(1) == "ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:0bf90cab657a2eea89ebe33bc8c3d5b68279e4645f08457b874f668f5a699295":  # pragma: allowlist secret -- deterministic image digest
+    if acceptance_match.group(1) == "ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:a4693923c263447a4a63e8a2c5920d0ebbfe29428e83c5971e749bf5ee06a0ee":  # pragma: allowlist secret -- deterministic image digest
         acceptance_sha256 = hashlib.sha256(acceptance.encode("utf-8")).hexdigest()
-        if acceptance_sha256 != "5b3f9676eba92dd8c3cec9996f0dad1d6ba155e0d29b415f5e09b1cd0373fea7":  # pragma: allowlist secret -- deterministic script digest
+        if acceptance_sha256 != "5b1486e5b1de2beedd213962117aa8b270add6afd70b4dac98b271852bb5e9e7":  # pragma: allowlist secret -- deterministic script digest
             raise PolicyFailure("approved acceptance execution boundary changed")
     prohibited_acceptance_options = ("--privileged", "/var/run/docker.sock", "--device", "--cap-add")
     if any(option in acceptance for option in prohibited_acceptance_options) or 'target=/source,readonly' not in acceptance:

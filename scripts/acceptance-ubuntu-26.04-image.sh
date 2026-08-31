@@ -3,7 +3,7 @@
 set -Eeuo pipefail
 
 project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-readonly image='ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:0bf90cab657a2eea89ebe33bc8c3d5b68279e4645f08457b874f668f5a699295'
+readonly image='ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:a4693923c263447a4a63e8a2c5920d0ebbfe29428e83c5971e749bf5ee06a0ee'
 docker run --rm \
   --user 0:0 \
   --mount "type=bind,source=$project_root,target=/source,readonly" \

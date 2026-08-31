@@ -75,7 +75,7 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:0bf90cab657a2eea89ebe33bc8c3d5b68279e4645f08457b874f668f5a699295
+          - ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:a4693923c263447a4a63e8a2c5920d0ebbfe29428e83c5971e749bf5ee06a0ee
           - ghcr.io/tullas/vss/versitygw@sha256:619ffa71548c6128dc52e53846a0f2178f8fe69fd083ae3c9d72982b50e1bd5c
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
