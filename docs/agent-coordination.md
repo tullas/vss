@@ -157,6 +157,23 @@ or repair-budget exhaustion fails closed. The controller may classify routine
 code or registered-fixture failure but never authorizes the repair, push, PR,
 merge, paid call, or Runtime/provider execution.
 
+`vss dev milestone next --packet` emits a strict, deterministic
+`vss.dev-milestone-execution-packet` for reset-session handoff. The packet binds the exact
+milestone generation and history tail, base and HEAD SHAs, worktree change identity, issue,
+policy, harness-v2 map, validation evidence, CI observation, and repair budget. Its context is a
+bounded set of harness-v2 repository references grouped as guidance, implementation, tests, and
+validation/config/contracts; it contains no file contents, commands, logs, prompts, or credentials.
+Unregistered domains, unclassified changed paths, sensitive residue, stale HEAD, corrupt state,
+map disagreement, and oversized context fail closed. Ordinary `next` output is unchanged.
+
+For a reset session, give the fresh repository-aware agent only the canonical packet and repository
+access. The agent verifies the bound checkout, reads the referenced guidance/context, performs only
+the controller-selected bounded action, and returns durable controller validation or checkpoint
+evidence. Hidden ChatGPT/Codex memory, copied terminal output, and hand-written milestone history
+are not authoritative. The packet is advisory coordination data and all Runtime, provider,
+production, publication, workflow, security-exception, product, merge, and push authority fields
+remain constant false.
+
 The compact state may recommend GPT-5.6 Sol High for architecture/security
 stops, GPT-5.6 Terra Medium for bounded repairs, and GPT-5.6 Terra Low for
 status/maintenance. This is advisory routing metadata only: it neither proves

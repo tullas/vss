@@ -22,7 +22,7 @@
     {
       "id": "dev-milestone",
       "docs": ["docs/agent-coordination.md", "docs/security/threat-model.md"],
-      "code": ["config/dev-milestone-policy-v1.json", "schemas/dev-milestone-policy-v1.schema.json", "schemas/dev-milestone-record-v1.schema.json", "src/vss_dev"],
+      "code": ["config/dev-milestone-policy-v1.json", "schemas/dev-milestone-execution-packet-v1.schema.json", "schemas/dev-milestone-policy-v1.schema.json", "schemas/dev-milestone-record-v1.schema.json", "src/vss_commands/cli.py", "src/vss_dev"],
       "tests": ["tests/dev_milestone"]
     },
     {
@@ -81,6 +81,7 @@
     {"pattern": "schemas/**", "domain": "architecture", "minimum_level": "L2", "risk": "shared", "profiles": ["architecture-tests", "security-tests"]},
     {"pattern": "schemas/agent-harness-v2.schema.json", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
     {"pattern": "schemas/agent-validation-evidence-v1.schema.json", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
+    {"pattern": "schemas/dev-milestone-execution-packet-v1.schema.json", "domain": "dev-milestone", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
     {"pattern": "schemas/dev-milestone-policy-v1.schema.json", "domain": "dev-milestone", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
     {"pattern": "schemas/dev-milestone-record-v1.schema.json", "domain": "dev-milestone", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
     {"pattern": "scripts/validate-change.sh", "domain": "agent-coordination", "minimum_level": "L3", "risk": "shared", "profiles": ["canonical"]},
