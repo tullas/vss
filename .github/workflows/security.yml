@@ -76,7 +76,7 @@ jobs:
       matrix:
         image:
           - ghcr.io/tullas/vss/ubuntu-26.04-acceptance@sha256:a4693923c263447a4a63e8a2c5920d0ebbfe29428e83c5971e749bf5ee06a0ee
-          - ghcr.io/tullas/vss/versitygw@sha256:619ffa71548c6128dc52e53846a0f2178f8fe69fd083ae3c9d72982b50e1bd5c
+          - ghcr.io/tullas/vss/versitygw@sha256:79a28a1b38fe8d96869bef7c3c54562bd69158f9df0ff108d9c8e902ea01764e
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Authenticate for the admitted VSS-maintained image
