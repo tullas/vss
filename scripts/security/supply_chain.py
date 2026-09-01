@@ -244,9 +244,9 @@ def validate_opentofu(root: Path) -> None:
 
 def validate_derivative_build_preparation(root: Path) -> None:
     expected = {
-        "containers/versitygw/Dockerfile": "f49973c801193127638ee55ff42a03fc9058d77a1e3f7e986729dd4281fee364",  # pragma: allowlist secret -- deterministic build-definition digest
+        "containers/versitygw/Dockerfile": "2f542a25406c0b6fb6a7ad05847c2ea0fa4c790f25613694cd6831a4559f52fc",  # pragma: allowlist secret -- deterministic build-definition digest
         "containers/ubuntu-26.04-acceptance/Dockerfile": "7682cb2d8c8795164b8be1c9546106870389dc0fe8d30cc19cc8b03defd4a182",  # pragma: allowlist secret -- deterministic build-definition digest
-        ".github/workflows/build-versitygw-derivative.yml": "734ff91c14efb7e8aac211bb0f7f59efc29826131f16e6b7996c5e1c0451f894",  # pragma: allowlist secret -- deterministic workflow digest
+        ".github/workflows/build-versitygw-derivative.yml": "391750362edf1711a16954df636ba4197e853787c52f158cf308ef994af56cd7",  # pragma: allowlist secret -- deterministic workflow digest
     }
     for relative, expected_sha256 in expected.items():
         path = root / relative
@@ -305,8 +305,12 @@ def validate_workflow_invariants(root: Path) -> None:
     }
     for job_name in ("container-scan", "iac-scan"):
         job_runs = {str(step.get("run", "")).strip() for step in jobs[job_name]["steps"] if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True}
-        required_container_policy = "python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}' --report \"$RUNNER_TEMP/trivy-report.json\""
-        if 'scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs or expected_scans[job_name] not in job_runs or (job_name == "container-scan" and required_container_policy not in job_runs):
+        required_container_policy = "python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}' --report \"$RUNNER_TEMP/trivy-report.json\" --manifest \"$RUNNER_TEMP/image-manifest.json\""
+        required_manifest_evidence = "docker buildx imagetools inspect --raw '${{ matrix.image }}' > \"$RUNNER_TEMP/image-manifest.json\""
+        if ('scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs
+                or expected_scans[job_name] not in job_runs
+                or (job_name == "container-scan"
+                    and (required_container_policy not in job_runs or required_manifest_evidence not in job_runs))):
             raise PolicyFailure(f"security scanner does not fail closed: {job_name}")
     scanned_images = jobs["container-scan"].get("strategy", {}).get("matrix", {}).get("image", [])
     required_images = sorted(record["source"] for record in component_map(root).values() if record["ecosystem"] == "oci")

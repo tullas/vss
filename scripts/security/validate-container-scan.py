@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -28,8 +29,10 @@ def finding_key(target: str, finding: dict[str, Any]) -> tuple[str, str, str, st
     )
 
 
-def validate(root: Path, image: str, report_path: Path, today: dt.date | None = None) -> dict[str, Any]:
+def validate(root: Path, image: str, report_path: Path, manifest_path: Path,
+             today: dt.date | None = None) -> dict[str, Any]:
     report = load_object(report_path)
+    manifest = load_object(manifest_path)
     components = load_object(root / "security/components.yml").get("components", [])
     exceptions = load_object(root / "security/exceptions.yml").get("exceptions", [])
     if not isinstance(report.get("Results"), list) or not isinstance(components, list) or not isinstance(exceptions, list):
@@ -40,9 +43,17 @@ def validate(root: Path, image: str, report_path: Path, today: dt.date | None = 
     component = next((item for item in components if isinstance(item, dict) and item.get("source") == image), None)
     if component is None:
         raise ValueError("container image is not registered")
+    expected_manifest_digest = str(component.get("version", ""))
+    observed_manifest_digest = "sha256:" + hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    config = manifest.get("config")
+    if (manifest.get("schemaVersion") != 2 or not isinstance(config, dict)
+            or observed_manifest_digest != expected_manifest_digest):
+        raise ValueError("container manifest digest evidence is missing")
     metadata = report.get("Metadata")
     expected_image_id = component.get("scan_image_id")
-    if not isinstance(metadata, dict) or not isinstance(metadata.get("ImageID"), str) or (expected_image_id and metadata.get("ImageID") != expected_image_id):
+    if (not isinstance(metadata, dict) or not isinstance(metadata.get("ImageID"), str)
+            or config.get("digest") != expected_image_id
+            or metadata.get("ImageID") not in {expected_manifest_digest, expected_image_id}):
         raise ValueError("container scan digest evidence is missing")
     repo_digests = metadata.get("RepoDigests")
     if not isinstance(repo_digests, list) or not any(isinstance(item, str) and item.endswith("@" + str(component.get("version"))) for item in repo_digests):
@@ -118,10 +129,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     args = parser.parse_args()
     try:
-        result = validate(args.root, args.image, args.report)
+        result = validate(args.root, args.image, args.report, args.manifest)
     except ValueError as exc:
         print(json.dumps({"status": "failed", "summary": str(exc)}, sort_keys=True))
         return 1

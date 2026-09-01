@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -44,6 +45,22 @@ class MilestoneControllerTests(unittest.TestCase):
     def initialize(self) -> dict:
         return self.controller.initialize("dev-wf-1", self.base, 114, ["agent-coordination"], ["src/demo"], "Approved bounded development milestone.")
 
+    def legacy_initialize(self) -> dict:
+        state = self.initialize()
+        directory = self.root / ".vss/milestones/dev-wf-1"
+        history = directory / "history.ndjson"
+        event = json.loads(history.read_text())
+        event["data"] = {key: event["data"][key] for key in ("issue", "domains", "paths")}
+        unsigned = {key: value for key, value in event.items() if key != "event_sha256"}
+        event["event_sha256"] = hashlib.sha256(json.dumps(
+            unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        history.write_text(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+        repository = dict(state["repository"])
+        legacy_state = self.controller._project([event], repository)
+        self.controller._atomic_json(directory / "state.json", legacy_state)
+        self.controller._write_pointer(legacy_state)
+        return legacy_state
+
     def test_strict_contracts_initialize_replay_and_protected_residue(self) -> None:
         state = self.initialize()
         schema = json.loads((ROOT / "schemas/dev-milestone-record-v1.schema.json").read_text())
@@ -66,6 +83,142 @@ class MilestoneControllerTests(unittest.TestCase):
         advanced = self.controller.load("dev-wf-1")
         self.assertEqual(advanced["status"], "CONFLICT")
         self.assertTrue(advanced["next"]["human_boundary"])
+
+    def test_explicit_feature_branch_transition_preserves_delta_and_history(self) -> None:
+        initialized = self.initialize()
+        history = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
+        initial_event = history.read_text().splitlines()[0]
+        self.git("switch", "-c", "feature/dev-wf-1")
+        path = self.root / "src/demo/change.py"; path.parent.mkdir(parents=True); path.write_text("value = 1\n", encoding="utf-8")
+        conflict = self.controller.load("dev-wf-1")
+        self.assertEqual(conflict["status"], "CONFLICT")
+        recovered = self.controller.transition_branch(
+            "dev-wf-1", "main", "feature/dev-wf-1", "Authorized milestone branch.",
+            initialized["generation"],
+        )
+        self.assertEqual(recovered["repository"]["base_sha"], self.base)
+        self.assertEqual(recovered["repository"]["branch"], "feature/dev-wf-1")
+        self.assertEqual(recovered["status"], "WORKING")
+        self.assertEqual(recovered["next"]["action"], "run_affected_validation")
+        self.assertEqual(history.read_text().splitlines()[0], initial_event)
+        event = json.loads(history.read_text().splitlines()[-1])
+        self.assertEqual(event["event_type"], "branch_transitioned")
+        self.assertEqual(event["data"]["from_branch"], "main")
+        self.assertEqual(event["data"]["to_branch"], "feature/dev-wf-1")
+        self.assertEqual(event["data"]["base_sha"], self.base)
+        self.assertEqual(event["data"]["change_identity"], initialized["repository"]["change_identity"])
+        self.assertTrue(all(value is False for value in event["authority"].values()))
+
+    def test_legacy_initialization_recovers_through_sealed_transition(self) -> None:
+        initialized = self.legacy_initialize()
+        self.git("switch", "-c", "feature/dev-wf-1")
+        path = self.root / "src/demo/change.py"; path.parent.mkdir(parents=True); path.write_text("value = 1\n", encoding="utf-8")
+        recovered = self.controller.transition_branch(
+            "dev-wf-1", "main", "feature/dev-wf-1", "Authorized legacy recovery.",
+            initialized["generation"])
+        self.assertEqual(recovered["status"], "WORKING")
+        self.assertEqual(recovered["repository"]["branch"], "feature/dev-wf-1")
+        self.assertEqual(recovered["repository"]["change_identity"], self.controller._repository(self.base)["change_identity"])
+
+    def test_arbitrary_branch_substitution_and_post_transition_switch_fail_closed(self) -> None:
+        initialized = self.initialize()
+        self.git("switch", "-c", "feature/arbitrary")
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.transition_branch(
+                "dev-wf-1", "main", "feature/arbitrary", "Substituted branch.", initialized["generation"])
+        self.git("switch", "-c", "feature/dev-wf-1", self.base)
+        recovered = self.controller.transition_branch(
+            "dev-wf-1", "main", "feature/dev-wf-1", "Authorized milestone branch.",
+            initialized["generation"])
+        self.assertEqual(recovered["repository"]["branch"], "feature/dev-wf-1")
+        self.git("switch", "feature/arbitrary")
+        conflict = self.controller.load("dev-wf-1")
+        self.assertEqual(conflict["status"], "CONFLICT")
+        self.assertEqual(conflict["next"], {"action": "recover_state", "human_boundary": True})
+
+    def test_branch_transition_replay_two_writer_and_event_substitution_fail_closed(self) -> None:
+        initialized = self.initialize()
+        self.git("switch", "-c", "feature/dev-wf-1")
+        first_writer = MilestoneController(self.root)
+        second_writer = MilestoneController(self.root)
+        first_writer.transition_branch(
+            "dev-wf-1", "main", "feature/dev-wf-1", "Authorized milestone branch.",
+            initialized["generation"])
+        with self.assertRaisesRegex(MilestoneFailure, "writer conflict"):
+            second_writer.transition_branch(
+                "dev-wf-1", "main", "feature/dev-wf-1", "Stale writer.",
+                initialized["generation"])
+        current = first_writer.load("dev-wf-1")
+        with self.assertRaisesRegex(MilestoneFailure, "already recorded"):
+            first_writer.transition_branch(
+                "dev-wf-1", "main", "feature/dev-wf-1", "Replay.", current["generation"])
+        history = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
+        lines = history.read_text().splitlines(); transition = json.loads(lines[-1])
+        transition["data"]["to_branch"] = "feature/substituted"
+        lines[-1] = json.dumps(transition, sort_keys=True, separators=(",", ":"))
+        history.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "history conflict"):
+            first_writer.load("dev-wf-1")
+
+    def test_materialized_state_reseal_cannot_hide_transition_delta(self) -> None:
+        initialized = self.initialize()
+        self.git("switch", "-c", "feature/dev-wf-1")
+        self.controller.transition_branch(
+            "dev-wf-1", "main", "feature/dev-wf-1", "Authorized milestone branch.",
+            initialized["generation"])
+        state_path = self.root / ".vss/milestones/dev-wf-1/state.json"
+        state = json.loads(state_path.read_text())
+        state["repository"]["change_identity"] = "f" * 64
+        state_path.write_text(json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "state conflict"):
+            self.controller.load("dev-wf-1")
+
+    def test_explicit_legacy_validation_identity_recovery_is_append_only(self) -> None:
+        initialized = self.initialize()
+        self.git("switch", "-c", "feature/dev-wf-1")
+        path = self.root / "src/demo/change.py"; path.parent.mkdir(parents=True); path.write_text("value = 1\n", encoding="utf-8")
+        self.controller.transition_branch(
+            "dev-wf-1", "main", "feature/dev-wf-1", "Authorized milestone branch.",
+            initialized["generation"])
+        directory = self.root / ".vss/milestones/dev-wf-1"
+        history = directory / "history.ndjson"
+        events = [json.loads(line) for line in history.read_text().splitlines()]
+        tail = {
+            "schema_version": "1", "protocol": "vss.dev-milestone", "record_kind": "event",
+            "milestone_id": "dev-wf-1", "sequence": 3, "event_type": "validation_completed",
+            "prior_event_sha256": events[-1]["event_sha256"], "subject_head_sha": self.base,
+            "summary": "Legacy validation.",
+            "data": {"validation_level": "L3", "evidence_sha256": "a" * 64},
+            "authority": initialized["authority"],
+        }
+        tail["event_sha256"] = hashlib.sha256(json.dumps(
+            tail, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        events.append(tail)
+        history.write_text("\n".join(json.dumps(
+            event, sort_keys=True, separators=(",", ":")) for event in events) + "\n", encoding="utf-8")
+        repository = self.controller._repository(self.base)
+        legacy_state = self.controller._project(events, repository)
+        self.controller._atomic_json(directory / "state.json", legacy_state)
+        self.controller._write_pointer(legacy_state)
+        with self.assertRaisesRegex(MilestoneFailure, "state conflict"):
+            self.controller.load("dev-wf-1")
+        recovered = self.controller.recover_state_identity(
+            "dev-wf-1", "Bind legacy validated worktree identity.", legacy_state["generation"])
+        self.assertEqual(recovered["status"], "LOCAL_VALIDATION_REQUIRED")
+        self.assertEqual(recovered["next"]["action"], "run_affected_validation")
+        bound = json.loads(history.read_text().splitlines()[-1])
+        self.assertEqual(bound["event_type"], "validation_invalidated")
+        self.assertEqual(bound["data"]["recovered_event_sha256"], tail["event_sha256"])
+        self.assertEqual(bound["data"]["change_identity"], repository["change_identity"])
+        self.assertTrue(all(value is False for value in bound["authority"].values()))
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.recover_state_identity(
+                "dev-wf-1", "Replay.", recovered["generation"])
+        continued = self.controller.checkpoint(
+            "dev-wf-1", "checkpointed", "Continue after explicit invalidation.",
+            expected_generation=recovered["generation"])
+        self.assertEqual(continued["status"], "LOCAL_VALIDATION_REQUIRED")
+        self.assertEqual(continued["next"]["action"], "run_affected_validation")
 
     def test_event_substitution_and_two_writer_conflicts_fail_closed(self) -> None:
         state = self.initialize()
@@ -123,6 +276,16 @@ class MilestoneControllerTests(unittest.TestCase):
         value = json.loads(status.stdout)
         self.assertEqual(value["next"]["action"], "start_bounded_work")
         self.assertTrue(all(result is False for result in value["authority"].values()))
+        self.git("switch", "-c", "feature/cli-state")
+        transition = subprocess.run([
+            "vss", "dev", "milestone", "transition-branch", "--milestone-id", "cli-state",
+            "--from-branch", "main", "--to-branch", "feature/cli-state",
+            "--summary", "Authorized CLI transition.", "--expected-generation", "0",
+        ], cwd=self.root, text=True, capture_output=True, check=False)
+        self.assertEqual(transition.returncode, 0, transition.stderr)
+        transitioned = json.loads(transition.stdout)
+        self.assertEqual(transitioned["repository"]["branch"], "feature/cli-state")
+        self.assertTrue(all(result is False for result in transitioned["authority"].values()))
 
     def test_validation_evidence_is_reused_for_an_unchanged_source_change(self) -> None:
         self.initialize()
@@ -131,6 +294,74 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(first["status"], "passed")
         self.assertEqual(second["status"], "reused")
         self.assertEqual(first["evidence_sha256"], second["evidence_sha256"])
+
+    def test_fresh_canonical_success_after_exact_ci_progresses_to_review(self) -> None:
+        initialized = self.initialize()
+        self.controller.checkpoint(
+            "dev-wf-1", "validation_completed", "Sealed lower-level validation.",
+            {"validation_level": "L1", "evidence_sha256": "a" * 64},
+            initialized["generation"])
+        head = self.controller.load("dev-wf-1")["repository"]["head_sha"]
+        self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        fresh = self.controller.validate("canonical", "dev-wf-1")
+        state = self.controller.load("dev-wf-1")
+        self.assertEqual(fresh["status"], "passed")
+        self.assertEqual(fresh["level"], "L3")
+        self.assertEqual(state["status"], "REVIEW_READY")
+        self.assertEqual(state["next"], {"action": "request_merge", "human_boundary": True})
+
+    def test_reused_canonical_success_after_exact_ci_progresses_to_review(self) -> None:
+        self.initialize()
+        canonical = self.controller.validate("canonical", "dev-wf-1")
+        head = self.controller.load("dev-wf-1")["repository"]["head_sha"]
+        self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        reused = self.controller.validate("canonical", "dev-wf-1")
+        state = self.controller.load("dev-wf-1")
+        self.assertEqual(reused, {"status": "reused", "level": "L3",
+                                  "evidence_sha256": canonical["evidence_sha256"]})
+        self.assertEqual(state["status"], "REVIEW_READY")
+        self.assertEqual(state["next"], {"action": "request_merge", "human_boundary": True})
+
+    def test_prior_ci_pending_materialization_recovers_only_the_exact_review_projection(self) -> None:
+        self.initialize()
+        self.controller.validate("canonical", "dev-wf-1")
+        head = self.controller.load("dev-wf-1")["repository"]["head_sha"]
+        self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        self.controller.validate("canonical", "dev-wf-1")
+        expected = self.controller.load("dev-wf-1")
+        legacy = {**expected, "status": "CI_PENDING",
+                  "routing": {"model": self.controller.policy["model_routing"]["maintenance"], "advisory": True},
+                  "next": {"action": "ingest_ci", "human_boundary": False}}
+        state_path = self.root / ".vss/milestones/dev-wf-1/state.json"
+        self.controller._atomic_json(state_path, legacy)
+        self.controller._write_pointer(legacy)
+        recovered = self.controller.load("dev-wf-1")
+        self.assertEqual(recovered["status"], "REVIEW_READY")
+        self.assertEqual(recovered["next"], {"action": "request_merge", "human_boundary": True})
+
+    def test_exact_ci_and_canonical_validation_cannot_cycle_or_duplicate(self) -> None:
+        self.initialize()
+        self.controller.validate("canonical", "dev-wf-1")
+        head = self.controller.load("dev-wf-1")["repository"]["head_sha"]
+        self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        self.controller.validate("canonical", "dev-wf-1")
+        history = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
+        before = history.read_text(encoding="utf-8")
+        repeated = self.controller.validate("canonical", "dev-wf-1")
+        self.assertEqual(repeated["status"], "reused")
+        self.assertEqual(history.read_text(encoding="utf-8"), before)
+        with self.assertRaisesRegex(MilestoneFailure, "not required"):
+            self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+
+    def test_stale_or_changed_source_never_reuses_canonical_evidence(self) -> None:
+        self.initialize()
+        self.controller.validate("canonical", "dev-wf-1")
+        (self.root / "work.py").write_text("pass\n", encoding="utf-8")
+        changed = self.controller.validate("canonical", "dev-wf-1")
+        self.assertEqual(changed["status"], "passed")
+        self.git("add", "work.py"); self.git("commit", "-qm", "advanced")
+        with self.assertRaisesRegex(MilestoneFailure, "source identity conflict"):
+            self.controller.validate("canonical", "dev-wf-1")
 
     def test_controller_has_no_runtime_provider_or_mutating_github_path(self) -> None:
         source = (ROOT / "src/vss_dev/milestone.py").read_text(encoding="utf-8")

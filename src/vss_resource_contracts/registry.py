@@ -29,6 +29,7 @@ FILES = MappingProxyType({
     "production_canon_binding/1": "production-canon-binding-v1.schema.json",
     "production_canon_binding/2": "production-canon-binding-v2.schema.json",
     "production_visual_grounding_profile/1": "production-visual-grounding-profile-v1.schema.json",
+    "production_visual_grounding_profile/2": "production-visual-grounding-profile-v2.schema.json",
     "production_visual_grounding_review/1": "production-visual-grounding-review-v1.schema.json",
     "dependency_impact_request/1": "dependency-impact-request-v1.schema.json",
     "dependency_impact_result/1": "dependency-impact-result-v1.schema.json",
@@ -46,7 +47,7 @@ FILES = MappingProxyType({
     "generated_review_candidate/2": "generated-review-candidate-v2.schema.json",
     "generated_review_candidate_review/1": "generated-review-candidate-review-v1.schema.json",
 })
-BUILT_IN_REGISTRY_SHA256 = "4b6d43e240c92c2c4e7dfe04fa84eee22d03a13204561125b5b6ba95a4fb55ae"  # pragma: allowlist secret
+BUILT_IN_REGISTRY_SHA256 = "b0cbb5e2be8f55df26a8f5f61219256ffad75d03c3b9776b666d57f5da664414"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 

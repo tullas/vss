@@ -43,6 +43,15 @@ operators/agents.
   narrow protected residue, bounded failure-only logs, constant-false authority,
   and canonical L3 merge readiness. Reviewed repository code and configuration
   remain trusted; evidence is integrity metadata, not a signature or approval.
+- Repository milestone state to an authorized feature branch. Abuse: arbitrary
+  branch substitution, history resealing, transition replay, stale two-writer
+  append, or treating recovery as merge/execution authority. Mitigation: one
+  append-only digest-chained transition from the recorded initialization branch
+  to exact `feature/<milestone-id>`; unchanged stored HEAD and base ancestry;
+  source-branch ref equality; expected-generation locking; materialized-state
+  reconstruction; fail-closed later branch changes; and constant-false Runtime,
+  provider, production, publication, workflow, security-exception, merge, and
+  push authority.
 - Repository-controlled capability manifest to the M2.1 Runtime Kernel and
   built-in handler. Abuse: unsafe YAML construction, malformed or substituted
   manifests, path/symlink escape, arbitrary module import, permission

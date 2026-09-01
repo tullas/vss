@@ -7,8 +7,9 @@ ADD --checksum=sha256:7e63315ced171ced2dc32482e8c2916121bdf77a63c0ef3e3124d6b5e1
     https://github.com/versity/versitygw/archive/refs/tags/v1.7.0.tar.gz /tmp/versitygw.tar.gz
 RUN mkdir /src && tar -xzf /tmp/versitygw.tar.gz -C /src --strip-components=1
 WORKDIR /src/cmd/versitygw
+RUN go get golang.org/x/crypto@v0.55.0
 RUN go build -trimpath -buildvcs=false \
-    -ldflags '-buildid= -X=main.Build=8a3dbcf97d996ea4955426e6b8a76eb96d2cd92a -X=main.BuildTime=2026-07-15T02:35:12Z -X=main.Version=v1.7.0-vss-go1.25.13' \
+    -ldflags '-buildid= -X=main.Build=8a3dbcf97d996ea4955426e6b8a76eb96d2cd92a -X=main.BuildTime=2026-07-15T02:35:12Z -X=main.Version=v1.7.0-vss-go1.25.13-xcrypto0.55.0' \
     -o /out/versitygw .
 
 FROM alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f
@@ -18,13 +19,14 @@ RUN apk add --no-cache --upgrade \
     libssl3=3.5.8-r0
 
 LABEL org.opencontainers.image.title="VSS-maintained VersityGW"
-LABEL org.opencontainers.image.description="VersityGW v1.7.0 rebuilt with the patched Go 1.25.13 toolchain for bounded VSS local S3 acceptance"
+LABEL org.opencontainers.image.description="VersityGW v1.7.0 rebuilt with Go 1.25.13 and golang.org/x/crypto 0.55.0 for bounded VSS local S3 acceptance"
 LABEL org.opencontainers.image.source="https://github.com/tullas/vss"
 LABEL org.opencontainers.image.url="https://github.com/tullas/vss"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.version="v1.7.0-go1.25.13-r4"
+LABEL org.opencontainers.image.version="v1.7.0-go1.25.13-xcrypto0.55.0-r5"
 LABEL dev.vss.upstream.source="https://github.com/versity/versitygw/archive/refs/tags/v1.7.0.tar.gz"
 LABEL dev.vss.go.toolchain="go1.25.13"
+LABEL dev.vss.go.x-crypto="v0.55.0"
 LABEL dev.vss.alpine.libcrypto3="3.5.8-r0"
 LABEL dev.vss.alpine.libssl3="3.5.8-r0"
 

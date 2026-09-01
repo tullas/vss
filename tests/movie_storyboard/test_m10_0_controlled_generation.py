@@ -23,6 +23,7 @@ from vss_movie_demo import finish_demo, prepare_demo
 from vss_movie_visual_grounding import (
     create_grounded_movie_route,
     create_production_visual_grounding_profile,
+    create_revised_production_visual_grounding_profile,
     record_production_visual_grounding_review,
 )
 from vss_movie_creative_smoke.provider import SmokeHTTPResponse
@@ -311,6 +312,92 @@ class M100ControlledGenerationTests(unittest.TestCase):
         self.assertTrue(all(value is False for value in review.value["authority"].values()))
         self.assertNotIn("approval", review.value["defects"][0])
         self.assertEqual(len(self.calls), calls)
+
+    def test_human_authored_revised_profile_binds_review_and_second_candidate(self):
+        first = self.admit_grounded()
+        first_admitted = self.admit_grounded(approval=self.approval(first))
+        first_result, first_code = self.runtime(first_admitted, mode="generate")
+        self.assertEqual(first_code, 0, first_result)
+        first_candidate = admit_generated_candidate(self.root, first_admitted)
+        first_review = record_production_visual_grounding_review(
+            generation=first_admitted, candidate=first_candidate, disposition="REGENERATE",
+            defects=[{
+                "defect_code": "production.defect-alpha", "group_id": "production.group-alpha",
+                "rationale": "Opaque production-owned correction for the next review candidate.",
+            }], reviewer_accountability_id="reviewer-grounding",
+        )
+        revised_profile = create_revised_production_visual_grounding_profile(
+            predecessor_profile=self.grounding_profile, review=first_review,
+            profile_id="visual-grounding-production-alpha", revision=2,
+            tenant_id="tenant-local", universe_id="universe-local",
+            production_id=self.base_payload["story"]["project_id"], mode="required",
+            scene_ids=[self.base_payload["scene_breakdown"]["payload"]["ordered_scenes"][0]["scene_id"]],
+            character_ids=list(self.base_payload["scene_breakdown"]["payload"]["ordered_scenes"][0]["declared_characters"]),
+            groups=[{
+                "ordinal": 1, "group_id": "production.group-alpha",
+                "positive_constraints": ["Apply revised opaque production visual token ALPHA-BETA."],
+                "negative_constraints": ["Exclude production-defined visual token ALPHA-NEGATIVE."],
+                "explicit_unknowns": ["Production-defined visual token ALPHA-UNKNOWN remains unresolved."],
+                "limitations": ["Opaque production revision; VSS assigns no domain meaning."],
+                "source_reference_digests": [canonical_digest({"source": "opaque-alpha-beta"})],
+            }], reviewer_accountability_id="reviewer-grounding",
+        ).to_json_value()
+        revised_route = create_grounded_movie_route(
+            self.base_payload["decision"], self.base_payload["review_packet"], self.base_payload["option_set"],
+            self.base_payload["scene_breakdown"], self.base_payload["creative_decision"],
+            self.base_payload["canon_snapshot"], self.base_payload["canon_binding"], self.base_payload["shot_plan"],
+            self.base_payload["storyboard"], profile_data=revised_profile,
+        )
+        second_payload = {**self.base_payload, "profile": revised_profile,
+                          "grounded_creative_decision": revised_route.creative_decision.to_json_value(),
+                          "grounded_canon_snapshot": revised_route.canon_snapshot.to_json_value(),
+                          "grounded_canon_binding": revised_route.canon_binding.to_json_value(),
+                          "grounded_shot_plan": revised_route.shot_plan.to_json_value(),
+                          "grounded_storyboard": revised_route.storyboard.to_json_value()}
+        second = self.admit_grounded(second_payload)
+        self.assertEqual(second.request["contract_version"], "3")
+        self.assertEqual(second.request["projection"]["visual_grounding_profile_sha256"], revised_profile["profile_sha256"])
+        self.assertEqual(revised_profile["predecessor"]["review"]["review_sha256"], first_review.value["review_sha256"])
+        self.assertNotEqual(first.request["request_sha256"], second.request["request_sha256"])
+
+        second_admitted = self.admit_grounded(second_payload, approval=self.approval(second))
+        second_result, second_code = self.runtime(second_admitted, mode="generate")
+        self.assertEqual(second_code, 0, second_result)
+        second_review = record_production_visual_grounding_review(
+            generation=second_admitted, candidate=admit_generated_candidate(self.root, second_admitted),
+            disposition="USE", defects=[], reviewer_accountability_id="reviewer-grounding",
+        )
+        self.assertEqual(second_review.value["candidate_sha256"], admit_generated_candidate(self.root, second_admitted).candidate_json()["candidate_sha256"])
+        self.assertTrue(all(value is False for value in second_review.value["authority"].values()))
+
+    def test_revised_profile_rejects_resealed_or_mismatched_predecessor_evidence(self):
+        profile = copy.deepcopy(self.grounding_profile)
+        review = {
+            "schema_version": "1", "contract_identity": "production_visual_grounding_review", "contract_version": "1",
+            "review_id": "visual-grounding-review-" + "0" * 32,
+            "candidate_sha256": "1" * 64, "frame_grounding_sha256": "2" * 64,
+            "visual_grounding_profile_sha256": profile["profile_sha256"], "disposition": "REGENERATE",
+            "defects": [{"defect_code": "production.defect-alpha", "group_id": "production.group-alpha", "rationale": "Opaque evidence."}],
+            "reviewer_accountability_id": "reviewer-grounding",
+            "authority": {"profile_mutation": False, "prompt_edit": False, "provider_execution": False,
+                          "runtime_execution": False, "approval": False, "reservation": False, "regeneration": False},
+            "limitations": ["accountability_evidence_only", "production_defined_defect_codes", "not_truth_by_itself",
+                            "not_profile_mutation", "not_prompt_authority", "not_provider_or_runtime_authority"],
+            "review_sha256": "0" * 64,
+        }
+        review["review_id"] = "visual-grounding-review-" + canonical_digest(
+            {key: value for key, value in review.items() if key not in {"review_id", "review_sha256"}})[:32]
+        review["review_sha256"] = canonical_digest({**review, "review_sha256": "0" * 64})
+        revised = create_revised_production_visual_grounding_profile(
+            predecessor_profile=profile, review=review, profile_id=profile["profile_id"], revision=2,
+            tenant_id="tenant-local", universe_id="universe-local", production_id=profile["scope"]["production_id"],
+            mode="required", groups=profile["groups"], reviewer_accountability_id="reviewer-grounding",
+        ).to_json_value()
+        revised["predecessor"]["review"]["candidate_sha256"] = "3" * 64
+        revised["profile_sha256"] = canonical_digest({**revised, "profile_sha256": "0" * 64})
+        with self.assertRaisesRegex(ResourceContractError, "visual grounding review (identity|seal) mismatch"):
+            from vss_resource_contracts import validate_production_visual_grounding_profile
+            validate_production_visual_grounding_profile(revised)
 
     def test_grounding_review_rejects_resealed_caller_evidence(self):
         base = self.admit_grounded()

@@ -107,82 +107,107 @@ class SupplyChainPolicyTests(unittest.TestCase):
             failed = subprocess.run([str(script)], cwd=root, env=environment, capture_output=True, text=True, check=False)
             self.assertNotEqual(failed.returncode, 0)
 
-    def _container_scan_fixture(self, root: Path) -> tuple[str, Path]:
-        image = "docker.io/library/ubuntu@sha256:" + "a" * 64
-        fixture_component = component("ubuntu", "ubuntu", "oci", "sha256:" + "a" * 64, source=image)
-        fixture_component["scan_image_id"] = "sha256:" + "a" * 64
+    def _container_scan_fixture(self, root: Path) -> tuple[str, Path, Path]:
+        config_digest = "sha256:" + "b" * 64
+        manifest = root / "manifest.json"
+        write_json(manifest, {"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                              "config": {"digest": config_digest}})
+        manifest_digest = "sha256:" + hashlib.sha256(manifest.read_bytes()).hexdigest()
+        image = "docker.io/library/ubuntu@" + manifest_digest
+        fixture_component = component("ubuntu", "ubuntu", "oci", manifest_digest, source=image)
+        fixture_component["scan_image_id"] = config_digest
         write_json(root / "security/components.yml", {"components": [fixture_component]})
         finding = {"VulnerabilityID": "CVE-2026-0001", "PkgName": "stdlib", "Severity": "HIGH"}
         report = root / "report.json"
         write_json(report, {
             "ArtifactName": image,
             "ArtifactType": "container_image",
-            "Metadata": {"ImageID": "sha256:" + "a" * 64, "RepoDigests": ["ubuntu@sha256:" + "a" * 64]},
+            "Metadata": {"ImageID": manifest_digest, "RepoDigests": ["ubuntu@" + manifest_digest]},
             "Results": [{"Target": "usr/bin/pebble", "Vulnerabilities": [finding]}],
         })
         write_json(root / "security/exceptions.yml", {"exceptions": [{
-            "id": "test-exception", "component": "ubuntu", "version": "sha256:" + "a" * 64,
+            "id": "test-exception", "component": "ubuntu", "version": manifest_digest,
             "owner": "Bootstrap Owner", "approval": "Independent Human Approver", "expiry_date": "2026-08-10",
             "allowed_findings": [{"target": "/usr/bin/pebble", "id": "CVE-2026-0001", "package": "stdlib", "severity": "HIGH"}],
         }]})
-        return image, report
+        return image, report, manifest
 
     def test_exact_container_exception_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            image, report = self._container_scan_fixture(root)
-            result = CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+            image, report, manifest = self._container_scan_fixture(root)
+            result = CONTAINER_SCAN.validate(root, image, report, manifest, today=dt.date(2026, 7, 27))
             self.assertTrue(result["exception"])
 
     def test_container_exception_scope_change_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            image, report = self._container_scan_fixture(root)
+            image, report, manifest = self._container_scan_fixture(root)
             value = json.loads(report.read_text(encoding="utf-8"))
             value["Results"][0]["Vulnerabilities"].append({"VulnerabilityID": "CVE-2026-0002", "PkgName": "stdlib", "Severity": "CRITICAL"})
             write_json(report, value)
             with self.assertRaisesRegex(ValueError, "differ from approved scope"):
-                CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+                CONTAINER_SCAN.validate(root, image, report, manifest, today=dt.date(2026, 7, 27))
 
     def test_container_report_for_different_image_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            image, report = self._container_scan_fixture(root)
+            image, report, manifest = self._container_scan_fixture(root)
             value = json.loads(report.read_text(encoding="utf-8"))
             value["ArtifactName"] = "docker.io/library/other@sha256:" + "b" * 64
             write_json(report, value)
             with self.assertRaisesRegex(ValueError, "does not match requested image"):
-                CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+                CONTAINER_SCAN.validate(root, image, report, manifest, today=dt.date(2026, 7, 27))
 
     def test_container_report_digest_substitution_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            image, report = self._container_scan_fixture(root)
+            image, report, manifest = self._container_scan_fixture(root)
             value = json.loads(report.read_text(encoding="utf-8"))
-            value["Metadata"]["ImageID"] = "sha256:" + "b" * 64
+            value["Metadata"]["ImageID"] = "sha256:" + "d" * 64
             write_json(report, value)
             with self.assertRaisesRegex(ValueError, "digest evidence is missing"):
-                CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+                CONTAINER_SCAN.validate(root, image, report, manifest, today=dt.date(2026, 7, 27))
 
-    def test_platform_manifest_and_config_digest_binding_passes(self) -> None:
+    def test_registered_config_digest_substitution_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            image, report = self._container_scan_fixture(root)
+            image, report, manifest = self._container_scan_fixture(root)
             registry = json.loads((root / "security/components.yml").read_text(encoding="utf-8"))
-            registry["components"][0]["scan_image_id"] = "sha256:" + "b" * 64
+            registry["components"][0]["scan_image_id"] = "sha256:" + "c" * 64
             write_json(root / "security/components.yml", registry)
+            value = json.loads(report.read_text(encoding="utf-8"))
+            value["Metadata"]["ImageID"] = "sha256:" + "c" * 64
+            write_json(report, value)
+            with self.assertRaisesRegex(ValueError, "digest evidence is missing"):
+                CONTAINER_SCAN.validate(root, image, report, manifest, today=dt.date(2026, 7, 27))
+
+    def test_trivy_config_digest_image_id_remains_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image, report, manifest = self._container_scan_fixture(root)
             value = json.loads(report.read_text(encoding="utf-8"))
             value["Metadata"]["ImageID"] = "sha256:" + "b" * 64
             write_json(report, value)
-            result = CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 7, 27))
+            result = CONTAINER_SCAN.validate(root, image, report, manifest, today=dt.date(2026, 7, 27))
             self.assertTrue(result["exception"])
+
+    def test_container_manifest_substitution_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image, report, manifest = self._container_scan_fixture(root)
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            value["config"]["digest"] = "sha256:" + "c" * 64
+            write_json(manifest, value)
+            with self.assertRaisesRegex(ValueError, "manifest digest evidence is missing"):
+                CONTAINER_SCAN.validate(root, image, report, manifest, today=dt.date(2026, 7, 27))
 
     def test_expired_container_exception_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            image, report = self._container_scan_fixture(root)
+            image, report, manifest = self._container_scan_fixture(root)
             with self.assertRaisesRegex(ValueError, "expired"):
-                CONTAINER_SCAN.validate(root, image, report, today=dt.date(2026, 8, 11))
+                CONTAINER_SCAN.validate(root, image, report, manifest, today=dt.date(2026, 8, 11))
 
     def test_unpinned_action_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

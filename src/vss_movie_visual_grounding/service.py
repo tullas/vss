@@ -108,6 +108,51 @@ def create_production_visual_grounding_profile(
     return validate_production_visual_grounding_profile(value)
 
 
+def create_revised_production_visual_grounding_profile(
+    *, predecessor_profile: Any, review: Any, profile_id: str, revision: int,
+    tenant_id: str, universe_id: str, production_id: str, mode: str,
+    groups: list[dict[str, Any]], reviewer_accountability_id: str,
+    scene_ids: list[str] | None = None, character_ids: list[str] | None = None,
+    uncertainty: list[str] | None = None, conflicts: list[str] | None = None,
+    limitations: list[str] | None = None, evidence_references: list[str] | None = None,
+    lifecycle: str = "active",
+) -> ValidatedResourceArtifact:
+    """Seal a human-authored opaque profile revision against its prior review evidence."""
+    prior = validate_production_visual_grounding_profile(
+        predecessor_profile.to_json_value()
+        if isinstance(predecessor_profile, ValidatedResourceArtifact) else predecessor_profile)
+    review_artifact = validate_production_visual_grounding_review(
+        review.to_json_value() if isinstance(review, ValidatedResourceArtifact) else review)
+    prior_value, review_value = prior.value, review_artifact.value
+    if (review_value["visual_grounding_profile_sha256"] != prior_value["profile_sha256"]
+            or review_value["disposition"] not in {"REGENERATE", "REJECT"}):
+        raise ResourceContractError("visual grounding revision evidence does not bind its predecessor")
+    predecessor = {
+        "profile_id": prior_value["profile_id"], "revision": prior_value["revision"],
+        "profile_sha256": prior_value["profile_sha256"],
+        "review": review_artifact.to_json_value(),
+    }
+    value = {
+        "schema_version": "1", "contract_identity": "production_visual_grounding_profile",
+        "contract_version": "2", "profile_id": profile_id, "revision": revision,
+        "scope": {"tenant_id": tenant_id, "universe_id": universe_id,
+                  "production_id": production_id},
+        "applicability": {"scene_ids": sorted(scene_ids or []),
+                          "character_ids": sorted(character_ids or [])},
+        "mode": mode, "groups": sorted(groups, key=lambda item: item.get("ordinal", 0)),
+        "uncertainty": sorted(uncertainty or []), "conflicts": sorted(conflicts or []),
+        "limitations": sorted(limitations or [
+            "production_owned_data", "opaque_constraint_semantics", "not_domain_truth",
+            "not_provider_or_runtime_authority", "human_authored_revision_only",
+        ]),
+        "evidence_references": sorted(evidence_references or []), "lifecycle": lifecycle,
+        "reviewer_accountability_id": reviewer_accountability_id, "predecessor": predecessor,
+        "profile_sha256": "0" * 64,
+    }
+    value["profile_sha256"] = canonical_digest(visual_grounding_profile_seal_material(value))
+    return validate_production_visual_grounding_profile(value)
+
+
 def record_production_visual_grounding_review(
     *, generation: Any, candidate: Any, disposition: str, defects: list[dict[str, Any]],
     reviewer_accountability_id: str,
