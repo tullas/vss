@@ -23,6 +23,7 @@ from vss_movie_demo import finish_demo, prepare_demo
 from vss_movie_storyboard import (
     create_grounded_storyboard_comparison,
     record_development_review_selection,
+    record_grounded_storyboard_promotion,
 )
 from vss_movie_visual_grounding import (
     create_grounded_movie_route,
@@ -38,6 +39,7 @@ from vss_runtime.external_preflight import ExternalExecutionPreflight
 from vss_providers import ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, ProviderAccess
 from vss_providers.errors import ControlledFrameProviderFailure
 from vss_reasoning_contracts import canonical_digest
+from vss_reasoning_contracts.canonicalization import freeze_json
 from vss_resource_contracts import ResourceContractError
 
 
@@ -436,18 +438,84 @@ class M100ControlledGenerationTests(unittest.TestCase):
             second_admitted, second_candidate, second_review,
         ).to_json_value())
 
-        selection = record_development_review_selection(
+        selection_evidence = record_development_review_selection(
             comparison, selected_candidate_id=second_candidate.candidate_json()["candidate_id"],
             reviewer_accountability_id="development.reviewer", rationale="Human development review selection.",
-        ).to_json_value()
+        )
+        selection = selection_evidence.to_json_value()
         self.assertEqual(selection["comparison_sha256"], comparison_json["comparison_sha256"])
         self.assertEqual(selection["selected_candidate_sha256"], second_candidate.candidate_json()["candidate_sha256"])
         self.assertTrue(all(value is False for value in selection["authority"].values()))
+        with self.assertRaisesRegex(ResourceContractError, "authoritative sealed selection"):
+            record_grounded_storyboard_promotion(
+                comparison, selection, second_admitted, second_candidate, second_review,
+                promotion_approver_accountability_id="promotion.approver",
+                rationale="Forged selection must fail closed.",
+            )
+        with self.assertRaisesRegex(ResourceContractError, "authoritative sealed comparison"):
+            record_grounded_storyboard_promotion(
+                comparison_json, selection_evidence, second_admitted, second_candidate, second_review,
+                promotion_approver_accountability_id="promotion.approver",
+                rationale="Forged comparison must fail closed.",
+            )
+        promotion = record_grounded_storyboard_promotion(
+            comparison, selection_evidence, second_admitted, second_candidate, second_review,
+            promotion_approver_accountability_id="promotion.approver",
+            rationale="Explicit accountable human promotion approval.",
+        ).to_json_value()
+        self.assertEqual(promotion["comparison_sha256"], comparison_json["comparison_sha256"])
+        self.assertEqual(promotion["selection_sha256"], selection["selection_sha256"])
+        self.assertEqual(promotion["selected_candidate"], comparison_json["candidates"][1])
+        self.assertTrue(all(value is False for value in promotion["authority"].values()))
+        with self.assertRaisesRegex(ResourceContractError, "already been recorded"):
+            record_grounded_storyboard_promotion(
+                comparison, selection_evidence, second_admitted, second_candidate, second_review,
+                promotion_approver_accountability_id="promotion.approver", rationale="Replay.",
+            )
         with self.assertRaisesRegex(ResourceContractError, "already been recorded"):
             record_development_review_selection(
                 comparison, selected_candidate_id=first_candidate.candidate_json()["candidate_id"],
                 reviewer_accountability_id="development.reviewer", rationale="Replay.",
             )
+
+        incompatible_comparison = create_grounded_storyboard_comparison(
+            first_admitted, first_candidate, first_review,
+            second_admitted, second_candidate, second_review,
+        )
+        incompatible_selection = record_development_review_selection(
+            incompatible_comparison, selected_candidate_id=second_candidate.candidate_json()["candidate_id"],
+            reviewer_accountability_id="development.reviewer", rationale="Human selection.",
+        )
+        with self.assertRaisesRegex(ResourceContractError, "selected candidate evidence binding mismatch"):
+            record_grounded_storyboard_promotion(
+                incompatible_comparison, incompatible_selection, first_admitted, first_candidate, first_review,
+                promotion_approver_accountability_id="promotion.approver",
+                rationale="Substituted candidate must fail closed.",
+            )
+        tampered = incompatible_comparison.to_json_value()
+        tampered["candidates"][1]["visual_grounding_profile"]["profile_sha256"] = "0" * 64
+        object.__setattr__(incompatible_comparison, "_value", freeze_json(tampered))
+        with self.assertRaisesRegex(ResourceContractError, "comparison package seal or authority mismatch"):
+            record_grounded_storyboard_promotion(
+                incompatible_comparison, incompatible_selection,
+                second_admitted, second_candidate, second_review,
+                promotion_approver_accountability_id="promotion.approver",
+                rationale="Tampered comparison must fail closed.",
+            )
+        deterministic_comparison = create_grounded_storyboard_comparison(
+            first_admitted, first_candidate, first_review,
+            second_admitted, second_candidate, second_review,
+        )
+        deterministic_selection = record_development_review_selection(
+            deterministic_comparison, selected_candidate_id=second_candidate.candidate_json()["candidate_id"],
+            reviewer_accountability_id="development.reviewer", rationale="Human development review selection.",
+        )
+        self.assertEqual(promotion, record_grounded_storyboard_promotion(
+            deterministic_comparison, deterministic_selection,
+            second_admitted, second_candidate, second_review,
+            promotion_approver_accountability_id="promotion.approver",
+            rationale="Explicit accountable human promotion approval.",
+        ).to_json_value())
 
     def test_m10_2_rejects_duplicate_and_nonmember_selection_before_authority(self):
         admitted = self.admit_grounded()
