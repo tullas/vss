@@ -72,9 +72,11 @@ def _parser() -> argparse.ArgumentParser:
     milestone_init.add_argument("--domain", action="append", default=[])
     milestone_init.add_argument("--path", action="append", default=[])
     milestone_init.add_argument("--summary", required=True)
-    for action in ("status", "next"):
-        parser_action = milestone_actions.add_parser(action)
-        parser_action.add_argument("--milestone-id")
+    milestone_status = milestone_actions.add_parser("status")
+    milestone_status.add_argument("--milestone-id")
+    milestone_next = milestone_actions.add_parser("next")
+    milestone_next.add_argument("--milestone-id")
+    milestone_next.add_argument("--packet", action="store_true")
     milestone_transition = milestone_actions.add_parser("transition-branch")
     milestone_transition.add_argument("--milestone-id", required=True)
     milestone_transition.add_argument("--from-branch", required=True)
@@ -398,9 +400,13 @@ def main(argv: list[str] | None = None) -> int:
             controller = MilestoneController()
             if args.milestone_action == "init":
                 value = controller.initialize(args.milestone_id, args.base, args.issue, args.domain, args.path, args.summary)
-            elif args.milestone_action in {"status", "next"}:
+            elif args.milestone_action == "status":
                 value = controller.load(args.milestone_id)
-                if args.milestone_action == "next":
+            elif args.milestone_action == "next":
+                if args.packet:
+                    value = controller.execution_packet(args.milestone_id)
+                else:
+                    value = controller.load(args.milestone_id)
                     value = {"milestone_id": value["milestone_id"], "status": value["status"], "next": value["next"], "authority": value["authority"]}
             elif args.milestone_action == "transition-branch":
                 value = controller.transition_branch(

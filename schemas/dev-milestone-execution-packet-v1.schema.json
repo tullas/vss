@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/dev-milestone-execution-packet-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol", "milestone", "work_issue", "repository", "scope", "controller", "validation", "ci", "repair", "context", "authority"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "protocol": {"const": "vss.dev-milestone-execution-packet"},
+    "milestone": {"type": "object", "additionalProperties": false, "required": ["id", "generation", "status"], "properties": {"id": {"$ref": "#/$defs/id"}, "generation": {"type": "integer", "minimum": 0, "maximum": 256}, "status": {"$ref": "#/$defs/status"}}},
+    "work_issue": {"type": "object", "additionalProperties": false, "required": ["kind", "number"], "properties": {"kind": {"const": "issue"}, "number": {"type": "integer", "minimum": 1}}},
+    "repository": {"type": "object", "additionalProperties": false, "required": ["name_with_owner", "branch", "base_sha", "head_sha", "change_identity"], "properties": {"name_with_owner": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}, "branch": {"type": "string", "minLength": 1, "maxLength": 200}, "base_sha": {"$ref": "#/$defs/sha1"}, "head_sha": {"$ref": "#/$defs/sha1"}, "change_identity": {"$ref": "#/$defs/sha256"}}},
+    "scope": {"type": "object", "additionalProperties": false, "required": ["domains", "paths"], "properties": {"domains": {"$ref": "#/$defs/ids"}, "paths": {"$ref": "#/$defs/paths"}}},
+    "controller": {"type": "object", "additionalProperties": false, "required": ["next", "routing", "history_tail", "state_sha256", "policy_sha256", "harness"], "properties": {
+      "next": {"type": "object", "additionalProperties": false, "required": ["action", "human_boundary"], "properties": {"action": {"$ref": "#/$defs/action"}, "human_boundary": {"type": "boolean"}}},
+      "routing": {"type": "object", "additionalProperties": false, "required": ["model", "advisory"], "properties": {"model": {"enum": ["gpt-5.6-sol-high", "gpt-5.6-terra-medium", "gpt-5.6-terra-low"]}, "advisory": {"const": true}}},
+      "history_tail": {"type": "object", "additionalProperties": false, "required": ["sequence", "sha256"], "properties": {"sequence": {"type": "integer", "minimum": 1, "maximum": 256}, "sha256": {"$ref": "#/$defs/sha256"}}},
+      "state_sha256": {"$ref": "#/$defs/sha256"}, "policy_sha256": {"$ref": "#/$defs/sha256"},
+      "harness": {"type": "object", "additionalProperties": false, "required": ["schema_version", "sha256"], "properties": {"schema_version": {"const": "2"}, "sha256": {"$ref": "#/$defs/sha256"}}}
+    }},
+    "validation": {"type": "object", "additionalProperties": false, "required": ["current_level", "evidence_sha256", "impact_minimum_level", "impact_human_gate_required", "required_tier", "required_level", "profiles", "risk"], "properties": {"current_level": {"$ref": "#/$defs/current_level"}, "evidence_sha256": {"type": ["null", "string"], "pattern": "^[0-9a-f]{64}$"}, "impact_minimum_level": {"$ref": "#/$defs/level"}, "impact_human_gate_required": {"type": "boolean"}, "required_tier": {"type": ["null", "string"], "enum": [null, "affected", "subsystem", "canonical"]}, "required_level": {"type": ["null", "string"], "enum": [null, "L0", "L1", "L2", "L3"]}, "profiles": {"$ref": "#/$defs/ids"}, "risk": {"enum": ["docs", "isolated", "shared", "external-effect", "paid-authority"]}}},
+    "ci": {"type": "object", "additionalProperties": false, "required": ["head_sha", "status", "classification"], "properties": {"head_sha": {"type": ["null", "string"], "pattern": "^[0-9a-f]{40}$"}, "status": {"enum": ["not_observed", "pending", "passed", "failed", "stale"]}, "classification": {"enum": ["none", "code", "fixture", "security", "infrastructure", "flaky/unknown"]}}},
+    "repair": {"type": "object", "additionalProperties": false, "required": ["attempts", "maximum_attempts", "remaining_attempts", "stop_reason"], "properties": {"attempts": {"type": "integer", "minimum": 0, "maximum": 3}, "maximum_attempts": {"type": "integer", "minimum": 1, "maximum": 3}, "remaining_attempts": {"type": "integer", "minimum": 0, "maximum": 3}, "stop_reason": {"type": ["null", "string"], "maxLength": 128}}},
+    "context": {"type": "object", "additionalProperties": false, "required": ["domains", "guidance_docs", "implementation", "tests", "validation_config_contracts"], "properties": {"domains": {"$ref": "#/$defs/ids"}, "guidance_docs": {"$ref": "#/$defs/paths"}, "implementation": {"$ref": "#/$defs/paths"}, "tests": {"$ref": "#/$defs/paths"}, "validation_config_contracts": {"$ref": "#/$defs/paths"}}},
+    "authority": {"$ref": "#/$defs/authority"}
+  },
+  "$defs": {
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "ids": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "path": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^(?!/)(?!\\.local(?:/|$))(?!.*(?:^|/)\\.\\.(?:/|$))[^\\x00-\\x1f\\x7f]+$"},
+    "paths": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
+    "level": {"enum": ["L0", "L1", "L2", "L3"]},
+    "current_level": {"enum": ["none", "L0", "L1", "L2", "L3"]},
+    "status": {"enum": ["DESIGN_REVIEW_REQUIRED", "READY_FOR_IMPLEMENTATION", "WORKING", "LOCAL_VALIDATION_REQUIRED", "CI_PENDING", "REPAIRING", "CANONICAL_VALIDATION_REQUIRED", "REVIEW_READY", "BLOCKED", "COMPLETE"]},
+    "action": {"enum": ["request_design_review", "start_bounded_work", "run_affected_validation", "run_subsystem_validation", "ingest_ci", "repair_code", "repair_fixture", "reproduce_flaky", "run_canonical_validation", "request_architecture_review", "request_security_review", "request_merge", "recover_state", "resolve_conflict", "none"]},
+    "authority": {"type": "object", "additionalProperties": false, "required": ["runtime_execution", "provider_execution", "production", "publication", "workflow_activation", "security_exception", "product_authority", "merge", "push"], "properties": {"runtime_execution": {"const": false}, "provider_execution": {"const": false}, "production": {"const": false}, "publication": {"const": false}, "workflow_activation": {"const": false}, "security_exception": {"const": false}, "product_authority": {"const": false}, "merge": {"const": false}, "push": {"const": false}}}
+  }
+}

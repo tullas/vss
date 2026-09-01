@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator
 
 
 PROTOCOL = "vss.dev-milestone"
+PACKET_PROTOCOL = "vss.dev-milestone-execution-packet"
 AUTHORITY = {"runtime_execution": False, "provider_execution": False, "production": False,
              "publication": False, "workflow_activation": False, "security_exception": False,
              "product_authority": False, "merge": False, "push": False}
@@ -23,6 +24,8 @@ MILESTONE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
 LEVELS = {"none": -1, "L0": 0, "L1": 1, "L2": 2, "L3": 3}
+MAX_PACKET_BYTES = 16_384
+MAX_PACKET_PATHS = 64
 
 
 class MilestoneFailure(Exception):
@@ -59,6 +62,7 @@ class MilestoneController:
         self.policy = _read_json(self.root / "config/dev-milestone-policy-v1.json")
         self.policy_schema = _read_json(self.root / "schemas/dev-milestone-policy-v1.schema.json")
         self.record_schema = _read_json(self.root / "schemas/dev-milestone-record-v1.schema.json")
+        self.packet_schema = _read_json(self.root / "schemas/dev-milestone-execution-packet-v1.schema.json")
         if list(Draft202012Validator(self.policy_schema).iter_errors(self.policy)):
             raise MilestoneFailure("milestone policy is malformed")
         if self.policy.get("authority") != AUTHORITY:
@@ -175,6 +179,137 @@ class MilestoneController:
             raise MilestoneFailure("milestone record is malformed")
         if value.get("authority") != AUTHORITY:
             raise MilestoneFailure("milestone record grants authority")
+
+    def _command_json(self, argv: list[str], limit: int = 65536) -> dict[str, Any]:
+        try:
+            value = json.loads(self._run(argv, limit))
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise MilestoneFailure("repository routing output is malformed") from exc
+        if type(value) is not dict:
+            raise MilestoneFailure("repository routing output is malformed")
+        return value
+
+    @staticmethod
+    def _packet_reference(path: Any) -> str:
+        if (type(path) is not str or not 1 <= len(path) <= 240 or path.startswith("/")
+                or "//" in path or any(part in {"", ".", ".."} for part in path.split("/"))
+                or any(ord(char) < 32 or ord(char) == 127 for char in path)
+                or path == ".local" or path.startswith(".local/")
+                or re.search(r"(?i)(secret|credential|token|api[_-]?key|private[_-]?key)", path)):
+            raise MilestoneFailure("execution packet repository reference is invalid")
+        return path
+
+    def execution_packet(self, milestone_id: str | None = None) -> dict[str, Any]:
+        """Project one strict, references-only handoff for the selected next action."""
+        state = self.load(milestone_id)
+        if state["status"] == "CONFLICT":
+            raise MilestoneFailure("execution packet repository identity is stale")
+        for path in state["scope"]["paths"]:
+            self._packet_reference(path)
+
+        impact = self._command_json([
+            "scripts/vss-agent", "impact", "--base", state["repository"]["base_sha"],
+        ])
+        impact_keys = {"schema_version", "map_sha256", "changed_paths", "domains", "minimum_level",
+                       "risk", "profiles", "human_gate_required", "unknown_paths", "authority"}
+        harness_authority = {"runtime_execution": False, "provider_execution": False,
+                             "merge": False, "push": False}
+        if (set(impact) != impact_keys or impact.get("schema_version") != "2"
+                or type(impact.get("map_sha256")) is not str
+                or SHA256.fullmatch(impact["map_sha256"]) is None
+                or impact.get("authority") != harness_authority
+                or any(type(impact.get(key)) is not list for key in (
+                    "changed_paths", "domains", "profiles", "unknown_paths"))
+                or impact.get("minimum_level") not in {"L0", "L1", "L2", "L3"}
+                or impact.get("risk") not in {"docs", "isolated", "shared", "external-effect", "paid-authority"}
+                or type(impact.get("human_gate_required")) is not bool):
+            raise MilestoneFailure("repository impact routing is malformed")
+        if impact["unknown_paths"]:
+            raise MilestoneFailure("execution packet has unclassified repository impact")
+
+        requested_domains = sorted(set(["agent-coordination", *state["scope"]["domains"],
+                                        *impact.get("domains", [])]))
+        context_argv = ["scripts/vss-agent", "context"]
+        for domain in requested_domains:
+            context_argv.extend(["--domain", domain])
+        routed = self._command_json(context_argv)
+        if (set(routed) != {"schema_version", "map_sha256", "domains", "paths"}
+                or routed.get("schema_version") != "2"
+                or routed.get("map_sha256") != impact["map_sha256"]
+                or routed.get("domains") != requested_domains
+                or type(routed.get("paths")) is not dict
+                or set(routed["paths"]) != {"docs", "code", "tests"}):
+            raise MilestoneFailure("repository context routing is malformed")
+        for category in ("docs", "code", "tests"):
+            paths = routed["paths"][category]
+            if (type(paths) is not list or paths != sorted(set(paths))
+                    or any(self._packet_reference(path) != path for path in paths)):
+                raise MilestoneFailure("repository context routing is malformed")
+        code = routed["paths"]["code"]
+        contract_prefixes = ("config/", "schemas/")
+
+        def is_contract(path: str) -> bool:
+            return path in {"config", "schemas"} or path.startswith(contract_prefixes)
+
+        context = {
+            "domains": requested_domains,
+            "guidance_docs": routed["paths"]["docs"],
+            "implementation": [path for path in code if not is_contract(path)],
+            "tests": routed["paths"]["tests"],
+            "validation_config_contracts": [path for path in code if is_contract(path)],
+        }
+        reference_count = sum(len(context[key]) for key in (
+            "guidance_docs", "implementation", "tests", "validation_config_contracts"))
+        if reference_count > MAX_PACKET_PATHS:
+            raise MilestoneFailure("execution packet repository context exceeded its bound")
+
+        tier_by_action = {"run_affected_validation": ("affected", "L1"),
+                          "run_subsystem_validation": ("subsystem", "L2"),
+                          "run_canonical_validation": ("canonical", "L3")}
+        required_tier: str | None = None
+        required_level: str | None = None
+        if state["next"]["action"] in tier_by_action:
+            required_tier, requested_level = tier_by_action[state["next"]["action"]]
+            required_level = (requested_level
+                              if LEVELS[requested_level] >= LEVELS[impact["minimum_level"]]
+                              else impact["minimum_level"])
+
+        packet = {
+            "schema_version": "1", "protocol": PACKET_PROTOCOL,
+            "milestone": {"id": state["milestone_id"], "generation": state["generation"],
+                          "status": state["status"]},
+            "work_issue": {"kind": "issue", "number": state["scope"]["issue"]},
+            "repository": state["repository"],
+            "scope": {"domains": state["scope"]["domains"], "paths": state["scope"]["paths"]},
+            "controller": {
+                "next": state["next"], "routing": state["routing"],
+                "history_tail": state["history_tail"], "state_sha256": _digest(state),
+                "policy_sha256": state["policy_sha256"],
+                "harness": {"schema_version": "2", "sha256": impact["map_sha256"]},
+            },
+            "validation": {
+                "current_level": state["validation"]["level"],
+                "evidence_sha256": state["validation"]["evidence_sha256"],
+                "impact_minimum_level": impact["minimum_level"],
+                "impact_human_gate_required": impact["human_gate_required"],
+                "required_tier": required_tier, "required_level": required_level,
+                "profiles": impact["profiles"], "risk": impact["risk"],
+            },
+            "ci": state["ci"],
+            "repair": {"attempts": state["repair"]["attempts"],
+                       "maximum_attempts": self.policy["limits"]["max_repair_attempts"],
+                       "remaining_attempts": self.policy["limits"]["max_repair_attempts"] - state["repair"]["attempts"],
+                       "stop_reason": state["repair"]["stop_reason"]},
+            "context": context,
+            "authority": dict(AUTHORITY),
+        }
+        if list(Draft202012Validator(self.packet_schema).iter_errors(packet)):
+            raise MilestoneFailure("execution packet is malformed")
+        if len(_canonical(packet)) > MAX_PACKET_BYTES:
+            raise MilestoneFailure("execution packet exceeded its bound")
+        if self._repository(state["repository"]["base_sha"]) != state["repository"]:
+            raise MilestoneFailure("repository changed during execution packet generation")
+        return packet
 
     def _read_events(self, milestone_id: str) -> list[dict[str, Any]]:
         _, _, history = self._paths(milestone_id)
