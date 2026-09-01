@@ -91,10 +91,14 @@ jobs:
           "$RUNNER_TEMP/vss-trivy/trivy" image --scanners vuln
           --severity HIGH,CRITICAL --format json --output "$RUNNER_TEMP/trivy-report.json"
           '${{ matrix.image }}'
+      - name: Capture exact container manifest evidence
+        run: >-
+          docker buildx imagetools inspect --raw '${{ matrix.image }}'
+          > "$RUNNER_TEMP/image-manifest.json"
       - name: Enforce container vulnerability policy
         run: >-
           python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}'
-          --report "$RUNNER_TEMP/trivy-report.json"
+          --report "$RUNNER_TEMP/trivy-report.json" --manifest "$RUNNER_TEMP/image-manifest.json"
 
   iac-scan:
     name: IaC and Dockerfile scan

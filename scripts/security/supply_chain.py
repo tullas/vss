@@ -305,8 +305,12 @@ def validate_workflow_invariants(root: Path) -> None:
     }
     for job_name in ("container-scan", "iac-scan"):
         job_runs = {str(step.get("run", "")).strip() for step in jobs[job_name]["steps"] if isinstance(step, dict) and "if" not in step and step.get("continue-on-error") is not True}
-        required_container_policy = "python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}' --report \"$RUNNER_TEMP/trivy-report.json\""
-        if 'scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs or expected_scans[job_name] not in job_runs or (job_name == "container-scan" and required_container_policy not in job_runs):
+        required_container_policy = "python3 scripts/security/validate-container-scan.py --image '${{ matrix.image }}' --report \"$RUNNER_TEMP/trivy-report.json\" --manifest \"$RUNNER_TEMP/image-manifest.json\""
+        required_manifest_evidence = "docker buildx imagetools inspect --raw '${{ matrix.image }}' > \"$RUNNER_TEMP/image-manifest.json\""
+        if ('scripts/security/install-trivy.sh "$RUNNER_TEMP/vss-trivy"' not in job_runs
+                or expected_scans[job_name] not in job_runs
+                or (job_name == "container-scan"
+                    and (required_container_policy not in job_runs or required_manifest_evidence not in job_runs))):
             raise PolicyFailure(f"security scanner does not fail closed: {job_name}")
     scanned_images = jobs["container-scan"].get("strategy", {}).get("matrix", {}).get("image", [])
     required_images = sorted(record["source"] for record in component_map(root).values() if record["ecosystem"] == "oci")
