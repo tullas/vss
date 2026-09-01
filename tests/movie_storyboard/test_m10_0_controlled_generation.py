@@ -20,6 +20,10 @@ from vss_movie_controlled_generation import (
 )
 from vss_movie_controlled_generation.contracts import validate_candidate_media
 from vss_movie_demo import finish_demo, prepare_demo
+from vss_movie_storyboard import (
+    create_grounded_storyboard_comparison,
+    record_development_review_selection,
+)
 from vss_movie_visual_grounding import (
     create_grounded_movie_route,
     create_production_visual_grounding_profile,
@@ -369,6 +373,97 @@ class M100ControlledGenerationTests(unittest.TestCase):
         )
         self.assertEqual(second_review.value["candidate_sha256"], admit_generated_candidate(self.root, second_admitted).candidate_json()["candidate_sha256"])
         self.assertTrue(all(value is False for value in second_review.value["authority"].values()))
+
+    def test_m10_2_comparison_binds_two_admitted_candidates_and_one_human_selection(self):
+        first = self.admit_grounded()
+        first_admitted = self.admit_grounded(approval=self.approval(first))
+        first_result, first_code = self.runtime(first_admitted, mode="generate")
+        self.assertEqual(first_code, 0, first_result)
+        first_candidate = admit_generated_candidate(self.root, first_admitted)
+        first_review = record_production_visual_grounding_review(
+            generation=first_admitted, candidate=first_candidate, disposition="REGENERATE",
+            defects=[{"defect_code": "production.defect-alpha", "group_id": "production.group-alpha",
+                      "rationale": "Opaque human development review evidence."}],
+            reviewer_accountability_id="reviewer-grounding",
+        )
+        revised_profile = create_revised_production_visual_grounding_profile(
+            predecessor_profile=self.grounding_profile, review=first_review,
+            profile_id="visual-grounding-production-alpha", revision=2,
+            tenant_id="tenant-local", universe_id="universe-local",
+            production_id=self.base_payload["story"]["project_id"], mode="required",
+            groups=[{"ordinal": 1, "group_id": "production.group-alpha",
+                     "positive_constraints": ["Apply revised opaque production visual token ALPHA-BETA."],
+                     "negative_constraints": ["Exclude production-defined visual token ALPHA-NEGATIVE."],
+                     "explicit_unknowns": ["Production-defined visual token ALPHA-UNKNOWN remains unresolved."],
+                     "limitations": ["Opaque production revision; VSS assigns no domain meaning."],
+                     "source_reference_digests": [canonical_digest({"source": "opaque-alpha-beta"})]}],
+            reviewer_accountability_id="reviewer-grounding",
+        ).to_json_value()
+        route = create_grounded_movie_route(
+            self.base_payload["decision"], self.base_payload["review_packet"], self.base_payload["option_set"],
+            self.base_payload["scene_breakdown"], self.base_payload["creative_decision"],
+            self.base_payload["canon_snapshot"], self.base_payload["canon_binding"], self.base_payload["shot_plan"],
+            self.base_payload["storyboard"], profile_data=revised_profile,
+        )
+        second_payload = {**self.base_payload, "profile": revised_profile,
+                          "grounded_creative_decision": route.creative_decision.to_json_value(),
+                          "grounded_canon_snapshot": route.canon_snapshot.to_json_value(),
+                          "grounded_canon_binding": route.canon_binding.to_json_value(),
+                          "grounded_shot_plan": route.shot_plan.to_json_value(),
+                          "grounded_storyboard": route.storyboard.to_json_value()}
+        second = self.admit_grounded(second_payload)
+        second_admitted = self.admit_grounded(second_payload, approval=self.approval(second))
+        second_result, second_code = self.runtime(second_admitted, mode="generate")
+        self.assertEqual(second_code, 0, second_result)
+        second_candidate = admit_generated_candidate(self.root, second_admitted)
+        second_review = record_production_visual_grounding_review(
+            generation=second_admitted, candidate=second_candidate, disposition="USE", defects=[],
+            reviewer_accountability_id="reviewer-grounding",
+        )
+
+        comparison = create_grounded_storyboard_comparison(
+            first_admitted, first_candidate, first_review,
+            second_admitted, second_candidate, second_review,
+        )
+        comparison_json = comparison.to_json_value()
+        self.assertEqual(comparison_json["candidates"][0]["candidate_sha256"],
+                         first_candidate.candidate_json()["candidate_sha256"])
+        self.assertEqual(comparison_json["candidates"][1]["visual_grounding_profile"]["revision"], 2)
+        self.assertEqual(comparison_json["candidate_order"], "caller_supplied_evidence_order_not_ranking")
+        self.assertTrue(all(value is False for value in comparison_json["authority"].values()))
+        self.assertEqual(comparison_json, create_grounded_storyboard_comparison(
+            first_admitted, first_candidate, first_review,
+            second_admitted, second_candidate, second_review,
+        ).to_json_value())
+
+        selection = record_development_review_selection(
+            comparison, selected_candidate_id=second_candidate.candidate_json()["candidate_id"],
+            reviewer_accountability_id="development.reviewer", rationale="Human development review selection.",
+        ).to_json_value()
+        self.assertEqual(selection["comparison_sha256"], comparison_json["comparison_sha256"])
+        self.assertEqual(selection["selected_candidate_sha256"], second_candidate.candidate_json()["candidate_sha256"])
+        self.assertTrue(all(value is False for value in selection["authority"].values()))
+        with self.assertRaisesRegex(ResourceContractError, "already been recorded"):
+            record_development_review_selection(
+                comparison, selected_candidate_id=first_candidate.candidate_json()["candidate_id"],
+                reviewer_accountability_id="development.reviewer", rationale="Replay.",
+            )
+
+    def test_m10_2_rejects_duplicate_and_nonmember_selection_before_authority(self):
+        admitted = self.admit_grounded()
+        approved = self.admit_grounded(approval=self.approval(admitted))
+        result, code = self.runtime(approved, mode="generate")
+        self.assertEqual(code, 0, result)
+        candidate = admit_generated_candidate(self.root, approved)
+        review = record_production_visual_grounding_review(
+            generation=approved, candidate=candidate, disposition="USE", defects=[],
+            reviewer_accountability_id="reviewer-grounding",
+        )
+        with self.assertRaisesRegex(ResourceContractError, "must be distinct"):
+            create_grounded_storyboard_comparison(
+                approved, candidate, review, approved, candidate, review,
+            )
+        self.assertEqual(len(self.calls), 1)
 
     def test_revised_profile_rejects_resealed_or_mismatched_predecessor_evidence(self):
         profile = copy.deepcopy(self.grounding_profile)
