@@ -17,6 +17,7 @@ from vss_resource_contracts import (
 
 _PACKAGE_KEY = object()
 _SELECTION_KEY = object()
+_PROMOTION_KEY = object()
 
 COMPARISON_AUTHORITY = {
     "ranking": False,
@@ -32,6 +33,13 @@ COMPARISON_AUTHORITY = {
     "workflow_activation": False,
     "canon_decision": False,
     "rights_decision": False,
+}
+
+PROMOTION_AUTHORITY = {
+    **COMPARISON_AUTHORITY,
+    "approval": False,
+    "reservation": False,
+    "deployment": False,
 }
 
 
@@ -55,10 +63,28 @@ class GroundedStoryboardComparison:
 @dataclass(frozen=True, slots=True, init=False)
 class DevelopmentReviewSelection:
     _value: Any
+    _promotion_recorded: bool = field(default=False, init=False, repr=False,
+                                      compare=False)
 
     def __init__(self, key: object, *, value: dict[str, Any]) -> None:
         if key is not _SELECTION_KEY:
             raise TypeError("development review selection requires an authoritative comparison")
+        object.__setattr__(self, "_value", freeze_json(value))
+        object.__setattr__(self, "_promotion_recorded", False)
+
+    def to_json_value(self) -> dict[str, Any]:
+        return thaw_json(self._value)
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class GroundedStoryboardPromotion:
+    """An opaque, sealed, accountable promotion-evidence record only."""
+
+    _value: Any
+
+    def __init__(self, key: object, *, value: dict[str, Any]) -> None:
+        if key is not _PROMOTION_KEY:
+            raise TypeError("grounded storyboard promotion requires authoritative construction")
         object.__setattr__(self, "_value", freeze_json(value))
 
     def to_json_value(self) -> dict[str, Any]:
@@ -192,3 +218,93 @@ def record_development_review_selection(
     value["selection_sha256"] = canonical_digest(value)
     comparison._selection_recorded = True
     return DevelopmentReviewSelection(_SELECTION_KEY, value=value)
+
+
+def _sealed_comparison_value(comparison: Any) -> dict[str, Any]:
+    if type(comparison) is not GroundedStoryboardComparison:
+        raise ResourceContractError("promotion requires an authoritative sealed comparison package")
+    try:
+        package = comparison.to_json_value()
+        expected_seal = canonical_digest({**package, "comparison_sha256": "0" * 64})
+        is_valid = (
+            package["schema_version"] == "1"
+            and package["comparison_identity"] == "grounded_storyboard_candidate_comparison"
+            and package["comparison_version"] == "1"
+            and package["comparison_status"] == "development_review_only"
+            and package["comparison_sha256"] == expected_seal
+            and isinstance(package["candidates"], list)
+            and len(package["candidates"]) == 2
+            and package["authority"] == COMPARISON_AUTHORITY
+        )
+    except (AttributeError, KeyError, TypeError):
+        is_valid = False
+    if not is_valid:
+        raise ResourceContractError("comparison package seal or authority mismatch")
+    return package
+
+
+def _sealed_selection_value(selection: Any, comparison: dict[str, Any]) -> dict[str, Any]:
+    if type(selection) is not DevelopmentReviewSelection:
+        raise ResourceContractError("promotion requires an authoritative sealed selection evidence")
+    try:
+        value = selection.to_json_value()
+        expected_seal = canonical_digest({**value, "selection_sha256": "0" * 64})
+        selected = [item for item in comparison["candidates"]
+                    if item["candidate_id"] == value["selected_candidate_id"]]
+        is_valid = (
+            value["schema_version"] == "1"
+            and value["selection_identity"] == "grounded_storyboard_development_review_selection"
+            and value["selection_version"] == "1"
+            and value["comparison_sha256"] == comparison["comparison_sha256"]
+            and value["selection_sha256"] == expected_seal
+            and len(selected) == 1
+            and value["selected_candidate_sha256"] == selected[0]["candidate_sha256"]
+            and value["authority"] == COMPARISON_AUTHORITY
+        )
+    except (AttributeError, KeyError, TypeError):
+        is_valid = False
+    if not is_valid:
+        raise ResourceContractError("selection evidence seal or comparison binding mismatch")
+    return value
+
+
+def record_grounded_storyboard_promotion(
+    comparison: Any, selection: Any, generation: Any, candidate: Any, review: Any, *,
+    promotion_approver_accountability_id: str, rationale: str,
+) -> GroundedStoryboardPromotion:
+    """Seal accountable promotion evidence without granting operational authority."""
+    package = _sealed_comparison_value(comparison)
+    selection_value = _sealed_selection_value(selection, package)
+    if selection._promotion_recorded:
+        raise ResourceContractError("selection promotion has already been recorded")
+    selected_evidence = _candidate_evidence(generation, candidate, review)
+    selected_member = [item for item in package["candidates"]
+                       if item["candidate_id"] == selection_value["selected_candidate_id"]]
+    if len(selected_member) != 1 or selected_evidence != selected_member[0]:
+        raise ResourceContractError("promotion selected candidate evidence binding mismatch")
+    if (not isinstance(promotion_approver_accountability_id, str)
+            or not promotion_approver_accountability_id):
+        raise ResourceContractError("promotion approver accountability identifier is invalid")
+    if not isinstance(rationale, str) or not rationale:
+        raise ResourceContractError("promotion rationale is invalid")
+    value = {
+        "schema_version": "1",
+        "promotion_identity": "grounded_storyboard_selected_candidate_promotion",
+        "promotion_version": "1",
+        "promotion_status": "accountable_evidence_only",
+        "comparison_sha256": package["comparison_sha256"],
+        "selection_sha256": selection_value["selection_sha256"],
+        "selected_candidate": selected_evidence,
+        "promotion_approver_accountability_id": promotion_approver_accountability_id,
+        "rationale": rationale,
+        "authority": dict(PROMOTION_AUTHORITY),
+        "limitations": [
+            "accountable_promotion_evidence_only", "not_publication_or_deployment_authority",
+            "not_provider_or_runtime_authority", "not_generation_or_regeneration_authority",
+            "not_production_asset_canon_rights_or_workflow_authority",
+        ],
+        "promotion_sha256": "0" * 64,
+    }
+    value["promotion_sha256"] = canonical_digest(value)
+    object.__setattr__(selection, "_promotion_recorded", True)
+    return GroundedStoryboardPromotion(_PROMOTION_KEY, value=value)

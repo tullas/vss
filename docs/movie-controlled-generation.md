@@ -72,6 +72,20 @@ metadata. This milestone creates an empty review record but does not implement
 review disposition recording; a later operation may seal `USE`, `REGENERATE`,
 or `REJECT`, and that disposition must not authorize another provider call.
 
+M10.2 adds an in-memory, authoritative comparison package for exactly two
+admitted grounded candidates and their sealed grounding reviews, followed by one
+explicit accountable development-review selection. Neither artifact ranks,
+recommends, regenerates, or grants any operational authority. M10.3 adds one
+process-local, one-use promotion-evidence record for that exact selected member.
+It requires the authoritative sealed comparison and selection, reconstructs and
+matches the supplied admitted candidate, request lineage, scope, frame grounding,
+profile, provider, and review evidence, and records an explicit accountable human
+promotion approval plus rationale. The resulting sealed evidence does not publish,
+deploy, create a production asset, invoke a provider or Runtime, regenerate,
+decide canon or rights, or activate a workflow. It is accountable evidence only;
+its object-authoritative replay protection is intentionally in-memory and does
+not introduce persistence, lifecycle, or workflow machinery.
+
 The request also seals exact capability/provider manifest and implementation
 digests. Runtime revalidates those bindings before preflight, approval
 verification, secret access, reservation, or transport.
