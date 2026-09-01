@@ -30,7 +30,7 @@ jobs:
         run: | # pragma: allowlist secret -- deterministic binary digest below
           set -Eeuo pipefail
           repository='ghcr.io/tullas/vss/versitygw'
-          image="$repository:v1.7.0-go1.25.13-r4"
+          image="$repository:v1.7.0-go1.25.13-xcrypto0.55.0-r5"
           metadata="$RUNNER_TEMP/versitygw-build-metadata.json"
           docker buildx build \
             --file containers/versitygw/Dockerfile \
@@ -53,7 +53,7 @@ jobs:
           config_digest=$(jq -er '.config.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<<"$platform_raw")
           observed_binary=$(docker run --rm --platform linux/amd64 --entrypoint sha256sum \
             "$reference" /usr/local/bin/versitygw | awk '{print $1}')
-          test "$observed_binary" = '7ec13c1c2b8169e67c0b840039b3a06d085ea4f48657cbb4dd1cad31643e75b8'
+          test "$observed_binary" = 'f0f833323d05fcfb1253d6145f01306d3f7101562579aea2e746a2d0100c9f92'
           jq -ncer --arg index_digest "$digest" --arg platform_digest "$platform_digest" --arg config_digest "$config_digest" \
             '{index_digest: $index_digest, platform_digest: $platform_digest, config_digest: $config_digest}'
       - name: Build, verify, and publish the exact reviewed Ubuntu acceptance derivative
