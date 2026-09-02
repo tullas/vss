@@ -92,11 +92,13 @@ class GroundedStoryboardAssetAdmission:
     """Opaque sealed status evidence; it grants no operational or asset-use authority."""
 
     _value: Any
+    _authoritative_admission_sha256: str
 
     def __init__(self, key: object, *, value: dict[str, Any]) -> None:
         if key is not _ADMISSION_KEY:
             raise TypeError("grounded storyboard asset admission requires authoritative construction")
         object.__setattr__(self, "_value", freeze_json(value))
+        object.__setattr__(self, "_authoritative_admission_sha256", value["admission_sha256"])
 
     def to_json_value(self) -> dict[str, Any]:
         return thaw_json(self._value)
