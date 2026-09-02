@@ -25,6 +25,7 @@ from vss_movie_storyboard import (
     create_grounded_storyboard_comparison,
     record_development_review_selection,
     record_grounded_storyboard_promotion,
+    register_grounded_storyboard_asset, lookup_grounded_storyboard_asset,
 )
 from vss_movie_visual_grounding import (
     create_grounded_movie_route,
@@ -484,10 +485,11 @@ class M100ControlledGenerationTests(unittest.TestCase):
                 promotion_evidence, asset_admission_approver_accountability_id="asset.approver",
                 rationale="",
             )
-        admission = admit_grounded_storyboard_asset(
+        admission_evidence = admit_grounded_storyboard_asset(
             promotion_evidence, asset_admission_approver_accountability_id="asset.approver",
             rationale="Admit the exact promoted USE candidate as reusable-asset evidence only.",
-        ).to_json_value()
+        )
+        admission = admission_evidence.to_json_value()
         self.assertEqual(admission["source"]["comparison_sha256"], comparison_json["comparison_sha256"])
         self.assertEqual(admission["source"]["selection_sha256"], selection["selection_sha256"])
         self.assertEqual(admission["source"]["promotion_sha256"], promotion["promotion_sha256"])
@@ -498,6 +500,9 @@ class M100ControlledGenerationTests(unittest.TestCase):
         self.assertEqual(admission["admission_sha256"], canonical_digest({
             **admission, "admission_sha256": "0" * 64,
         }))
+        # M10.5: persist and resolve only the exact M10.4 metadata envelope.
+        catalog = register_grounded_storyboard_asset(self.root, admission_evidence)
+        self.assertEqual(catalog, lookup_grounded_storyboard_asset(self.root, catalog.asset_id))
         with self.assertRaisesRegex(ResourceContractError, "already been admitted"):
             admit_grounded_storyboard_asset(
                 promotion_evidence, asset_admission_approver_accountability_id="asset.approver",
