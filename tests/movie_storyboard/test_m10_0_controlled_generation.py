@@ -26,6 +26,7 @@ from vss_movie_storyboard import (
     record_development_review_selection,
     record_grounded_storyboard_promotion,
     register_grounded_storyboard_asset, lookup_grounded_storyboard_asset,
+    bind_grounded_storyboard_asset_to_shot,
 )
 from vss_movie_visual_grounding import (
     create_grounded_movie_route,
@@ -503,6 +504,30 @@ class M100ControlledGenerationTests(unittest.TestCase):
         # M10.5: persist and resolve only the exact M10.4 metadata envelope.
         catalog = register_grounded_storyboard_asset(self.root, admission_evidence)
         self.assertEqual(catalog, lookup_grounded_storyboard_asset(self.root, catalog.asset_id))
+        shot = second_payload["shot_plan"]["payload"]["ordered_shots"][0]
+        binding = bind_grounded_storyboard_asset_to_shot(
+            catalog, second_payload["storyboard"], second_payload["decision"],
+            second_payload["review_packet"], second_payload["option_set"],
+            second_payload["scene_breakdown"], second_payload["shot_plan"],
+            shot_id=shot["shot_id"], approver_accountability_id="shot.approver",
+            rationale="Bind the cataloged visual basis to this exact production shot.",
+            grounded_shot_plan_data=second_payload["grounded_shot_plan"],
+            grounded_storyboard_data=second_payload["grounded_storyboard"],
+        )
+        binding_json = binding.to_json_value()
+        self.assertEqual(binding_json["asset_id"], catalog.asset_id)
+        self.assertEqual(binding_json["shot_card_digest"], shot["shot_card_digest"])
+        self.assertTrue(all(value is False for value in binding_json["authority"].values()))
+        with self.assertRaisesRegex(ResourceContractError, "wrong shot"):
+            bind_grounded_storyboard_asset_to_shot(
+                catalog, second_payload["storyboard"], second_payload["decision"],
+                second_payload["review_packet"], second_payload["option_set"],
+                second_payload["scene_breakdown"], second_payload["shot_plan"],
+                shot_id=second_payload["shot_plan"]["payload"]["ordered_shots"][1]["shot_id"],
+                approver_accountability_id="shot.approver", rationale="Wrong-shot evidence must fail closed.",
+                grounded_shot_plan_data=second_payload["grounded_shot_plan"],
+                grounded_storyboard_data=second_payload["grounded_storyboard"],
+            )
         with self.assertRaisesRegex(ResourceContractError, "already been admitted"):
             admit_grounded_storyboard_asset(
                 promotion_evidence, asset_admission_approver_accountability_id="asset.approver",
