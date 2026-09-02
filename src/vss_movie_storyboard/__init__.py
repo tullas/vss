@@ -21,6 +21,7 @@ from .asset_admission import (
 )
 from .asset_catalog import GroundedStoryboardAssetCatalogEntry, register_grounded_storyboard_asset, lookup_grounded_storyboard_asset
 from .shot_binding import GroundedStoryboardShotBinding, bind_grounded_storyboard_asset_to_shot
+from .visual_production_set import SceneVisualProductionSet, create_scene_visual_production_set, validate_scene_visual_production_set
 
 __all__ = [
     "StoryboardProviderView", "admit_storyboard_inputs", "create_frame_specifications",
@@ -31,4 +32,5 @@ __all__ = [
     "GroundedStoryboardAssetAdmission", "admit_grounded_storyboard_asset",
     "GroundedStoryboardAssetCatalogEntry", "register_grounded_storyboard_asset", "lookup_grounded_storyboard_asset",
     "GroundedStoryboardShotBinding", "bind_grounded_storyboard_asset_to_shot",
+    "SceneVisualProductionSet", "create_scene_visual_production_set", "validate_scene_visual_production_set",
 ]
