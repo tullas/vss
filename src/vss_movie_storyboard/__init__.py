@@ -15,6 +15,10 @@ from .comparison import (
     record_development_review_selection,
     record_grounded_storyboard_promotion,
 )
+from .asset_admission import (
+    GroundedStoryboardAssetAdmission,
+    admit_grounded_storyboard_asset,
+)
 
 __all__ = [
     "StoryboardProviderView", "admit_storyboard_inputs", "create_frame_specifications",
@@ -22,4 +26,5 @@ __all__ = [
     "storyboard_provider_view", "DevelopmentReviewSelection", "GroundedStoryboardComparison",
     "GroundedStoryboardPromotion", "create_grounded_storyboard_comparison",
     "record_development_review_selection", "record_grounded_storyboard_promotion",
+    "GroundedStoryboardAssetAdmission", "admit_grounded_storyboard_asset",
 ]

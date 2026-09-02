@@ -86,11 +86,25 @@ decide canon or rights, or activate a workflow. It is accountable evidence only;
 its object-authoritative replay protection is intentionally in-memory and does
 not introduce persistence, lifecycle, or workflow machinery.
 
+M10.4 adds one further process-local, one-use boundary that consumes only the
+authoritative sealed M10.3 promotion. It revalidates the promotion seal, closed
+authority, exact comparison and selection digest references, selected candidate
+lineage, scope, frame grounding, grounding profile, registered provider tuple,
+and sealed review bindings. Only a promoted candidate with a `USE` grounding
+review is eligible. An explicit asset-admission approver accountability identifier
+and non-empty rationale are required; the identifier is accountability metadata,
+not authenticated identity or authorization proof. The opaque sealed result
+records reusable-asset evidence status for the exact promoted candidate and a
+deterministic digest. It creates no asset ID, catalog record, durable state, or
+lifecycle machinery and grants no asset-use, production, publication, deployment,
+export, scheduling, workflow, provider, Runtime, regeneration, mutation, canon,
+or rights authority.
+
 The request also seals exact capability/provider manifest and implementation
 digests. Runtime revalidates those bindings before preflight, approval
 verification, secret access, reservation, or transport.
 
 Durable retention, deletion/legal hold, customer export, catalogs, databases,
-queues, multi-candidate runs, reusable-asset admission, promotion, production
+queues, multi-candidate runs, durable reusable-asset registration, production
 rights adjudication, general RBAC, commercial ledgers, and production-grade
 identity or process isolation remain deferred.
