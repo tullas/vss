@@ -81,11 +81,16 @@ class GroundedStoryboardPromotion:
     """An opaque, sealed, accountable promotion-evidence record only."""
 
     _value: Any
+    _authoritative_promotion_sha256: str = field(init=False, repr=False, compare=False)
+    _asset_admission_recorded: bool = field(default=False, init=False, repr=False,
+                                            compare=False)
 
     def __init__(self, key: object, *, value: dict[str, Any]) -> None:
         if key is not _PROMOTION_KEY:
             raise TypeError("grounded storyboard promotion requires authoritative construction")
         object.__setattr__(self, "_value", freeze_json(value))
+        object.__setattr__(self, "_authoritative_promotion_sha256", value["promotion_sha256"])
+        object.__setattr__(self, "_asset_admission_recorded", False)
 
     def to_json_value(self) -> dict[str, Any]:
         return thaw_json(self._value)
