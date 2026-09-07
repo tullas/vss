@@ -26,6 +26,13 @@ PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
 LEVELS = {"none": -1, "L0": 0, "L1": 1, "L2": 2, "L3": 3}
 MAX_PACKET_BYTES = 16_384
 MAX_PACKET_PATHS = 64
+MISSION_REVIEWS = {
+    "strategic_concern": {"strategic"},
+    "creative_production_authority": {"strategic", "constitutional", "unknown_unknown"},
+    "provider_media_transition": {"constitutional"},
+    "architecture_boundary": {"constitutional", "unknown_unknown"},
+}
+DECISION_INDEX = "docs/architecture/decisions/index.json"
 
 
 class MilestoneFailure(Exception):
@@ -180,6 +187,106 @@ class MilestoneController:
         if value.get("authority") != AUTHORITY:
             raise MilestoneFailure("milestone record grants authority")
 
+    def _active_decisions(self) -> tuple[set[str], str]:
+        """Load the small Git-native index; its records remain the authority."""
+        index = _read_json(self.root / DECISION_INDEX, 8192)
+        if (set(index) != {"schema_version", "protocol", "decisions"}
+                or index["schema_version"] != "1"
+                or index["protocol"] != "vss.active-decision-index"
+                or type(index["decisions"]) is not list or not index["decisions"]
+                or len(index["decisions"]) > 32):
+            raise MilestoneFailure("active decision index is malformed")
+        active: set[str] = set()
+        for entry in index["decisions"]:
+            if (type(entry) is not dict or set(entry) != {"id", "status", "record"}
+                    or type(entry["id"]) is not str or not re.fullmatch(r"DEC-[0-9]{4}", entry["id"])
+                    or entry["status"] != "ACTIVE"):
+                raise MilestoneFailure("active decision index is malformed")
+            record_path = self._packet_reference(entry["record"])
+            record = _read_json(self.root / record_path, 8192)
+            required = {"id", "status", "scope", "decision", "rationale", "constraints",
+                        "supersedes", "superseded_by", "references"}
+            if (set(record) != required or record["id"] != entry["id"]
+                    or record["status"] != "ACTIVE"
+                    or any(type(record[key]) is not str or not record[key].strip()
+                           for key in ("scope", "decision", "rationale", "constraints"))
+                    or record["supersedes"] is not None or record["superseded_by"] is not None
+                    or type(record["references"]) is not list or not record["references"]
+                    or any(self._packet_reference(reference) != reference for reference in record["references"])
+                    or entry["id"] in active):
+                raise MilestoneFailure("active decision record is malformed")
+            active.add(entry["id"])
+        return active, _digest(index)
+
+    def _mission_gate(self, events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Replay declared evidence; review receipts are coordination, never authority."""
+        assessment = None
+        assessment_sha = None
+        required: set[str] = set()
+        reviews: dict[str, str] = {}
+        stalled = 0
+        decision_ids: list[str] = []
+        active_decisions, _ = self._active_decisions()
+        for event in events:
+            data = event["data"]
+            kind = event["event_type"]
+            if "mission" in data:
+                if kind not in {"initialized", "mission_assessed"}:
+                    raise MilestoneFailure("mission evidence is misplaced")
+                assessment = data["mission"]
+                assessment_sha = event["event_sha256"]
+                reviews = {}
+                heartbeat = assessment["heartbeat"]
+                if len({item["milestone_id"] for item in heartbeat}) != len(heartbeat):
+                    raise MilestoneFailure("mission heartbeat repeats a milestone")
+                stalled = 0
+                for item in reversed(heartbeat):
+                    if item["advanced"]:
+                        break
+                    stalled += 1
+                for trigger in assessment["triggers"]:
+                    required.update(MISSION_REVIEWS[trigger])
+                decision_ids = [item["id"] for item in assessment["active_decisions"]]
+                if len(set(decision_ids)) != len(decision_ids) or any(identifier not in active_decisions for identifier in decision_ids):
+                    raise MilestoneFailure("mission assessment has unknown active decision evidence")
+                if any(item["disposition"] == "CHALLENGE" for item in assessment["active_decisions"]):
+                    required.update({"strategic", "constitutional"})
+                if stalled >= 3:
+                    required.add("strategic")
+                # Required reviews remain latched: a replacement declaration cannot
+                # erase a concern. Reassessment invalidates all earlier receipts.
+            elif kind == "mission_assessed":
+                raise MilestoneFailure("mission assessment is missing")
+            if kind == "mission_reviewed":
+                if (assessment is None or data["assessment_sha256"] != assessment_sha
+                        or data["review"]["mechanism"] not in required):
+                    raise MilestoneFailure("mission review does not match the current assessment")
+                review = data["review"]
+                mechanism = review["mechanism"]
+                allowed = ({"CONTINUE", "CONTINUE_WITH_GUARDRAIL", "REMEDIATE_FIRST", "STRATEGIC_REASSESSMENT"}
+                           if mechanism == "strategic" else {"ACCEPT", "REVISE", "REJECT"})
+                if review["disposition"] not in allowed:
+                    raise MilestoneFailure("mission review disposition is incompatible")
+                self._packet_reference(review["evidence"])
+                reviews[mechanism] = review["disposition"]
+        outcome = "PROCEED"
+        if assessment is None or assessment["authority_alignment"] != "aligned":
+            outcome = "STRATEGIC_REVIEW_REQUIRED"
+        elif any(value in {"REMEDIATE_FIRST", "REVISE", "REJECT"} for value in reviews.values()):
+            outcome = "REVISE"
+        elif (required - reviews.keys() or "STRATEGIC_REASSESSMENT" in reviews.values()):
+            outcome = "STRATEGIC_REVIEW_REQUIRED"
+        return {"outcome": outcome, "assessment_sha256": assessment_sha,
+                "required_reviews": sorted(required), "consecutive_no_advance": stalled,
+                "active_decision_ids": decision_ids}
+
+    def _apply_mission_gate(self, state: dict[str, Any]) -> dict[str, Any]:
+        if state["mission_gate"]["outcome"] != "PROCEED" and state["status"] != "CONFLICT":
+            state["status"] = "DESIGN_REVIEW_REQUIRED"
+            state["next"] = {"action": "request_design_review", "human_boundary": True}
+            state["routing"] = {"model": self.policy["model_routing"]["architecture_security"], "advisory": True}
+        return state
+
     def _command_json(self, argv: list[str], limit: int = 65536) -> dict[str, Any]:
         try:
             value = json.loads(self._run(argv, limit))
@@ -301,6 +408,10 @@ class MilestoneController:
                        "remaining_attempts": self.policy["limits"]["max_repair_attempts"] - state["repair"]["attempts"],
                        "stop_reason": state["repair"]["stop_reason"]},
             "context": context,
+            "mission_gate": state["mission_gate"],
+            "active_decisions": {"index_sha256": self._active_decisions()[1],
+                                 "ids": state["mission_gate"]["active_decision_ids"]},
+            "stop_and_challenge": True,
             "authority": dict(AUTHORITY),
         }
         if list(Draft202012Validator(self.packet_schema).iter_errors(packet)):
@@ -336,11 +447,12 @@ class MilestoneController:
             prior = claimed; events.append(event)
         return events
 
-    def _project(self, events: list[dict[str, Any]], repository: dict[str, str]) -> dict[str, Any]:
+    def _project(self, events: list[dict[str, Any]], repository: dict[str, str],
+                 legacy: bool = False) -> dict[str, Any]:
         first = events[0]
         scope = first["data"]
         if (first["event_type"] != "initialized"
-                or set(scope) not in ({"issue", "domains", "paths"},
+                or (set(scope) - {"mission"}) not in ({"issue", "domains", "paths"},
                                       {"issue", "domains", "paths", "initial_branch", "base_sha",
                                        "change_identity"})
                 or type(scope["issue"]) is not int or scope["issue"] < 1
@@ -395,6 +507,9 @@ class MilestoneController:
                  "validation": validation, "ci": ci, "repair": repair, "routing": {"model": model, "advisory": True}, "next": {"action": action, "human_boundary": human},
                  "history_tail": {"sequence": tail["sequence"], "sha256": tail["event_sha256"]}, "policy_sha256": self.policy_digest,
                  "authority": dict(AUTHORITY)}
+        if not legacy:
+            state["mission_gate"] = self._mission_gate(events)
+            self._apply_mission_gate(state)
         self._validate(state); return state
 
     def _write_pointer(self, state: dict[str, Any]) -> None:
@@ -402,7 +517,8 @@ class MilestoneController:
                    "history_tail_sha256": state["history_tail"]["sha256"]}
         self._atomic_json(self.state_root / "current.json", pointer)
 
-    def initialize(self, milestone_id: str, base: str, issue: int, domains: list[str], paths: list[str], summary: str) -> dict[str, Any]:
+    def initialize(self, milestone_id: str, base: str, issue: int, domains: list[str], paths: list[str], summary: str,
+                   mission: dict[str, Any] | None = None) -> dict[str, Any]:
         directory, state_path, history = self._paths(milestone_id)
         if issue < 1 or not summary or len(summary) > 512 or len(domains) > 16 or len(paths) > 64:
             raise MilestoneFailure("milestone initialization is invalid")
@@ -412,12 +528,17 @@ class MilestoneController:
             data = {"issue": issue, "domains": sorted(set(domains)), "paths": sorted(set(paths)),
                     "initial_branch": repository["branch"], "base_sha": repository["base_sha"],
                     "change_identity": repository["change_identity"]}
+            if mission is not None:
+                data["mission"] = mission
             event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event", "milestone_id": milestone_id,
                      "sequence": 1, "event_type": "initialized", "prior_event_sha256": "0" * 64,
                      "subject_head_sha": repository["head_sha"], "summary": summary, "data": data, "authority": dict(AUTHORITY)}
             event["event_sha256"] = _digest(event); self._validate(event)
+            state = self._project([event], repository)
+            if len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]:
+                raise MilestoneFailure("milestone event exceeded its bound")
             history.write_bytes(_canonical(event) + b"\n")
-            state = self._project([event], repository); self._atomic_json(state_path, state); self._write_pointer(state)
+            self._atomic_json(state_path, state); self._write_pointer(state)
             return state
 
     def _materialized(self, milestone_id: str, events: list[dict[str, Any]],
@@ -465,12 +586,18 @@ class MilestoneController:
             "change_identity": bound_change_identity,
         }
         expected = self._project(events, historical_repository)
+        legacy_ungated = None
+        if "mission_gate" not in stored and not any("mission" in event["data"] or
+                event["event_type"].startswith("mission_") for event in events):
+            legacy_ungated = self._project(events, historical_repository, legacy=True)
         legacy_cycle_state = None
-        if expected["status"] == "REVIEW_READY" and expected["next"] == {"action": "request_merge", "human_boundary": True}:
-            legacy_cycle_state = {**expected, "status": "CI_PENDING",
+        cycle_source = legacy_ungated or expected
+        if cycle_source["status"] == "REVIEW_READY" and cycle_source["next"] == {"action": "request_merge", "human_boundary": True}:
+            legacy_cycle_state = {**cycle_source, "status": "CI_PENDING",
                                   "routing": {"model": self.policy["model_routing"]["maintenance"], "advisory": True},
                                   "next": {"action": "ingest_ci", "human_boundary": False}}
         if ((_digest(stored) != _digest(expected)
+             and (legacy_ungated is None or _digest(stored) != _digest(legacy_ungated))
              and (legacy_cycle_state is None or _digest(stored) != _digest(legacy_cycle_state)))
                 or stored["policy_sha256"] != self.policy_digest
                 or stored["repository"]["name_with_owner"] != repository["name_with_owner"]):
@@ -503,7 +630,7 @@ class MilestoneController:
         if repository["change_identity"] != stored["repository"]["change_identity"]:
             partial = self._project(events, repository)
             partial["status"] = "WORKING"; partial["next"] = {"action": "run_affected_validation", "human_boundary": False}
-            return partial
+            return self._apply_mission_gate(partial)
         return stored
 
     def transition_branch(self, milestone_id: str, from_branch: str, to_branch: str,
@@ -567,6 +694,8 @@ class MilestoneController:
                 raise MilestoneFailure("milestone writer conflict")
             stored_repository = dict(repository)
             stored_repository["change_identity"] = stored["repository"]["change_identity"]
+            legacy = "mission_gate" not in stored and not any(
+                "mission" in event["data"] or event["event_type"].startswith("mission_") for event in events)
             repository_identity = {key: value for key, value in repository.items() if key != "change_identity"}
             stored_identity = {key: value for key, value in stored["repository"].items() if key != "change_identity"}
             if (len(transitions) != 1 or tail["event_type"] != "validation_completed"
@@ -574,7 +703,7 @@ class MilestoneController:
                     or stored["history_tail"] != {"sequence": tail["sequence"], "sha256": tail["event_sha256"]}
                     or stored_identity != repository_identity
                     or stored["policy_sha256"] != self.policy_digest
-                    or _digest(stored) != _digest(self._project(events, stored_repository))):
+                    or _digest(stored) != _digest(self._project(events, stored_repository, legacy=legacy))):
                 raise MilestoneFailure("milestone state identity recovery is unauthorized")
             transition = transitions[0]
             if (transition["data"].get("to_branch") != f"feature/{milestone_id}"
@@ -598,8 +727,14 @@ class MilestoneController:
     def checkpoint(self, milestone_id: str | None, event_type: str, summary: str, data: dict[str, Any] | None = None,
                    expected_generation: int | None = None) -> dict[str, Any]:
         state = self.load(milestone_id); milestone_id = state["milestone_id"]
-        if event_type not in {"checkpointed", "validation_completed", "ci_observed", "repair_started", "repair_completed", "blocked", "completed"} or not summary or len(summary) > 512:
+        if event_type not in {"mission_assessed", "mission_reviewed", "checkpointed", "validation_completed", "ci_observed", "repair_started", "repair_completed", "blocked", "completed"} or not summary or len(summary) > 512:
             raise MilestoneFailure("milestone checkpoint is invalid")
+        if (state["mission_gate"]["outcome"] != "PROCEED"
+                and event_type in {"repair_started", "repair_completed", "completed"}):
+            raise MilestoneFailure("mission review is required before implementation or completion")
+        if event_type in {"mission_assessed", "mission_reviewed"}:
+            if expected_generation is None or state["status"] == "CONFLICT":
+                raise MilestoneFailure("mission checkpoint requires current generation and repository identity")
         if expected_generation is not None and expected_generation != state["generation"]:
             raise MilestoneFailure("milestone writer conflict")
         if event_type == "repair_started":
@@ -615,13 +750,19 @@ class MilestoneController:
             events = self._read_events(milestone_id)
             if len(events) - 1 != state["generation"]: raise MilestoneFailure("milestone writer conflict")
             repository = self._repository(events[0]["subject_head_sha"])
+            if event_type in {"mission_assessed", "mission_reviewed"} and repository != state["repository"]:
+                raise MilestoneFailure("mission checkpoint repository identity changed")
             data = {**data, "change_identity": repository["change_identity"]}
             event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event", "milestone_id": milestone_id,
                      "sequence": len(events) + 1, "event_type": event_type, "prior_event_sha256": events[-1]["event_sha256"],
                      "subject_head_sha": repository["head_sha"], "summary": summary, "data": data, "authority": dict(AUTHORITY)}
             event["event_sha256"] = _digest(event); self._validate(event)
+            state = self._project(events + [event], repository)
+            if (len(events) >= self.policy["limits"]["max_events"]
+                    or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]):
+                raise MilestoneFailure("milestone event exceeded its bound")
             with history.open("ab") as stream: stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
-            state = self._project(events + [event], repository); self._atomic_json(state_path, state); self._write_pointer(state)
+            self._atomic_json(state_path, state); self._write_pointer(state)
             return state
 
     def validate(self, tier: str, milestone_id: str | None = None) -> dict[str, Any]:

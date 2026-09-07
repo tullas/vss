@@ -16,6 +16,16 @@ from vss_dev import MilestoneController, MilestoneFailure
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def mission_evidence() -> dict:
+    return {"gap": "Film #1 needs a moving shot.",
+            "observable_result": "A bounded moving-shot review candidate.",
+            "authority_alignment": "aligned", "triggers": [],
+            "heartbeat": [{"milestone_id": "prior", "capability": "image", "advanced": True,
+                           "evidence": "README.md"}],
+            "active_decisions": [{"id": "DEC-0001", "disposition": "COMPLY",
+                                  "rationale": "The bounded milestone follows Foundation Closure."}]}
+
+
 class MilestoneControllerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -24,6 +34,8 @@ class MilestoneControllerTests(unittest.TestCase):
                      "schemas/dev-milestone-record-v1.schema.json", "config/agent-harness-v2.json",
                      "schemas/dev-milestone-execution-packet-v1.schema.json",
                      "schemas/agent-harness-v2.schema.json", "schemas/agent-validation-evidence-v1.schema.json"):
+            destination = self.root / path; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / path, destination)
+        for path in ("docs/architecture/decisions/index.json", "docs/architecture/decisions/DEC-0001-foundation-closure.json"):
             destination = self.root / path; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / path, destination)
         (self.root / "scripts").mkdir(); shutil.copy2(ROOT / "scripts/vss-agent", self.root / "scripts/vss-agent")
         (self.root / "scripts/vss-agent").chmod(0o755)
@@ -45,7 +57,7 @@ class MilestoneControllerTests(unittest.TestCase):
         return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=True)
 
     def initialize(self) -> dict:
-        return self.controller.initialize("dev-wf-1", self.base, 114, ["agent-coordination"], ["src/demo"], "Approved bounded development milestone.")
+        return self.controller.initialize("dev-wf-1", self.base, 114, ["agent-coordination"], ["src/demo"], "Approved bounded development milestone.", mission_evidence())
 
     def legacy_initialize(self) -> dict:
         state = self.initialize()
@@ -58,7 +70,7 @@ class MilestoneControllerTests(unittest.TestCase):
             unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
         history.write_text(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
         repository = dict(state["repository"])
-        legacy_state = self.controller._project([event], repository)
+        legacy_state = self.controller._project([event], repository, legacy=True)
         self.controller._atomic_json(directory / "state.json", legacy_state)
         self.controller._write_pointer(legacy_state)
         return legacy_state
@@ -88,6 +100,8 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(first["controller"]["next"], state["next"])
         self.assertEqual(first["controller"]["policy_sha256"], state["policy_sha256"])
         self.assertEqual(first["controller"]["harness"]["schema_version"], "2")
+        self.assertEqual(first["active_decisions"]["ids"], ["DEC-0001"])
+        self.assertRegex(first["active_decisions"]["index_sha256"], r"^[0-9a-f]{64}$")
         self.assertTrue(all(value is False for value in first["authority"].values()))
         self.assertLessEqual(len(json.dumps(first, sort_keys=True, separators=(",", ":")).encode()), 16_384)
         context_paths = [path for category in ("guidance_docs", "implementation", "tests",
@@ -138,7 +152,7 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(ci_packet["ci"]["status"], "pending")
         self.assertEqual(ci_packet["validation"]["evidence_sha256"], "a" * 64)
 
-        canonical_state = self.controller.initialize("canonical", self.base, 115, [], [], "Canonical route.")
+        canonical_state = self.controller.initialize("canonical", self.base, 115, [], [], "Canonical route.", mission_evidence())
         canonical_state = self.controller.checkpoint(
             "canonical", "validation_completed", "Affected validation passed.",
             {"validation_level": "L1", "evidence_sha256": "b" * 64}, canonical_state["generation"])
@@ -148,7 +162,7 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(canonical["validation"]["required_tier"], "canonical")
         self.assertEqual(canonical["validation"]["required_level"], "L3")
 
-        repair_state = self.controller.initialize("repair", self.base, 116, [], [], "Repair route.")
+        repair_state = self.controller.initialize("repair", self.base, 116, [], [], "Repair route.", mission_evidence())
         repair_state = self.controller.checkpoint(
             "repair", "validation_completed", "Affected validation passed.",
             {"validation_level": "L1", "evidence_sha256": "c" * 64}, repair_state["generation"])
@@ -176,14 +190,14 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(security_packet["controller"]["next"],
                          {"action": "request_security_review", "human_boundary": True})
 
-        architecture = self.controller.initialize("architecture-stop", self.base, 115, [], [], "Architecture stop.")
+        architecture = self.controller.initialize("architecture-stop", self.base, 115, [], [], "Architecture stop.", mission_evidence())
         self.controller.checkpoint("architecture-stop", "blocked", "Architecture decision required.",
                                    {"stop_reason": "architecture"}, architecture["generation"])
         architecture_packet = self.controller.execution_packet("architecture-stop")
         self.assertEqual(architecture_packet["controller"]["next"],
                          {"action": "request_architecture_review", "human_boundary": True})
 
-        review = self.controller.initialize("review", self.base, 116, [], [], "Review route.")
+        review = self.controller.initialize("review", self.base, 116, [], [], "Review route.", mission_evidence())
         review = self.controller.checkpoint(
             "review", "validation_completed", "Validation passed.",
             {"validation_level": "L3", "evidence_sha256": "d" * 64}, review["generation"])
@@ -279,7 +293,7 @@ class MilestoneControllerTests(unittest.TestCase):
         recovered = self.controller.transition_branch(
             "dev-wf-1", "main", "feature/dev-wf-1", "Authorized legacy recovery.",
             initialized["generation"])
-        self.assertEqual(recovered["status"], "WORKING")
+        self.assertEqual(recovered["status"], "DESIGN_REVIEW_REQUIRED")
         self.assertEqual(recovered["repository"]["branch"], "feature/dev-wf-1")
         self.assertEqual(recovered["repository"]["change_identity"], self.controller._repository(self.base)["change_identity"])
 
@@ -402,7 +416,7 @@ class MilestoneControllerTests(unittest.TestCase):
                                           ("security", "security policy failure", "security"), ("infra", "runner network timeout", "infrastructure"),
                                           ("flaky", "intermittent retry", "flaky/unknown")):
             identifier = f"ci-{suffix}"
-            self.controller.initialize(identifier, self.base, 114, [], [], "CI classification.")
+            self.controller.initialize(identifier, self.base, 114, [], [], "CI classification.", mission_evidence())
             head = self.controller.load(identifier)["repository"]["head_sha"]
             result = self.controller.ingest_ci({"head_sha": head, "checks": [{"name": "check", "status": "completed", "conclusion": "failure", "summary": summary}]}, identifier)
             self.assertEqual(result["classification"], expected)
@@ -430,8 +444,11 @@ class MilestoneControllerTests(unittest.TestCase):
             self.controller.checkpoint("dev-wf-1", "repair_started", "Unsafe repair.", expected_generation=state["generation"])
 
     def test_cli_surface_stays_outside_runtime(self) -> None:
+        mission_path = self.root / ".vss/mission-input.json"
+        mission_path.parent.mkdir(parents=True, exist_ok=True)
+        mission_path.write_text(json.dumps(mission_evidence()))
         init = subprocess.run(["vss", "dev", "milestone", "init", "--milestone-id", "cli-state", "--base", self.base,
-                               "--issue", "114", "--summary", "CLI state."], cwd=self.root, text=True, capture_output=True, check=False)
+                               "--issue", "114", "--summary", "CLI state.", "--mission-input", str(mission_path)], cwd=self.root, text=True, capture_output=True, check=False)
         self.assertEqual(init.returncode, 0, init.stderr)
         status = subprocess.run(["vss", "dev", "milestone", "next", "--milestone-id", "cli-state"], cwd=self.root,
                                 text=True, capture_output=True, check=False)
@@ -538,6 +555,263 @@ class MilestoneControllerTests(unittest.TestCase):
         source = (ROOT / "src/vss_dev/milestone.py").read_text(encoding="utf-8")
         for forbidden in ("vss_runtime", "vss_providers", "git push", "git merge", "gh pr create", "shell=True", "--method"):
             self.assertNotIn(forbidden, source)
+
+    def assess(self, evidence: dict, identifier: str = "dev-wf-1") -> dict:
+        state = self.controller.load(identifier)
+        return self.controller.checkpoint(identifier, "mission_assessed", "Mission evidence.",
+                                         {"mission": evidence}, state["generation"])
+
+    def review(self, state: dict, mechanism: str, disposition: str) -> dict:
+        return self.controller.checkpoint(
+            state["milestone_id"], "mission_reviewed", "Bounded existing review disposition.",
+            {"assessment_sha256": state["mission_gate"]["assessment_sha256"],
+             "review": {"mechanism": mechanism, "disposition": disposition,
+                        "owner": "project-owner", "evidence": "README.md"}}, state["generation"])
+
+    def test_missing_gate_stops_initialization_legacy_and_worktree_bypasses(self) -> None:
+        state = self.controller.initialize("ungated", self.base, 128, [], [], "No assessment yet.")
+        self.assertEqual(state["status"], "DESIGN_REVIEW_REQUIRED")
+        self.assertEqual(state["mission_gate"]["outcome"], "STRATEGIC_REVIEW_REQUIRED")
+        changed = self.root / "src/vss_dev/change.py"
+        changed.parent.mkdir(parents=True); changed.write_text("value = 1\n")
+        for event, data in (("checkpointed", {}),
+                            ("validation_completed", {"validation_level": "L3", "evidence_sha256": "a" * 64}),
+                            ("ci_observed", {"ci_head_sha": self.base, "ci_status": "failed", "ci_classification": "code"})):
+            with self.subTest(event=event):
+                self.controller.checkpoint("ungated", event, "Cannot clear mission gate.", data)
+                packet = self.controller.execution_packet("ungated")
+                self.assertEqual(packet["controller"]["next"],
+                                 {"action": "request_design_review", "human_boundary": True})
+                self.assertTrue(packet["stop_and_challenge"])
+                self.assertTrue(all(value is False for value in packet["authority"].values()))
+        for event in ("repair_started", "repair_completed", "completed"):
+            with self.assertRaisesRegex(MilestoneFailure, "mission review is required"):
+                self.controller.checkpoint("ungated", event, "Bypass attempt.")
+        legacy = self.legacy_initialize()
+        self.assertNotIn("mission_gate", legacy)
+        self.assertEqual(self.controller.load("dev-wf-1")["status"], "DESIGN_REVIEW_REQUIRED")
+        assessed = self.assess(mission_evidence())
+        self.assertEqual(assessed["next"]["action"], "start_bounded_work")
+
+    def test_each_trigger_requires_all_applicable_reviews_and_only_then_proceeds(self) -> None:
+        cases = {"strategic_concern": ["strategic"],
+                 "creative_production_authority": ["constitutional", "strategic", "unknown_unknown"],
+                 "provider_media_transition": ["constitutional"],
+                 "architecture_boundary": ["constitutional", "unknown_unknown"]}
+        for trigger, required in cases.items():
+            with self.subTest(trigger=trigger):
+                evidence = mission_evidence(); evidence["triggers"] = [trigger]
+                identifier = trigger.replace("_", "-")
+                state = self.controller.initialize(identifier, self.base, 128, [], [], "Review trigger.", evidence)
+                self.assertEqual(state["mission_gate"]["required_reviews"], required)
+                for mechanism in required:
+                    self.assertEqual(self.controller.execution_packet(identifier)["controller"]["next"]["action"],
+                                     "request_design_review")
+                    state = self.review(state, mechanism, "CONTINUE" if mechanism == "strategic" else "ACCEPT")
+                packet = self.controller.execution_packet(identifier)
+                self.assertEqual(packet["mission_gate"]["outcome"], "PROCEED")
+                self.assertEqual(packet["controller"]["next"]["action"], "start_bounded_work")
+
+    def test_active_decision_challenge_requires_existing_review_path(self) -> None:
+        evidence = mission_evidence()
+        evidence["active_decisions"] = [{
+            "id": "DEC-0001", "disposition": "CHALLENGE",
+            "rationale": "New evidence supports a different Film #1 experiment.",
+        }]
+        state = self.controller.initialize("decision-challenge", self.base, 128, [], [],
+                                           "Challenge an active decision.", evidence)
+        self.assertEqual(state["mission_gate"]["required_reviews"], ["constitutional", "strategic"])
+        self.assertEqual(self.controller.execution_packet("decision-challenge")["controller"]["next"],
+                         {"action": "request_design_review", "human_boundary": True})
+        state = self.review(state, "strategic", "CONTINUE_WITH_GUARDRAIL")
+        state = self.review(state, "constitutional", "ACCEPT")
+        packet = self.controller.execution_packet("decision-challenge")
+        self.assertEqual(packet["mission_gate"]["outcome"], "PROCEED")
+        self.assertEqual(packet["controller"]["next"]["action"], "start_bounded_work")
+
+    def test_declared_consecutive_heartbeat_stalls_require_strategic_review(self) -> None:
+        evidence = mission_evidence()
+        evidence["heartbeat"] = [{"milestone_id": f"prior-{i}", "capability": "image", "advanced": False,
+                                  "evidence": "README.md"} for i in range(3)]
+        state = self.controller.initialize("dev-wf-1", self.base, 128, [], [], "Stalled production.", evidence)
+        self.assertEqual(state["mission_gate"]["consecutive_no_advance"], 3)
+        self.assertEqual(state["mission_gate"]["required_reviews"], ["strategic"])
+        cleared = mission_evidence()
+        state = self.assess(cleared)
+        self.assertEqual(state["mission_gate"]["outcome"], "STRATEGIC_REVIEW_REQUIRED")
+        state = self.review(state, "strategic", "CONTINUE_WITH_GUARDRAIL")
+        self.assertEqual(state["mission_gate"]["outcome"], "PROCEED")
+        # A same-rung observable improvement breaks the consecutive stall signal.
+        evidence["heartbeat"][-1]["advanced"] = True
+        state = self.controller.initialize("improvement", self.base, 128, [], [], "Image improvement.", evidence)
+        self.assertEqual(state["mission_gate"]["consecutive_no_advance"], 0)
+        self.assertEqual(state["mission_gate"]["outcome"], "PROCEED")
+
+    def test_negative_dispositions_unknown_authority_and_reassessment_fail_closed(self) -> None:
+        self.initialize()
+        evidence = mission_evidence(); evidence["triggers"] = ["strategic_concern", "architecture_boundary"]
+        state = self.assess(evidence)
+        for disposition, expected in (("REMEDIATE_FIRST", "REVISE"),
+                                      ("STRATEGIC_REASSESSMENT", "STRATEGIC_REVIEW_REQUIRED")):
+            state = self.review(state, "strategic", disposition)
+            self.assertEqual(state["mission_gate"]["outcome"], expected)
+        state = self.review(state, "strategic", "CONTINUE")
+        for disposition in ("REVISE", "REJECT"):
+            state = self.review(state, "constitutional", disposition)
+            self.assertEqual(state["mission_gate"]["outcome"], "REVISE")
+        state = self.review(state, "constitutional", "ACCEPT")
+        state = self.review(state, "unknown_unknown", "ACCEPT")
+        self.assertEqual(state["mission_gate"]["outcome"], "PROCEED")
+        for alignment in ("unknown", "conflicting"):
+            evidence["authority_alignment"] = alignment
+            state = self.assess(evidence)
+            for mechanism in state["mission_gate"]["required_reviews"]:
+                state = self.review(state, mechanism, "CONTINUE" if mechanism == "strategic" else "ACCEPT")
+            self.assertEqual(state["mission_gate"]["outcome"], "STRATEGIC_REVIEW_REQUIRED")
+        state = self.assess(mission_evidence())
+        self.assertEqual(state["mission_gate"]["required_reviews"], ["constitutional", "strategic", "unknown_unknown"])
+        self.assertEqual(state["mission_gate"]["outcome"], "STRATEGIC_REVIEW_REQUIRED")
+
+    def test_malformed_evidence_wrong_reviews_and_stale_writers_leave_history_intact(self) -> None:
+        initial = self.initialize()
+        history = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
+        malformed = []
+        for key in mission_evidence():
+            value = mission_evidence(); del value[key]; malformed.append(value)
+        for key, value in (("triggers", ["unknown"]), ("authority_alignment", "approved"),
+                           ("gap", "   "), ("heartbeat", []), ("production", True),
+                           ("active_decisions", [{"id": "DEC-9999", "disposition": "COMPLY", "rationale": "Unknown."}])):
+            evidence = mission_evidence(); evidence[key] = value; malformed.append(evidence)
+        duplicate = mission_evidence(); duplicate["heartbeat"] *= 2; malformed.append(duplicate)
+        for evidence in malformed:
+            with self.subTest(evidence=evidence):
+                before = history.read_bytes()
+                with self.assertRaises(MilestoneFailure): self.assess(evidence)
+                self.assertEqual(history.read_bytes(), before)
+        evidence = mission_evidence(); evidence["triggers"] = ["strategic_concern"]
+        state = self.assess(evidence)
+        for mechanism, disposition in (("constitutional", "ACCEPT"), ("strategic", "ACCEPT")):
+            before = history.read_bytes()
+            with self.assertRaises(MilestoneFailure): self.review(state, mechanism, disposition)
+            self.assertEqual(history.read_bytes(), before)
+        with self.assertRaisesRegex(MilestoneFailure, "writer conflict"):
+            self.controller.checkpoint("dev-wf-1", "mission_assessed", "Stale writer.",
+                                       {"mission": evidence}, initial["generation"])
+        with self.assertRaisesRegex(MilestoneFailure, "requires current generation"):
+            self.controller.checkpoint("dev-wf-1", "mission_assessed", "No generation.", {"mission": evidence})
+        with self.assertRaisesRegex(MilestoneFailure, "current assessment"):
+            self.controller.checkpoint("dev-wf-1", "mission_reviewed", "Wrong assessment.",
+                {"assessment_sha256": initial["mission_gate"]["assessment_sha256"],
+                 "review": {"mechanism": "strategic", "disposition": "CONTINUE",
+                            "owner": "project-owner", "evidence": "README.md"}}, state["generation"])
+
+    def test_resealed_state_and_misbound_review_cannot_substitute_gate_evidence(self) -> None:
+        self.initialize()
+        evidence = mission_evidence(); evidence["triggers"] = ["strategic_concern"]
+        assessed = self.assess(evidence)
+        directory = self.root / ".vss/milestones/dev-wf-1"
+        forged = json.loads(json.dumps(assessed))
+        forged["mission_gate"]["outcome"] = "PROCEED"
+        forged["status"] = "READY_FOR_IMPLEMENTATION"
+        forged["next"] = {"action": "start_bounded_work", "human_boundary": False}
+        self.controller._atomic_json(directory / "state.json", forged)
+        self.controller._write_pointer(forged)
+        with self.assertRaisesRegex(MilestoneFailure, "state conflict"):
+            self.controller.execution_packet()
+        self.controller._atomic_json(directory / "state.json", assessed)
+        self.controller._write_pointer(assessed)
+        reviewed = self.review(assessed, "strategic", "CONTINUE")
+        events = self.controller._read_events("dev-wf-1")
+        events[-1]["data"]["assessment_sha256"] = events[0]["event_sha256"]
+        from vss_dev.milestone import _canonical, _digest
+        unsigned = {key: value for key, value in events[-1].items() if key != "event_sha256"}
+        events[-1]["event_sha256"] = _digest(unsigned)
+        (directory / "history.ndjson").write_bytes(b"\n".join(_canonical(event) for event in events) + b"\n")
+        reviewed["history_tail"]["sha256"] = events[-1]["event_sha256"]
+        self.controller._atomic_json(directory / "state.json", reviewed)
+        self.controller._write_pointer(reviewed)
+        with self.assertRaisesRegex(MilestoneFailure, "current assessment"):
+            self.controller.execution_packet()
+
+    def test_cli_mission_review_path_uses_real_controller_and_packet(self) -> None:
+        def run(*args: str) -> dict:
+            result = subprocess.run(["vss", "dev", "milestone", *args], cwd=self.root,
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return json.loads(result.stdout)
+        state = run("init", "--milestone-id", "cli-mission", "--base", self.base,
+                    "--issue", "128", "--summary", "Mission gate.")
+        self.assertEqual(state["next"]["action"], "request_design_review")
+        source = self.root / ".vss/input.json"
+        evidence = mission_evidence(); evidence["triggers"] = ["strategic_concern"]
+        source.write_text(json.dumps({"mission": evidence}))
+        state = run("checkpoint", "--milestone-id", "cli-mission", "--type", "mission_assessed",
+                    "--input", str(source), "--summary", "Strategic concern.", "--expected-generation", "0")
+        packet = run("next", "--packet", "--milestone-id", "cli-mission")
+        self.assertEqual(packet["controller"]["next"]["action"], "request_design_review")
+        source.write_text(json.dumps({"assessment_sha256": state["mission_gate"]["assessment_sha256"],
+                                     "review": {"mechanism": "strategic", "disposition": "CONTINUE",
+                                                "owner": "project-owner", "evidence": "README.md"}}))
+        run("checkpoint", "--milestone-id", "cli-mission", "--type", "mission_reviewed",
+            "--input", str(source), "--summary", "Review recorded.", "--expected-generation", "1")
+        packet = run("next", "--packet", "--milestone-id", "cli-mission")
+        self.assertEqual(packet["controller"]["next"]["action"], "start_bounded_work")
+        self.assertEqual(packet["mission_gate"]["outcome"], "PROCEED")
+        self.assertTrue(packet["stop_and_challenge"])
+
+    def test_oversized_and_misplaced_mission_evidence_cannot_poison_history(self) -> None:
+        self.initialize()
+        history = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
+        before = history.read_bytes()
+        evidence = mission_evidence()
+        evidence["gap"] = "x" * 240
+        evidence["observable_result"] = "x" * 240
+        evidence["heartbeat"] = [{"milestone_id": f"prior-{i}", "capability": "image",
+                                  "advanced": False, "evidence": "x" * 160} for i in range(5)]
+        with self.assertRaisesRegex(MilestoneFailure, "exceeded its bound"):
+            self.assess(evidence)
+        with self.assertRaisesRegex(MilestoneFailure, "record is malformed"):
+            self.controller.checkpoint("dev-wf-1", "checkpointed", "Hidden mission replacement.",
+                                       {"mission": mission_evidence()})
+        self.assertEqual(history.read_bytes(), before)
+        with self.assertRaisesRegex(MilestoneFailure, "exceeded its bound"):
+            self.controller.initialize("oversized", self.base, 128, [], [], "Oversized assessment.", evidence)
+        self.assertFalse((self.root / ".vss/milestones/oversized/history.ndjson").exists())
+
+    def test_legacy_ci_cycle_and_identity_recovery_preserve_mission_stop(self) -> None:
+        from vss_dev.milestone import _canonical, _digest
+        self.legacy_initialize()
+        self.git("switch", "-c", "feature/dev-wf-1")
+        self.controller.transition_branch("dev-wf-1", "main", "feature/dev-wf-1", "Legacy transition.", 0)
+        changed = self.root / "src/demo/change.py"
+        changed.parent.mkdir(parents=True); changed.write_text("value = 1\n")
+        directory = self.root / ".vss/milestones/dev-wf-1"
+        events = self.controller._read_events("dev-wf-1")
+        tail = {"schema_version": "1", "protocol": "vss.dev-milestone", "record_kind": "event",
+                "milestone_id": "dev-wf-1", "sequence": 3, "event_type": "validation_completed",
+                "prior_event_sha256": events[-1]["event_sha256"], "subject_head_sha": self.base,
+                "summary": "Legacy unbound validation.",
+                "data": {"validation_level": "L3", "evidence_sha256": "a" * 64},
+                "authority": events[0]["authority"]}
+        tail["event_sha256"] = _digest(tail); events.append(tail)
+        (directory / "history.ndjson").write_bytes(b"\n".join(_canonical(event) for event in events) + b"\n")
+        repository = self.controller._repository(self.base)
+        legacy = self.controller._project(events, repository, legacy=True)
+        self.controller._atomic_json(directory / "state.json", legacy); self.controller._write_pointer(legacy)
+        recovered = self.controller.recover_state_identity("dev-wf-1", "Legacy identity binding.", 2)
+        self.assertEqual(recovered["status"], "DESIGN_REVIEW_REQUIRED")
+        self.assertIsNone(recovered["validation"]["evidence_sha256"])
+        self.controller.validate("canonical", "dev-wf-1")
+        self.controller.ingest_ci({"head_sha": self.base, "checks": []}, "dev-wf-1")
+        self.controller.checkpoint("dev-wf-1", "validation_completed", "Legacy canonical evidence.",
+                                   {"validation_level": "L3", "evidence_sha256": "a" * 64})
+        events = self.controller._read_events("dev-wf-1")
+        legacy = self.controller._project(events, repository, legacy=True)
+        self.assertEqual(legacy["status"], "REVIEW_READY")
+        legacy.update(status="CI_PENDING", next={"action": "ingest_ci", "human_boundary": False},
+                      routing={"model": self.controller.policy["model_routing"]["maintenance"], "advisory": True})
+        self.controller._atomic_json(directory / "state.json", legacy); self.controller._write_pointer(legacy)
+        self.assertEqual(self.controller.load()["status"], "DESIGN_REVIEW_REQUIRED")
 
 
 if __name__ == "__main__":

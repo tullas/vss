@@ -1,0 +1,11 @@
+{
+  "schema_version": "1",
+  "protocol": "vss.active-decision-index",
+  "decisions": [
+    {
+      "id": "DEC-0001",
+      "status": "ACTIVE",
+      "record": "docs/architecture/decisions/DEC-0001-foundation-closure.json"
+    }
+  ]
+}

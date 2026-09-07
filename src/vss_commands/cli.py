@@ -72,6 +72,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone_init.add_argument("--domain", action="append", default=[])
     milestone_init.add_argument("--path", action="append", default=[])
     milestone_init.add_argument("--summary", required=True)
+    milestone_init.add_argument("--mission-input", type=Path)
     milestone_status = milestone_actions.add_parser("status")
     milestone_status.add_argument("--milestone-id")
     milestone_next = milestone_actions.add_parser("next")
@@ -89,7 +90,8 @@ def _parser() -> argparse.ArgumentParser:
     milestone_identity.add_argument("--expected-generation", required=True, type=int)
     milestone_checkpoint = milestone_actions.add_parser("checkpoint")
     milestone_checkpoint.add_argument("--milestone-id")
-    milestone_checkpoint.add_argument("--type", required=True, choices=("checkpointed", "repair_started", "repair_completed", "blocked", "completed"))
+    milestone_checkpoint.add_argument("--type", required=True, choices=("mission_assessed", "mission_reviewed", "checkpointed", "repair_started", "repair_completed", "blocked", "completed"))
+    milestone_checkpoint.add_argument("--input", type=Path)
     milestone_checkpoint.add_argument("--summary", required=True)
     milestone_checkpoint.add_argument("--expected-generation", type=int)
     milestone_checkpoint.add_argument("--stop-reason")
@@ -396,10 +398,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.action == "dev":
         from vss_dev import MilestoneController, MilestoneFailure
+        from vss_dev.milestone import _read_json
         try:
             controller = MilestoneController()
             if args.milestone_action == "init":
-                value = controller.initialize(args.milestone_id, args.base, args.issue, args.domain, args.path, args.summary)
+                mission = _read_json(args.mission_input, 2048) if args.mission_input else None
+                value = controller.initialize(args.milestone_id, args.base, args.issue, args.domain, args.path, args.summary, mission)
             elif args.milestone_action == "status":
                 value = controller.load(args.milestone_id)
             elif args.milestone_action == "next":
@@ -416,7 +420,13 @@ def main(argv: list[str] | None = None) -> int:
                 value = controller.recover_state_identity(
                     args.milestone_id, args.summary, args.expected_generation)
             elif args.milestone_action == "checkpoint":
+                if bool(args.input) != (args.type in {"mission_assessed", "mission_reviewed"}):
+                    raise MilestoneFailure("mission checkpoints require --input; other checkpoints do not accept it")
+                if args.input and args.stop_reason:
+                    raise MilestoneFailure("mission checkpoints do not accept --stop-reason")
                 data = {"stop_reason": args.stop_reason} if args.stop_reason else None
+                if args.input:
+                    data = _read_json(args.input, 2048)
                 value = controller.checkpoint(args.milestone_id, args.type, args.summary, data, args.expected_generation)
             elif args.milestone_action == "validate":
                 value = controller.validate(args.tier, args.milestone_id)
