@@ -629,6 +629,26 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(packet["mission_gate"]["outcome"], "PROCEED")
         self.assertEqual(packet["controller"]["next"]["action"], "start_bounded_work")
 
+    def test_omitted_indexed_active_decision_fails_closed(self) -> None:
+        index_path = self.root / "docs/architecture/decisions/index.json"
+        second_record = self.root / "docs/architecture/decisions/DEC-0002-test.json"
+        second = json.loads((self.root / "docs/architecture/decisions/DEC-0001-foundation-closure.json").read_text())
+        second.update(id="DEC-0002", decision="A second active decision for omission testing.")
+        second_record.write_text(json.dumps(second), encoding="utf-8")
+        index = json.loads(index_path.read_text())
+        index["decisions"].append({"id": "DEC-0002", "status": "ACTIVE",
+                                   "record": "docs/architecture/decisions/DEC-0002-test.json"})
+        index_path.write_text(json.dumps(index), encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "exactly cover active decisions"):
+            self.controller.initialize("omitted-decision", self.base, 128, [], [],
+                                       "Omitted decision.", mission_evidence())
+        evidence = mission_evidence()
+        evidence["active_decisions"].append({"id": "DEC-0002", "disposition": "NOT_APPLICABLE",
+                                             "rationale": "The test decision does not govern this slice."})
+        state = self.controller.initialize("covered-decisions", self.base, 128, [], [],
+                                           "All decisions covered.", evidence)
+        self.assertEqual(state["mission_gate"]["outcome"], "PROCEED")
+
     def test_declared_consecutive_heartbeat_stalls_require_strategic_review(self) -> None:
         evidence = mission_evidence()
         evidence["heartbeat"] = [{"milestone_id": f"prior-{i}", "capability": "image", "advanced": False,

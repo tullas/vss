@@ -194,7 +194,7 @@ class MilestoneController:
                 or index["schema_version"] != "1"
                 or index["protocol"] != "vss.active-decision-index"
                 or type(index["decisions"]) is not list or not index["decisions"]
-                or len(index["decisions"]) > 32):
+                or len(index["decisions"]) > 8):
             raise MilestoneFailure("active decision index is malformed")
         active: set[str] = set()
         for entry in index["decisions"]:
@@ -247,8 +247,10 @@ class MilestoneController:
                 for trigger in assessment["triggers"]:
                     required.update(MISSION_REVIEWS[trigger])
                 decision_ids = [item["id"] for item in assessment["active_decisions"]]
-                if len(set(decision_ids)) != len(decision_ids) or any(identifier not in active_decisions for identifier in decision_ids):
-                    raise MilestoneFailure("mission assessment has unknown active decision evidence")
+                if (len(set(decision_ids)) != len(decision_ids)
+                        or set(decision_ids) != active_decisions):
+                    raise MilestoneFailure("mission assessment does not exactly cover active decisions")
+                decision_ids.sort()
                 if any(item["disposition"] == "CHALLENGE" for item in assessment["active_decisions"]):
                     required.update({"strategic", "constitutional"})
                 if stalled >= 3:

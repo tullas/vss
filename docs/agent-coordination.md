@@ -216,12 +216,14 @@ values describe an intended slice, not an implemented moving-shot feature):
 }
 ```
 
-Each declared active decision needs one disposition. `COMPLY` means the work
+The bounded index holds at most eight ACTIVE decisions, and every one must
+appear exactly once in every mission assessment. Each declared active decision
+needs one disposition. `COMPLY` means the work
 is consistent. `NOT_APPLICABLE` gives the short reason it does not govern.
 `CHALLENGE` identifies the record and concise new rationale, then requires the
 existing Strategic and Constitutional review receipts before implementation.
-The controller rejects unknown, retired, malformed, or duplicate decision
-evidence. A successful challenge does not change a record: the review owner
+The controller rejects unknown, missing, retired, malformed, or duplicate
+decision evidence. A successful challenge does not change a record: the review owner
 must explicitly preserve its lineage as `ACTIVE` to `SUPERSEDED` or `RETIRED`
 and add the replacement/rationale before a later assessment can comply.
 
