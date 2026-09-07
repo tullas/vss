@@ -244,9 +244,9 @@ def validate_opentofu(root: Path) -> None:
 
 def validate_derivative_build_preparation(root: Path) -> None:
     expected = {
-        "containers/versitygw/Dockerfile": "2f542a25406c0b6fb6a7ad05847c2ea0fa4c790f25613694cd6831a4559f52fc",  # pragma: allowlist secret -- deterministic build-definition digest
+        "containers/versitygw/Dockerfile": "856daa6870da6cdd555481125622b854b2021a399474917e46c20a15d5013053",  # pragma: allowlist secret -- deterministic build-definition digest
         "containers/ubuntu-26.04-acceptance/Dockerfile": "7682cb2d8c8795164b8be1c9546106870389dc0fe8d30cc19cc8b03defd4a182",  # pragma: allowlist secret -- deterministic build-definition digest
-        ".github/workflows/build-versitygw-derivative.yml": "391750362edf1711a16954df636ba4197e853787c52f158cf308ef994af56cd7",  # pragma: allowlist secret -- deterministic workflow digest
+        ".github/workflows/build-versitygw-derivative.yml": "9c862e8bcd9cd8caf8e529e34f5465984ea5be070306dfca80f1adbb5a9911f1",  # pragma: allowlist secret -- deterministic workflow digest
     }
     for relative, expected_sha256 in expected.items():
         path = root / relative
