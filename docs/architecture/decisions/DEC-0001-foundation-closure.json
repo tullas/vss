@@ -1,0 +1,15 @@
+{
+  "id": "DEC-0001",
+  "status": "ACTIVE",
+  "scope": "Foundation Closure and selection of the next VSS product milestone.",
+  "decision": "Foundation Closure is bounded. Select material development from an observable Film #1 gap; after its exit criteria, the next product milestone advances observable audiovisual production, preferably the first governed moving shot.",
+  "rationale": "The current path reaches a reviewable still image but not observable audiovisual production. M10 closes at M10.7; M10.8 visual continuity is retired as a proposed direction.",
+  "constraints": "Use existing strategic, constitutional, and Right to Pause review. Do not grant autonomous production authority or create a governor, agent framework, context platform, or cost subsystem. Delegated-agent authority must eventually have a bounded resource envelope and durable artifact-mediated context.",
+  "supersedes": null,
+  "superseded_by": null,
+  "references": [
+    "docs/architecture/vss-constitution.md",
+    "docs/architecture/architecture-review-governance.md",
+    "docs/agent-coordination.md"
+  ]
+}

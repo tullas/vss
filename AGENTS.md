@@ -19,6 +19,11 @@ Before significant implementation:
 
 Extend existing VSS components; do not invent parallel frameworks.
 
+Select milestones from observable movie-production gaps. Record the existing
+dev milestone controller's mission assessment before implementation. If repository
+evidence contradicts the issue, stop affected work, challenge the scope, and declare
+the concern through that controller; a prior `PROCEED` packet cannot override it.
+
 ## Contract discipline
 
 For governed artifacts:

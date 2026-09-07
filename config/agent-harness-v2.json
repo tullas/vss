@@ -3,7 +3,7 @@
   "domains": [
     {
       "id": "agent-coordination",
-      "docs": ["AGENTS.md", "docs/agent-coordination.md", "docs/security/threat-model.md"],
+      "docs": ["AGENTS.md", "docs/agent-coordination.md", "docs/architecture-boundary-review.md", "docs/architecture/architecture-review-governance.md", "docs/architecture/decisions/DEC-0001-foundation-closure.json", "docs/architecture/decisions/index.json", "docs/architecture/vss-constitution.md", "docs/security/threat-model.md"],
       "code": ["config/agent-harness-v2.json", "scripts/validate-change.sh", "scripts/vss-agent"],
       "tests": ["tests/agent_coordination"]
     },
@@ -21,7 +21,7 @@
     },
     {
       "id": "dev-milestone",
-      "docs": ["docs/agent-coordination.md", "docs/security/threat-model.md"],
+      "docs": ["docs/agent-coordination.md", "docs/architecture/decisions/DEC-0001-foundation-closure.json", "docs/architecture/decisions/index.json", "docs/security/threat-model.md"],
       "code": ["config/dev-milestone-policy-v1.json", "schemas/dev-milestone-execution-packet-v1.schema.json", "schemas/dev-milestone-policy-v1.schema.json", "schemas/dev-milestone-record-v1.schema.json", "src/vss_commands/cli.py", "src/vss_dev"],
       "tests": ["tests/dev_milestone"]
     },

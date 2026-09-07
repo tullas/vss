@@ -187,6 +187,25 @@ M6.1 validation and M6.2 Context assembly are not provider execution paths.
   admission boundary and reassessing Gateway pressure before adding another
   provider route or framework.
 
+## A10 direction-check delta
+
+The [A10 strategic conclusion](../agent-coordination.md#a10-strategic-conclusion)
+uses main `8b476dd` as its source baseline. This is a scoped development-flow
+delta, not a recount of the historical platform inventories above. The source
+delta extends `src/vss_dev/milestone.py`, its CLI, two existing schemas, and
+existing harness routing: zero new packages, registries, services, databases,
+daemons, or authority-bearing components. Two checkpoint event kinds replace
+the implicit implementation start with bounded evidence and review receipts.
+
+Governance/cognitive pressure is `WATCH`: the stop changes packet issuance,
+but should not grow into a separate review engine. Decision: `ACCEPTABLE` for
+this bounded controller extension. Candidates for Removal: None. Things
+deliberately not built: Studio Director and generalized governor/framework;
+reconsider only when independently evidenced production behavior cannot fit
+existing human/Runtime authority and a separately accepted decision admits it.
+The next product slice must demonstrate audiovisual progress as specified in
+the linked strategic conclusion.
+
 ## Snapshot template
 
 | Field | Entry |

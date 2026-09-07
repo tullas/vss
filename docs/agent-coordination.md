@@ -164,7 +164,7 @@ policy, harness-v2 map, validation evidence, CI observation, and repair budget. 
 bounded set of harness-v2 repository references grouped as guidance, implementation, tests, and
 validation/config/contracts; it contains no file contents, commands, logs, prompts, or credentials.
 Unregistered domains, unclassified changed paths, sensitive residue, stale HEAD, corrupt state,
-map disagreement, and oversized context fail closed. Ordinary `next` output is unchanged.
+map disagreement, and oversized context fail closed. Ordinary `next` retains its compact shape.
 
 For a reset session, give the fresh repository-aware agent only the canonical packet and repository
 access. The agent verifies the bound checkout, reads the referenced guidance/context, performs only
@@ -173,6 +173,187 @@ evidence. Hidden ChatGPT/Codex memory, copied terminal output, and hand-written 
 are not authoritative. The packet is advisory coordination data and all Runtime, provider,
 production, publication, workflow, security-exception, product, merge, and push authority fields
 remain constant false.
+
+### Mission checkpoint and stop/challenge contract
+
+The pre-implementation gate uses the existing controller's initialization,
+checkpoints, history, and `DESIGN_REVIEW_REQUIRED / request_design_review`
+route. Its only outcomes are `PROCEED`, `REVISE`, and
+`STRATEGIC_REVIEW_REQUIRED`. Initialization without mission evidence stops;
+legacy histories remain readable but must append an assessment before work
+can proceed. There is no implicit grandfathering of prior implementation,
+validation, or CI into mission clearance.
+
+Read `docs/architecture/decisions/index.json` first. It lists only active
+decision records; each compact record points to its governing ADRs and reviews.
+This is Git-native institutional memory, not a new authority center. A
+decision is authoritative until its record is explicitly superseded or
+retired; a hypothesis or backlog item is not a decision. Do not copy records
+into packets or conversations.
+
+`init --mission-input <file>` accepts this compact declaration (example
+values describe an intended slice, not an implemented moving-shot feature):
+
+```json
+{
+  "gap": "Film #1 has still review images but no moving shot.",
+  "observable_result": "One governed moving-shot review candidate.",
+  "authority_alignment": "aligned",
+  "active_decisions": [{
+    "id": "DEC-0001",
+    "disposition": "COMPLY",
+    "rationale": "This advances the Foundation Closure direction."
+  }],
+  "triggers": ["provider_media_transition", "architecture_boundary"],
+  "heartbeat": [
+    {
+      "milestone_id": "m10-7",
+      "capability": "image",
+      "advanced": true,
+      "evidence": "src/vss_movie_storyboard/visual_production_set.py"
+    }
+  ]
+}
+```
+
+The bounded index holds at most eight ACTIVE decisions, and every one must
+appear exactly once in every mission assessment. Each declared active decision
+needs one disposition. `COMPLY` means the work
+is consistent. `NOT_APPLICABLE` gives the short reason it does not govern.
+`CHALLENGE` identifies the record and concise new rationale, then requires the
+existing Strategic and Constitutional review receipts before implementation.
+The controller rejects unknown, missing, retired, malformed, or duplicate
+decision evidence. A successful challenge does not change a record: the review owner
+must explicitly preserve its lineage as `ACTIVE` to `SUPERSEDED` or `RETIRED`
+and add the replacement/rationale before a later assessment can comply.
+
+`authority_alignment` must be explicitly `aligned`, `unknown`, or
+`conflicting`. Unknown or conflicting authority always stops, even when
+positive review receipts exist; record the resolution in repository evidence
+and submit a new assessment. `aligned` asserts compatibility with existing
+authority boundaries and never delegates creative or production authority.
+
+Supply the last one to five completed milestones in chronological order,
+with unique milestone IDs, an observed capability, whether it advanced, and
+a compact evidence reference. The ladder is `story`, `scene`, `storyboard`,
+`image`, `moving_shot`, `multi_shot_scene`, `dialogue_audio`, `edited_scene`,
+`rough_film`, `finished_poc`. Improvements within a rung count when observable;
+projected future results do not. Three consecutive `advanced: false` entries
+require Strategic Review. This fixed bounded signal is not the governance
+document's roughly-five-major-milestones review cadence or a production
+ontology. The controller checks declarations, not historical completeness or
+the truth of media-quality claims; the repository-aware reviewer checks the
+references. No global history scanner or new persistence is introduced.
+
+| Declared trigger | Existing review mechanisms required |
+| --- | --- |
+| `strategic_concern` (including an explicit strategic pause) | Strategic Review / Right to Pause |
+| `creative_production_authority` | Strategic, Constitutional, UNKNOWN_UNKNOWN_REVIEW |
+| `provider_media_transition` where architecture requires review | Constitutional |
+| `architecture_boundary` (major plane, durable authority, external dependency, or material recovery/security/rights transition) | Constitutional, UNKNOWN_UNKNOWN_REVIEW |
+
+Declare every applicable trigger. A provider transition that also crosses a
+major boundary declares both; ordinary compatible extensions do not trigger
+boundary review. A declared requirement stays latched for that milestone so
+removing a trigger or shortening the heartbeat cannot erase it.
+
+Use the existing checkpoint command to assess or reassess:
+
+```text
+vss dev milestone checkpoint --type mission_assessed --input assessment.json --summary "Film #1 gap and scope checked." --expected-generation N
+```
+
+The input is exactly `{"mission": <declaration above>}`. For each applicable
+review, record its actual disposition using `--type mission_reviewed` with:
+
+```json
+{
+  "assessment_sha256": "<current state mission_gate.assessment_sha256>",
+  "review": {
+    "mechanism": "strategic",
+    "disposition": "CONTINUE_WITH_GUARDRAIL",
+    "owner": "<accountable project owner or assigned reviewer>",
+    "evidence": "docs/reviews/<actual bounded review record>.md"
+  }
+}
+```
+
+These commands require the current `--expected-generation`. Strategic
+receipts use the existing Right to Pause outcomes: `CONTINUE`,
+`CONTINUE_WITH_GUARDRAIL`, `REMEDIATE_FIRST`, `STRATEGIC_REASSESSMENT`.
+The referenced Strategic Review retains its existing concise output format;
+guardrails and their affected scope belong in that record. Constitutional and
+UNKNOWN_UNKNOWN_REVIEW receipts use `ACCEPT`, `REVISE`, or `REJECT`; each
+references the applicable existing review evidence, including independent
+review where architecture governance requires it. Review owner strings are
+accountability metadata, not authenticated identity or proof of authorization.
+The controller records dispositions; it does not perform or authenticate the
+reviews. References are bounded repository paths, not copied review contents.
+
+Only all required positive dispositions permit `PROCEED`. Remediation or
+rejection yields `REVISE`; missing review or strategic reassessment stops.
+Receipts bind to the exact assessment event digest, not a caller-selected
+substitute. A new assessment invalidates earlier receipts; subsequent review
+checkpoints can record changed dispositions for the same assessment. Replay
+reconstructs the gate from history and rejects a resealed materialized gate
+that disagrees. Local hashes detect inconsistency, not a hostile writer who
+controls the entire local history and all materializations.
+
+The gate overrides normal implementation, validation, CI, and repair packet
+routing while unresolved. Diagnostic validation and CI observations remain
+available but cannot clear it; repair/completion checkpoints cannot cross it.
+After clearance, existing validation, CI, repair budgets, and human boundaries
+still apply. The packet includes the compact gate projection, active-decision
+IDs and index digest, and constant `stop_and_challenge: true`, within the
+existing 16-KiB / 64-reference limits.
+
+That constant obliges the executing agent to inspect the issue, Constitution,
+governance, boundary-review guidance, and actual repository evidence before
+acting. If those contradict the requested milestone, stop affected work,
+state the concrete contradiction and smallest viable revision, and append a
+`mission_assessed` checkpoint declaring `strategic_concern` and all other
+applicable triggers. Unknown authority uses `unknown`; a material unresolved
+contradiction uses `conflicting`. Do not continue ordinary implementation
+because a previous packet said `PROCEED`. The controller cannot detect an
+undeclared prose contradiction or enforce behavior outside its own flow.
+
+### A10 strategic conclusion
+
+Issue #128 records the direction following the M10.8 pause: movie production
+remains VSS's proving application. Select work from observable Film #1 gaps,
+with a concrete movie-production result, rather than previous-milestone
+adjacency. The current visual-production-set implementation explicitly
+excludes motion/video generation; still-image coordination does not close
+that gap. A10 adds a development stop, not audiovisual capability.
+
+The existing Strategic Review vocabulary captures this direction:
+
+- `KEEP`: governed creative intent, accumulated knowledge, replaceable
+  providers, Runtime effect authority, and human creative/production control.
+- `CHANGE`: select milestones mission-forward from Film #1 capability gaps.
+- `RESEARCH`: only bounded questions needed to admit the first moving shot.
+- `REMOVE/RETIRE`: no component removal justified by this slice.
+- `DO_NOT_BUILD`: a Studio Director, governor, agent framework, or additional
+  persistent subsystem for this development checkpoint.
+- `BIGGEST_WRONG_ASSUMPTION`: local milestone coherence establishes sustained
+  progress toward a demonstrable film.
+- `MISSION_ALIGNMENT`: `ALIGNED_WITH_DRIFT_RISK`; the intended system remains
+  recognizable when explainability, human intent, governed creative
+  intelligence, knowledge, and simplicity lead capability selection.
+
+After A10 the next product milestone must add observable audiovisual
+production capability; the preferred target is the first governed moving/video
+shot. A deviation needs an explicit strategic justification in the existing
+review, declared as `strategic_concern` in its mission assessment. Capability
+does not imply autonomous production authority. Future delegated agent work
+must operate under an explicit resource envelope covering scope, authoritative
+context references, context/token budget, model class, turns, retries,
+provider-call and monetary limits, allowed actions/artifacts, stop conditions,
+and escalation. Route work to the least costly adequate model, bound retries
+to actionable evidence, and ultimately attribute production cost to useful
+film, scene, or shot units. Conversations are disposable execution state;
+durable bounded repository artifacts are authoritative context. These are
+architectural constraints for later work, not an A10 agent or cost system.
 
 The compact state may recommend GPT-5.6 Sol High for architecture/security
 stops, GPT-5.6 Terra Medium for bounded repairs, and GPT-5.6 Terra Low for
