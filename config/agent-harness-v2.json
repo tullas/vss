@@ -102,6 +102,7 @@
     {"pattern": "src/vss_reasoning_strategies/**", "domain": "reasoning", "minimum_level": "L1", "risk": "isolated", "profiles": ["reasoning-tests"]},
     {"pattern": "src/vss_runtime/**", "domain": "runtime", "minimum_level": "L3", "risk": "external-effect", "profiles": ["canonical"]},
     {"pattern": "tests/agent_coordination/**", "domain": "agent-coordination", "minimum_level": "L1", "risk": "isolated", "profiles": ["agent-coordination-tests"]},
+    {"pattern": "tests/architecture/**", "domain": "architecture", "minimum_level": "L1", "risk": "isolated", "profiles": ["architecture-tests"]},
     {"pattern": "tests/config_engine/**", "domain": "configuration", "minimum_level": "L1", "risk": "isolated", "profiles": ["configuration-tests"]},
     {"pattern": "tests/dev_milestone/**", "domain": "dev-milestone", "minimum_level": "L1", "risk": "isolated", "profiles": ["dev-milestone-tests"]},
     {"pattern": "tests/movie_contracts/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-contract-tests"]},
