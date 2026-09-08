@@ -10,8 +10,9 @@ ADR_DIR = ROOT / "docs/adr"
 ADR_25 = ADR_DIR / "ADR-0025-scoped-studio-resources-rights-canon-provenance.md"
 ADR_26 = ADR_DIR / "ADR-0026-studio-governance-principal-identity-lifecycle-operations.md"
 ADR_27 = ADR_DIR / "ADR-0027-portable-authoritative-state-storage-evolution.md"
+ADR_28 = ADR_DIR / "ADR-0028-first-external-media-attempt-admission.md"
 REVIEW = ROOT / "docs/architecture-boundary-review.md"
-DOCUMENTS = (ADR_25, ADR_26, ADR_27, REVIEW)
+DOCUMENTS = (ADR_25, ADR_26, ADR_27, ADR_28, REVIEW)
 
 
 class StudioArchitectureGuardrailTests(unittest.TestCase):
@@ -24,6 +25,7 @@ class StudioArchitectureGuardrailTests(unittest.TestCase):
             ADR_25: "# ADR-0025: Scoped Studio Resources, Rights, Canon, and Provenance",
             ADR_26: "# ADR-0026: Studio Governance, Principal Identity, and Lifecycle Operations",
             ADR_27: "# ADR-0027: Portable Authoritative State and Storage Evolution",
+            ADR_28: "# ADR-0028: First External Media Attempt Admission",
         }
         for path, title in expected.items():
             with self.subTest(path=path.name):
@@ -36,6 +38,29 @@ class StudioArchitectureGuardrailTests(unittest.TestCase):
         self.assertIn("Runtime remains the sole execution", self.text[ADR_26])
         self.assertIn("ADR-0023", self.text[ADR_27])
         self.assertIn("ADR-0022", self.text[ADR_25])
+
+    def test_first_external_media_attempt_remains_bounded_and_non_authorizing(self) -> None:
+        text = " ".join(self.text[ADR_28].split())
+        for phrase in (
+            "single human-triggered moving-shot review candidate",
+            "exact external production input/output boundary",
+            "one-attempt dynamic spend admission",
+            "controlled local review-media output admission",
+            "must reconstruct—not trust a caller claim",
+            "Provider handling, processing/retention, residency, and",
+            "Cheap closed readiness checks occur before a reservation",
+            "No fallback, fan-out, autonomous regeneration, or retry is admitted",
+            "Paid-call authorization remains a separately explicit human decision",
+            "exact, non-reusable attempt identity",
+            "full ceiling remains consumed",
+            "local controlled quarantine",
+            "same-scope, purpose-limited local review",
+            "disposable local-review preservation class",
+            "Unit and contract tests make zero paid calls",
+            "does not admit provider selection",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
 
     def test_scope_promotion_rights_canon_and_incremental_rules_are_closed(self) -> None:
         text = " ".join(self.text[ADR_25].split())
