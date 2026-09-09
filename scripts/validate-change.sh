@@ -72,19 +72,22 @@ run_stage "shell syntax" bash -c \
 run_stage "changed-file secret scan" validate_changed_secrets
 run_stage "ADR validation" ./scripts/validate_adr.sh
 run_stage "supply-chain and workflow validation" python3 scripts/security/validate-supply-chain.py
+run_stage "repository governance and reproducibility" python3 scripts/security/validate-repository-governance.py
+run_stage "isolated HOME deterministic test validation" python3 scripts/validate-hermetic.py
 
 if [[ $validation_level == L0 ]]; then
     exit 0
 fi
 
-for directory in "${test_directories[@]}"; do
-    run_stage "unittest discovery: $directory" \
-        python -m unittest discover -s "$directory" -p 'test_*.py'
-done
-
 if [[ $focused_validation == false ]]; then
+    run_stage "classified deterministic test suite" python3 scripts/run-test-classification.py
     mapfile -t bash_tests < <(find tests -type f -name '*-test.sh' -print | sort)
     for test_file in "${bash_tests[@]}"; do
         run_stage "Bash test: $test_file" "$test_file"
+    done
+else
+    for directory in "${test_directories[@]}"; do
+        run_stage "unittest discovery: $directory" \
+            python -m unittest discover -s "$directory" -p 'test_*.py'
     done
 fi
