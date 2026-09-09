@@ -1,0 +1,2 @@
+detect-secrets==1.5.0 \
+    --hash=sha256:e24e7b9b5a35048c313e983f76c4bd09dad89f045ff059e354f9943bf45aa060

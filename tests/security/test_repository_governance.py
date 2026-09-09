@@ -34,9 +34,24 @@ class RepositoryGovernanceTests(unittest.TestCase):
             self.assertIn("scope expansion", result.stdout)
 
     def test_protected_artifact_drift_requires_justification(self) -> None:
-        result = self.run_check(ROOT, justification="")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("protected artifact", result.stdout)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(ROOT / "config", root / "config")
+            shutil.copy2(ROOT / ".secrets.baseline", root / ".secrets.baseline")
+            destination = root / "scripts/security/validate-repository-governance.py"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / "scripts/security/validate-repository-governance.py", destination)
+            (root / "tests/movie_storyboard").mkdir(parents=True)
+            (root / "tests/performance").mkdir(parents=True)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                            "commit", "-qm", "fixture"], cwd=root, check=True)
+            (root / "config/repository-governance-v1.json").write_text(
+                (root / "config/repository-governance-v1.json").read_text() + "\n", encoding="utf-8")
+            result = self.run_check(root, justification="")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("protected artifact", result.stdout)
 
     def test_digest_reference_preserves_bare_sha256_and_supports_algorithm(self) -> None:
         from vss_reasoning_contracts import DigestReference
