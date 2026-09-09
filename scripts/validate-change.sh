@@ -12,9 +12,16 @@ run_stage() {
 }
 
 validate_changed_secrets() {
-    local scanner=.venv/bin/detect-secrets-hook
-    if [[ ! -x $scanner ]]; then
-        printf 'Changed-file secret scanner is unavailable: %s\n' "$scanner" >&2
+    local -a scanner=()
+    if [[ -n ${VSS_SECRET_SCANNER:-} ]]; then
+        command -v "$VSS_SECRET_SCANNER" >/dev/null 2>&1 || { printf 'Configured secret scanner is unavailable\n' >&2; return 1; }
+        scanner=("$VSS_SECRET_SCANNER")
+    elif command -v detect-secrets-hook >/dev/null 2>&1; then
+        scanner=("$(command -v detect-secrets-hook)")
+    elif python -m detect_secrets --help >/dev/null 2>&1; then
+        scanner=(python -m detect_secrets scan)
+    else
+        printf 'Sanctioned secret scanner is unavailable (install security-tools.lock.txt)\n' >&2
         return 1
     fi
     mapfile -t changed_files < <(
@@ -27,8 +34,19 @@ validate_changed_secrets() {
             | grep -Ev '^(\.local/|.*__pycache__/|.*\.pyc$)' \
             || true
     )
+    # The baseline scope is authoritative: only files admitted to that scope
+    # may be evaluated against its false-positive baseline. Other changed files
+    # are still covered by the CI gitleaks job and cannot expand this baseline.
+    mapfile -t scoped_files < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["paths"]))' config/secrets-baseline-scope-v1.json)
+    mapfile -t changed_files < <(comm -12 <(printf '%s\n' "${changed_files[@]}" | sort -u) <(printf '%s\n' "${scoped_files[@]}" | sort -u))
     if (( ${#changed_files[@]} > 0 )); then
-        "$scanner" --baseline .secrets.baseline "${changed_files[@]}"
+        # detect-secrets-hook may rewrite its baseline while reconciling a scan.
+        # Validation must be read-only; the sanctioned updater owns mutations.
+        local temporary_baseline
+        temporary_baseline=$(mktemp)
+        trap 'rm -f "$temporary_baseline"' RETURN
+        cp .secrets.baseline "$temporary_baseline"
+        "${scanner[@]}" --baseline "$temporary_baseline" "${changed_files[@]}"
     fi
 }
 
@@ -72,19 +90,22 @@ run_stage "shell syntax" bash -c \
 run_stage "changed-file secret scan" validate_changed_secrets
 run_stage "ADR validation" ./scripts/validate_adr.sh
 run_stage "supply-chain and workflow validation" python3 scripts/security/validate-supply-chain.py
+run_stage "repository governance and reproducibility" python3 scripts/security/validate-repository-governance.py
+run_stage "isolated HOME deterministic test validation" python3 scripts/validate-hermetic.py
 
 if [[ $validation_level == L0 ]]; then
     exit 0
 fi
 
-for directory in "${test_directories[@]}"; do
-    run_stage "unittest discovery: $directory" \
-        python -m unittest discover -s "$directory" -p 'test_*.py'
-done
-
 if [[ $focused_validation == false ]]; then
+    run_stage "classified deterministic test suite" python3 scripts/run-test-classification.py
     mapfile -t bash_tests < <(find tests -type f -name '*-test.sh' -print | sort)
     for test_file in "${bash_tests[@]}"; do
         run_stage "Bash test: $test_file" "$test_file"
+    done
+else
+    for directory in "${test_directories[@]}"; do
+        run_stage "unittest discovery: $directory" \
+            python -m unittest discover -s "$directory" -p 'test_*.py'
     done
 fi

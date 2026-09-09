@@ -1,0 +1,20 @@
+{
+  "schema_version": "1",
+  "protocol": "vss.repository-governance",
+  "secrets_baseline": {
+    "path": ".secrets.baseline",
+    "scope_path": "config/secrets-baseline-scope-v1.json",
+    "updater": "scripts/security/update-secrets-baseline.sh"
+  },
+  "protected_paths": [
+    ".secrets.baseline",
+    "config/secrets-baseline-scope-v1.json",
+    "config/repository-governance-v1.json",
+    "config/test-classification-v1.json",
+    "docs/architecture/decisions/index.json",
+    "security/lock-metadata.json",
+    "requirements/locks/**",
+    "**/.terraform.lock.hcl"
+  ],
+  "authority": {"runtime_execution": false, "provider_execution": false, "production": false, "publication": false, "workflow_activation": false}
+}
