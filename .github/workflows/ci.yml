@@ -42,14 +42,14 @@ jobs:
           python-version: '3.12'
       - name: Install sanctioned secret scanner
         run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/security-tools.lock.txt
-      - name: Repository reproducibility parity gate
-        env:
-          VSS_PROTECTED_UPDATE_JUSTIFICATION: CI uses committed protected artifacts
-        run: ./scripts/validate-change.sh --level L0
       - name: Install configuration engine
         run: |
           python -m pip install --disable-pip-version-check --require-hashes -r requirements/locks/runtime.lock.txt
           python -m pip install --disable-pip-version-check --no-deps --no-build-isolation -e .
+      - name: Repository reproducibility parity gate
+        env:
+          VSS_PROTECTED_UPDATE_JUSTIFICATION: CI uses committed protected artifacts
+        run: ./scripts/validate-change.sh --level L0
       - name: Test configuration engine
         run: python -m unittest discover -s tests/config_engine -p 'test_*.py'
       - name: Test command engine

@@ -61,3 +61,14 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertEqual(DigestReference.parse("blake3:" + "b" * 64).as_string(), "blake3:" + "b" * 64)
         with self.assertRaises(ValueError):
             DigestReference.parse("c" * 63)
+
+    def test_l0_gate_bootstrap_provisions_every_dependency_it_executes(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        scanner = workflow.index("requirements/locks/security-tools.lock.txt")
+        runtime = workflow.index("requirements/locks/runtime.lock.txt")
+        project = workflow.index("--no-deps --no-build-isolation -e .")
+        gate = workflow.index("./scripts/validate-change.sh --level L0")
+        self.assertLess(scanner, runtime)
+        self.assertLess(runtime, project)
+        self.assertLess(project, gate)
+        self.assertIn("scripts/validate-hermetic.py", (ROOT / "scripts/validate-change.sh").read_text())
