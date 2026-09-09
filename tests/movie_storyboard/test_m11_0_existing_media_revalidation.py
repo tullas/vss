@@ -10,11 +10,14 @@ from vss_movie_storyboard import (
     prepare_existing_media_revalidation,
 )
 from vss_resource_contracts import ResourceContractError, validate_existing_media_revalidation_evidence
+from vss_movie_contracts import validate_existing_media_current_shot_binding
 from vss_reasoning_contracts import canonical_digest
 
 ROOT = Path(__file__).resolve().parents[2]
 STORY = json.loads((ROOT / "tests/fixtures/movie/vikramaditya-opening-story-fragment.json").read_text())
 DURABLE_REVIEW = json.loads((ROOT / "docs/reviews/m11-0-existing-media-revalidation.json").read_text())
+DURABLE_CURRENT_REVIEW = json.loads((ROOT / "docs/reviews/m11-0-existing-media-revalidation-current.json").read_text())
+DURABLE_BINDING = json.loads((ROOT / "docs/reviews/m11-0-existing-media-current-shot-binding.json").read_text())
 # The contract boundary accepts bytes and verifies their digest.  Keep this
 # test independent of host-local Runtime output; the retained production SHA
 # is asserted from the durable review artifact above.
@@ -79,5 +82,27 @@ class ExistingMediaRevalidationTests(unittest.TestCase):
             target = copy.deepcopy(self.target); target[key] = value
             with self.assertRaisesRegex(ResourceContractError, "lineage mismatch"):
                 bind_existing_media_to_current_shot(completed, media=MEDIA, current_target=target)
+
+    def test_completed_use_review_admits_separate_current_shot_binding(self):
+        review = {"review_sha256":"0"*64, "candidate_sha256":"6"*64, "scene_id":SCENE, "shot_id":SHOT, "frame_id":FRAME, "option_id":OPTION, "disposition":"USE", "reviewer_accountability_id":"human"}
+        review["review_sha256"] = hashlib.sha256(json.dumps({**review, "review_sha256":"0"*64}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        completed = complete_existing_media_revalidation(self.pending, review=review)
+        binding = bind_existing_media_to_current_shot(completed, media=MEDIA, current_target=self.target).to_json_value()
+        self.assertEqual("existing_media_current_shot_binding", binding["contract_identity"])
+        self.assertEqual("sealed_current_visual_basis_reference_only", binding["binding_status"])
+        self.assertEqual(review["review_sha256"], binding["human_review_sha256"])
+        self.assertTrue(all(value is False for value in binding["authority"].values()))
+
+    def test_durable_current_review_and_binding_are_admitted_and_distinct(self):
+        checked = validate_existing_media_revalidation_evidence(DURABLE_CURRENT_REVIEW)
+        binding = validate_existing_media_current_shot_binding(DURABLE_BINDING)
+        self.assertEqual("revalidated_review_only", checked.value["status"])
+        self.assertEqual("USE", checked.value["human_grounding_review"]["disposition"])
+        self.assertNotEqual(DURABLE_CURRENT_REVIEW["human_grounding_review"]["candidate_sha256"],
+                            DURABLE_CURRENT_REVIEW["historical_only"]["candidate_sha256"])
+        self.assertEqual(checked.value["revalidation_sha256"], binding.value["revalidation_sha256"])
+        self.assertEqual(checked.value["human_grounding_review"]["review_sha256"], binding.value["human_review_sha256"])
+        self.assertTrue(all(value is False for value in checked.value["authority"].values()))
+        self.assertTrue(all(value is False for value in binding.value["authority"].values()))
 
 if __name__ == "__main__": unittest.main()

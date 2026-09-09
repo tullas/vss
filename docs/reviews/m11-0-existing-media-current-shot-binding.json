@@ -1,0 +1,31 @@
+{
+  "authority": {"canon": false, "deployment": false, "production": false, "provider": false, "publication": false, "regeneration": false, "runtime": false, "workflow_activation": false},
+  "binding_sha256": "3761c5db571bd6bd5990a899967bc487a82859aefa1003201ef5ddce05c0b1a0",
+  "binding_status": "sealed_current_visual_basis_reference_only",
+  "contract_identity": "existing_media_current_shot_binding",
+  "contract_version": "1",
+  "current_lineage": {
+    "canon_snapshot": "f90f9aa31a78812bc308024c2c5073f7b300bf21b508f091718e12db43316d0e",
+    "creative_decision_revision": "0dc497840c039cac27f79b1f7fa17decf092f3f8af33f446e983c4840cab9b43",
+    "production_canon_binding": "4da8506ae62c74941655d89198312d67e0b15c12b048d197682e6b86dd670f1a",
+    "production_option_set": "2c78434406c45444da2935c1ba7f02ac929d89cd4bc486a68ef576139aa869cf",
+    "review_decision": "3ee0bccf2afdea3a6653db891099aec1caa2f28c4dd98d44fb8109b28e1d9ff7",
+    "review_packet": "343e95b5f7ae8ae8ae96d812d4ab9e6238fd3dca1ab1c73ff046b2be9ad9c401",
+    "scene_breakdown": "1385a3123aad50e5f0e17e1a345bb84da9cc8f328218a63571701fbec83038a8",
+    "shot_plan_draft": "9ccdff6bb2804717bc095e1123aa9f037d984d62f949aba95e97333708b0ab3f",
+    "story_fragment": "b60c6a0c0ecc74068c107db44c4ca6e61b8f5cea124a4c5a9a3c34d94eddb8a3",
+    "storyboard_frame": "4ff516866b0123661613c2d47aec059ee802822fcf22776314cca7a1ad5f12d6",
+    "storyboard_specification": "ee2cebe3d40c2ab76a4b2659ebaf53435cadb304495f3b651c3517acbc5f0865"
+  },
+  "frame_id": "frame-fb0d79ba59d7781b0bad3e7e",
+  "human_review_sha256": "36c257d007f44d61fdfab74b4d1727c71a50da7dbdff8f3978f78bd52bc0d4e7",
+  "limitations": ["current_lineage_reference_only", "revalidation_review_required", "historical_lineage_not_rewritten", "not_production_or_generation_authority", "not_provider_or_runtime_authority", "not_publication_export_scheduling_or_workflow_authority", "not_canon_or_rights_authority"],
+  "media_sha256": "2d23736bce6f76def26416841b81806262c0a172e29b6d994f140e4a39eb55aa",
+  "option_id": "option-b5d2461f4ec95dc0377938ba",
+  "project_id": "vikramaditya-local",
+  "revalidation_id": "media-revalidation-18d8f4351f95b03ff131f9cfd65b8397",
+  "revalidation_sha256": "38cc02be64a573de9dcd6cd0f99a7a554761383e241cd1ea0ef835933dcdb357",
+  "schema_version": "1",
+  "scene_id": "scene-91f5c8634519d8264e2dd5f8",
+  "shot_id": "shot-024b0d6352149eabb74df543"
+}
