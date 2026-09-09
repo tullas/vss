@@ -92,7 +92,9 @@ def complete_existing_media_revalidation(pending: ExistingMediaRevalidationEvide
         review: dict[str, Any]) -> ExistingMediaRevalidationEvidence:
     value = _check(pending.to_json_value())
     if value.value["status"] != "awaiting_new_human_grounding_review": raise ResourceContractError("revalidation is not pending")
-    target = value.value["current_authoritative_target"]
+    # Resource validation freezes nested values; thaw the authoritative target
+    # before constructing the separately validated JSON binding artifact.
+    target = thaw_json(value.value["current_authoritative_target"])
     required = {"review_sha256", "candidate_sha256", "scene_id", "shot_id", "frame_id", "option_id", "disposition", "reviewer_accountability_id"}
     if set(review) != required or review["disposition"] not in {"USE", "REGENERATE", "REJECT"}: raise ResourceContractError("new human review is incomplete")
     if any(review[k] != target[k] for k in ("scene_id", "shot_id", "frame_id", "option_id")) or review["candidate_sha256"] == value.value["historical_only"]["candidate_sha256"]:
@@ -108,7 +110,9 @@ def bind_existing_media_to_current_shot(revalidation: ExistingMediaRevalidationE
         current_target: dict[str, Any]) -> ExistingMediaCurrentShotBinding:
     value = _check(revalidation.to_json_value(), media)
     if value.value["status"] != "revalidated_review_only": raise ResourceContractError("current shot binding requires completed new human review")
-    target = value.value["current_authoritative_target"]
+    # Resource validation freezes nested values; thaw the authoritative target
+    # before constructing the separately validated JSON binding artifact.
+    target = thaw_json(value.value["current_authoritative_target"])
     checked_target = dict(current_target)
     checked_target["lineage"] = _lineage(checked_target.get("lineage"))
     if checked_target != target:
