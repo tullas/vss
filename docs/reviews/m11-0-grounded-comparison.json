@@ -1,0 +1,126 @@
+{
+  "authority": {
+    "asset_promotion": false,
+    "canon_decision": false,
+    "production": false,
+    "profile_mutation": false,
+    "prompt_mutation": false,
+    "provider_execution": false,
+    "publication": false,
+    "ranking": false,
+    "recommendation": false,
+    "regeneration": false,
+    "rights_decision": false,
+    "runtime_execution": false,
+    "workflow_activation": false
+  },
+  "candidate_order": "caller_supplied_evidence_order_not_ranking",
+  "candidates": [
+    {
+      "candidate_id": "generated-review-4236d0b643a71fec3c38bad7d8d41d93",
+      "candidate_sha256": "525ee34d08f175d562672fd53b8ee4d0c2a119fcabde338da7c1c49c84e0771c",
+      "candidate_variation": {"identity": "comparison-candidate-1", "ordinal": 1},
+      "request_sha256": "3ebdeced6133e558f26f4c6174580174ed7a070b31cd5749f5dd7800692691e6",
+      "frame_grounding_sha256": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+      "provider": {
+        "identity": "movie.storyboard-image.openai",
+        "implementation_identity": "vss.openai-gpt-image-2-opaque-cabx",
+        "model_snapshot": "gpt-image-2-2026-04-21",
+        "version": "1.1.0"
+      },
+      "scope": {
+        "frame_id": "frame-fb0d79ba59d7781b0bad3e7e",
+        "production_id": "vikramaditya-local",
+        "project_id": "vikramaditya-local",
+        "scene_id": "scene-91f5c8634519d8264e2dd5f8",
+        "tenant_id": "tenant-local",
+        "universe_id": "universe-local"
+      },
+      "sealed_review": {
+        "candidate_sha256": "525ee34d08f175d562672fd53b8ee4d0c2a119fcabde338da7c1c49c84e0771c",
+        "disposition": "USE",
+        "frame_grounding_sha256": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+        "review_id": "visual-grounding-review-1f2aed8e9add7dc3e4365569c7c142da",
+        "review_sha256": "5f01af93619f7410f6525df8502497e48b234df9eabc37e087787f05abf51f04",
+        "visual_grounding_profile_sha256": "51e785c899f7331e51c7583edc4558f779864236dfa1501e826ace994a71b903"
+      },
+      "source_repository_lineage": {
+        "canon_snapshot": "ec18ba9b0a2d9a6e57784cb4a2ecfd4e4553980d9d25ddd2aee79a5e386f84d7",
+        "creative_decision_revision": "0cecd4cf42139fcb0ee86923f2109021a813212ea7da7ce2309bf4aa50ad5ae2",
+        "production_canon_binding": "1615b727abd3ea0141e7306618cb1a036053e1fd00c4fd05feed0531961bc140",
+        "production_option_set": "a94879bbcc995e769e87f04a2318589f076ffc2f06ed8328e981c5940adef806",
+        "review_decision": "870d2bc021eaa468488218bd29b9a27334d795e33701d1a5c00cc75a08467752",
+        "review_packet": "d02af5d27f605a237877c106eeddd809d86a690a856bb281c1b9af5fe4735e81",
+        "scene_breakdown": "61218d5359e9e5cf4162f1ef1c4b06b35ed50313dcebbf04acef51e667c2b43d",
+        "shot_plan_draft": "4e43c7d07f0b35b0a265a0d23141f6265f882843cba7d4326009e213522eed97",
+        "story_fragment": "b60c6a0c0ecc74068c107db44c4ca6e61b8f5cea124a4c5a9a3c34d94eddb8a3",
+        "storyboard_frame": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+        "storyboard_specification": "c8164b0134298e9d38d49e53c3f19d50cedc120859815a310ab5767bbbbad320"
+      },
+      "visual_grounding_profile": {
+        "profile_id": "visual-grounding-m11-location-live-action",
+        "profile_sha256": "51e785c899f7331e51c7583edc4558f779864236dfa1501e826ace994a71b903",
+        "revision": 1
+      }
+    },
+    {
+      "candidate_id": "generated-review-a3c962ee414199c7d0c2c411d42cd789",
+      "candidate_sha256": "7a47879d9727bc252e6e579278080364df9f0ad86a13019453bab41b608c2b97",
+      "candidate_variation": {"identity": "comparison-candidate-2", "ordinal": 2},
+      "request_sha256": "a471323eec0b3d3c69897447a5bb6d1922023cf09825a4910eed687514108d54",
+      "frame_grounding_sha256": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+      "provider": {
+        "identity": "movie.storyboard-image.openai",
+        "implementation_identity": "vss.openai-gpt-image-2-opaque-cabx",
+        "model_snapshot": "gpt-image-2-2026-04-21",
+        "version": "1.1.0"
+      },
+      "scope": {
+        "frame_id": "frame-fb0d79ba59d7781b0bad3e7e",
+        "production_id": "vikramaditya-local",
+        "project_id": "vikramaditya-local",
+        "scene_id": "scene-91f5c8634519d8264e2dd5f8",
+        "tenant_id": "tenant-local",
+        "universe_id": "universe-local"
+      },
+      "sealed_review": {
+        "candidate_sha256": "7a47879d9727bc252e6e579278080364df9f0ad86a13019453bab41b608c2b97",
+        "disposition": "USE",
+        "frame_grounding_sha256": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+        "review_id": "visual-grounding-review-ccb1bb5da5ada894c9c1b9db19974362",
+        "review_sha256": "0fc31c95821d629901a7560f2d0aabaf06f87a5db3aee1a1919dba400a468dde",
+        "visual_grounding_profile_sha256": "51e785c899f7331e51c7583edc4558f779864236dfa1501e826ace994a71b903"
+      },
+      "source_repository_lineage": {
+        "canon_snapshot": "ec18ba9b0a2d9a6e57784cb4a2ecfd4e4553980d9d25ddd2aee79a5e386f84d7",
+        "creative_decision_revision": "0cecd4cf42139fcb0ee86923f2109021a813212ea7da7ce2309bf4aa50ad5ae2",
+        "production_canon_binding": "1615b727abd3ea0141e7306618cb1a036053e1fd00c4fd05feed0531961bc140",
+        "production_option_set": "a94879bbcc995e769e87f04a2318589f076ffc2f06ed8328e981c5940adef806",
+        "review_decision": "870d2bc021eaa468488218bd29b9a27334d795e33701d1a5c00cc75a08467752",
+        "review_packet": "d02af5d27f605a237877c106eeddd809d86a690a856bb281c1b9af5fe4735e81",
+        "scene_breakdown": "61218d5359e9e5cf4162f1ef1c4b06b35ed50313dcebbf04acef51e667c2b43d",
+        "shot_plan_draft": "4e43c7d07f0b35b0a265a0d23141f6265f882843cba7d4326009e213522eed97",
+        "story_fragment": "b60c6a0c0ecc74068c107db44c4ca6e61b8f5cea124a4c5a9a3c34d94eddb8a3",
+        "storyboard_frame": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+        "storyboard_specification": "c8164b0134298e9d38d49e53c3f19d50cedc120859815a310ab5767bbbbad320"
+      },
+      "visual_grounding_profile": {
+        "profile_id": "visual-grounding-m11-location-live-action",
+        "profile_sha256": "51e785c899f7331e51c7583edc4558f779864236dfa1501e826ace994a71b903",
+        "revision": 1
+      }
+    }
+  ],
+  "comparison_identity": "grounded_storyboard_candidate_comparison",
+  "comparison_sha256": "16c0554c5cf44948620256d836eca9b14d3995fc1870c12c6897db4623c5c811",
+  "comparison_status": "development_review_only",
+  "comparison_version": "1",
+  "limitations": [
+    "deterministic_evidence_only",
+    "not_a_ranking_or_recommendation",
+    "not_generation_or_regeneration_authority",
+    "not_provider_or_runtime_authority",
+    "not_production_publication_asset_workflow_canon_or_rights_authority"
+  ],
+  "schema_version": "1"
+}

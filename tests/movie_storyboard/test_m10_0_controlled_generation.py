@@ -16,7 +16,8 @@ from unittest.mock import patch
 from vss_commands import CommandRunner, ExitCode
 from vss_movie_controlled_generation import (
     APPROVER_SECRET_NAME, SECRET_NAME, admit_controlled_generation, admit_generated_candidate,
-    admit_grounded_controlled_generation, issue_approval,
+    admit_grounded_controlled_generation, derive_grounded_comparison_candidate,
+    derive_grounded_comparison_candidates, issue_approval,
 )
 from vss_movie_controlled_generation.contracts import validate_candidate_media
 from vss_movie_demo import finish_demo, prepare_demo
@@ -321,6 +322,87 @@ class M100ControlledGenerationTests(unittest.TestCase):
         self.assertTrue(all(value is False for value in review.value["authority"].values()))
         self.assertNotIn("approval", review.value["defects"][0])
         self.assertEqual(len(self.calls), calls)
+
+    def test_bounded_comparison_variation_preserves_binding_and_is_create_once(self):
+        base = self.admit_grounded()
+        original = base.request_json()
+        same_a = derive_grounded_comparison_candidate(base, variation_identity="comparison-a")
+        same_b = derive_grounded_comparison_candidate(base, variation_identity="comparison-a")
+        other = derive_grounded_comparison_candidate(base, variation_identity="comparison-b")
+        self.assertEqual(same_a.request_json(), same_b.request_json())
+        self.assertNotEqual(same_a.request["request_sha256"], other.request["request_sha256"])
+        for candidate in (same_a, other):
+            self.assertEqual(candidate.request["contract_version"], "3")
+            self.assertEqual(candidate.request["projection"]["visual_grounding_profile_sha256"],
+                             base.request["projection"]["visual_grounding_profile_sha256"])
+            self.assertEqual(candidate.request["scope"], base.request["scope"])
+            self.assertEqual(candidate.request["lineage"], base.request["lineage"])
+        self.assertEqual(base.request_json(), original)
+        bounded = derive_grounded_comparison_candidates(base, ["comparison-a", "comparison-b"])
+        self.assertEqual(
+            [candidate.request["candidate_variation"] for candidate in bounded],
+            [{"identity": "comparison-a", "ordinal": 1},
+             {"identity": "comparison-b", "ordinal": 2}],
+        )
+        from_second = derive_grounded_comparison_candidate(
+            bounded[1], variation_identity="comparison-candidate-1", variation_ordinal=1,
+        )
+        self.assertEqual(from_second.request["candidate_variation"],
+                         {"identity": "comparison-candidate-1", "ordinal": 1})
+        self.assertEqual(from_second.request["lineage"], base.request["lineage"])
+        self.assertEqual(from_second.request["scope"], base.request["scope"])
+        with self.assertRaisesRegex(Exception, "fan-out"):
+            derive_grounded_comparison_candidates(base, ["comparison-a", "comparison-b", "comparison-c"])
+        preflight, preflight_code = self.runtime(
+            derive_grounded_comparison_candidate(base, variation_identity="comparison-b"),
+            mode="preflight",
+        )
+        self.assertEqual(preflight_code, 0, preflight)
+        self.assertEqual(preflight["output"]["provider_call_count"], 0)
+        self.assertFalse(preflight["output"]["attempt_reserved"])
+        self.assertEqual(self.provider_secret_reads, [])
+
+        first = self.admit_grounded(approval=self.approval(base))
+        first_result, first_code = self.runtime(first, mode="generate")
+        self.assertEqual(first_code, 0, first_result)
+        first_candidate = admit_generated_candidate(self.root, first)
+        first_review = record_production_visual_grounding_review(
+            generation=first, candidate=first_candidate, disposition="USE", defects=[],
+            reviewer_accountability_id="reviewer-grounding",
+        )
+        derived = derive_grounded_comparison_candidate(first, variation_identity="comparison-b")
+        mismatched, mismatched_code = self.runtime(
+            derive_grounded_comparison_candidate(
+                first, variation_identity="comparison-b", approval=self.approval(first)),
+            mode="generate",
+        )
+        self.assertNotEqual(mismatched_code, 0, mismatched)
+        second = derive_grounded_comparison_candidate(
+            first, variation_identity="comparison-b", approval=self.approval(derived),
+        )
+        second_result, second_code = self.runtime(second, mode="generate")
+        self.assertEqual(second_code, 0, second_result)
+        calls = len(self.calls)
+        duplicate = derive_grounded_comparison_candidate(
+            first, variation_identity="comparison-b", approval=self.approval(derived),
+        )
+        duplicate_result, duplicate_code = self.runtime(duplicate, mode="generate")
+        self.assertNotEqual(duplicate_code, 0, duplicate_result)
+        self.assertEqual(len(self.calls), calls)
+        second_candidate = admit_generated_candidate(self.root, second)
+        second_review = record_production_visual_grounding_review(
+            generation=second, candidate=second_candidate, disposition="USE", defects=[],
+            reviewer_accountability_id="reviewer-grounding",
+        )
+        comparison = create_grounded_storyboard_comparison(
+            first, first_candidate, first_review, second, second_candidate, second_review,
+        )
+        self.assertNotEqual(
+            comparison.to_json_value()["candidates"][0]["candidate_sha256"],
+            comparison.to_json_value()["candidates"][1]["candidate_sha256"],
+        )
+        self.assertEqual(self.provider_secret_reads, [SECRET_NAME, SECRET_NAME])
+        self.assertEqual(self.approver_secret_reads, [APPROVER_SECRET_NAME, APPROVER_SECRET_NAME, APPROVER_SECRET_NAME])
 
     def test_human_authored_revised_profile_binds_review_and_second_candidate(self):
         first = self.admit_grounded()

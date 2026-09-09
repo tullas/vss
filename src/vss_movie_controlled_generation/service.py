@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ from vss_movie_storyboard_render import admit_storyboard_render
 from vss_reasoning_contracts import canonical_digest
 from vss_reasoning_contracts.canonicalization import freeze_json, thaw_json
 from vss_resource_contracts import ResourceContractError
+from vss_resource_contracts.validation import validate_production_visual_grounding_profile
 
 from .contracts import validate_generation_request
 
@@ -33,6 +35,7 @@ MAXIMUM_OUTPUT_BYTES = 10 * 1024 * 1024
 MAXIMUM_CONTENT_CREDENTIALS_BYTES = 4 * 1024 * 1024
 OUTPUT_POLICY_IDENTITY = "vss.opaque-provider-content-credentials.png/1"
 RUNTIME_TIMEOUT_SECONDS = 150.0
+MAX_COMPARISON_CANDIDATES = 2
 SETTINGS = MappingProxyType({
     "n": 1, "size": "1280x720", "quality": "medium", "output_format": "png",
     "background": "opaque", "moderation": "auto", "stream": False,
@@ -116,6 +119,114 @@ def _build_grounded_prompt(frame: Mapping[str, Any], grounding: Mapping[str, Any
     if len(prompt.encode("utf-8")) > 4096:
         raise MovieContractError("grounded provider projection exceeds its bound")
     return prompt
+
+
+_VARIATION_IDENTITY = re.compile(r"^[a-z][a-z0-9._:-]{2,63}$")
+
+
+def derive_grounded_comparison_candidate(
+    generation: Any, *, variation_identity: str, variation_ordinal: int = 2,
+    approval: dict[str, Any] | None = None,
+) -> "AdmittedControlledGeneration":
+    """Derive one bounded comparison request without changing grounded semantics."""
+    if type(generation) is not AdmittedControlledGeneration:
+        raise MovieContractError("comparison variation requires authoritative admission")
+    request = generation.request_json()
+    validate_generation_request(request)
+    profile = generation.grounding_profile_json()
+    if request["contract_version"] != "3" or profile is None:
+        raise MovieContractError("comparison variation requires a grounded v3 admission")
+    if (not isinstance(variation_identity, str) or not _VARIATION_IDENTITY.fullmatch(variation_identity)
+            or variation_ordinal not in {1, 2}):
+        raise MovieContractError("comparison variation identity is outside the bounded contract")
+    existing_variation = request.pop("candidate_variation", None)
+    if existing_variation is not None:
+        suffix = "\nV2:" + existing_variation["identity"]
+        if not request["projection"]["prompt"].endswith(suffix):
+            raise MovieContractError("comparison variation base prompt is inconsistent")
+        request["projection"]["prompt"] = request["projection"]["prompt"][:-len(suffix)]
+    else:
+        if request["projection"]["prompt"] != generation.prompt:
+            raise MovieContractError("comparison variation base prompt is inconsistent")
+    variation = {"identity": variation_identity, "ordinal": variation_ordinal}
+    prompt = request["projection"]["prompt"] + "\nV2:" + variation_identity
+    request["candidate_variation"] = variation
+    request["projection"] = {
+        "prompt": prompt,
+        "visual_grounding_profile_sha256": request["projection"]["visual_grounding_profile_sha256"],
+        "frame_grounding_sha256": request["projection"]["frame_grounding_sha256"],
+        "projection_sha256": _digest({
+            "prompt": prompt,
+            "visual_grounding_profile_sha256": request["projection"]["visual_grounding_profile_sha256"],
+            "frame_grounding_sha256": request["projection"]["frame_grounding_sha256"],
+        }),
+    }
+    request["provider"]["provider_request_sha256"] = _digest(provider_request_body(prompt))
+    request["request_sha256"] = _digest({**request, "request_sha256": "0" * 64})
+    validate_generation_request(request)
+    return AdmittedControlledGeneration(
+        _ADMISSION_KEY, request=request, prompt=prompt, approval=approval, grounding_profile=profile,
+    )
+
+
+def derive_grounded_comparison_candidates(
+    generation: Any, variation_identities: list[str],
+) -> tuple["AdmittedControlledGeneration", ...]:
+    """Derive the bounded ordinal-1/ordinal-2 comparison set."""
+    if (not isinstance(variation_identities, list)
+            or len(variation_identities) > MAX_COMPARISON_CANDIDATES
+            or len(set(variation_identities)) != len(variation_identities)):
+        raise MovieContractError("comparison candidate fan-out exceeds its bound")
+    return tuple(derive_grounded_comparison_candidate(
+        generation, variation_identity=value, variation_ordinal=index
+    ) for index, value in enumerate(variation_identities, 1))
+
+
+def load_sealed_grounded_admission(
+    material: Mapping[str, Any], *, expected_request_sha256: str,
+    expected_provider_request_sha256: str, expected_profile_sha256: str,
+    expected_variation_identity: str, expected_variation_ordinal: int,
+    expected_option_id: str, expected_scene_id: str, expected_shot_id: str,
+    expected_frame_id: str, approval: dict[str, Any] | None = None,
+) -> "AdmittedControlledGeneration":
+    """Load one fixed, durably sealed grounded admission for host handoff."""
+    if not isinstance(material, Mapping) or set(material) != {"request", "profile", "binding"}:
+        raise MovieContractError("sealed grounded admission material is invalid")
+    request = validate_generation_request(dict(material["request"]))
+    profile = validate_production_visual_grounding_profile(dict(material["profile"])).to_json_value()
+    binding = material["binding"]
+    if (request["contract_version"] != "3"
+            or request["request_sha256"] != expected_request_sha256
+            or request["provider"]["provider_request_sha256"] != expected_provider_request_sha256
+            or request["projection"]["visual_grounding_profile_sha256"] != expected_profile_sha256
+            or profile["profile_sha256"] != expected_profile_sha256
+            or request.get("candidate_variation") != {
+                "identity": expected_variation_identity, "ordinal": expected_variation_ordinal,
+            }
+            or request["scope"]["scene_id"] != expected_scene_id
+            or request["scope"]["frame_id"] != expected_frame_id
+            or binding != {
+                "option_id": expected_option_id, "scene_id": expected_scene_id,
+                "shot_id": expected_shot_id, "frame_id": expected_frame_id,
+            }
+            or request["lineage"].get("shot_plan_draft") is None
+            or request["bounds"] != {
+                **request["bounds"], "maximum_provider_attempts": 1,
+                "maximum_cost_usd": "0.100000",
+            }):
+        raise MovieContractError("sealed grounded admission binding mismatch")
+    if request["projection"].get("prompt") is None:
+        raise MovieContractError("sealed grounded admission prompt is unavailable")
+    if request["scope"].get("production_id") != request["scope"].get("project_id"):
+        raise MovieContractError("sealed grounded admission production binding mismatch")
+    # The selected option and shot are authoritative lineage identities.  They are
+    # checked against the sealed material by the host wrapper's fixed constants.
+    if not isinstance(expected_option_id, str) or not isinstance(expected_shot_id, str):
+        raise MovieContractError("sealed grounded admission binding is invalid")
+    return AdmittedControlledGeneration(
+        _ADMISSION_KEY, request=request, prompt=request["projection"]["prompt"],
+        approval=approval, grounding_profile=profile,
+    )
 
 
 @dataclass(frozen=True, slots=True, init=False)

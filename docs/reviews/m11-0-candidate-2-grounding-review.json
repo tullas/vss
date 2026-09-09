@@ -1,0 +1,30 @@
+{
+  "authority": {
+    "approval": false,
+    "profile_mutation": false,
+    "prompt_edit": false,
+    "provider_execution": false,
+    "regeneration": false,
+    "reservation": false,
+    "runtime_execution": false
+  },
+  "candidate_sha256": "7a47879d9727bc252e6e579278080364df9f0ad86a13019453bab41b608c2b97",
+  "contract_identity": "production_visual_grounding_review",
+  "contract_version": "1",
+  "defects": [],
+  "disposition": "USE",
+  "frame_grounding_sha256": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+  "limitations": [
+    "accountability_evidence_only",
+    "production_defined_defect_codes",
+    "not_truth_by_itself",
+    "not_profile_mutation",
+    "not_prompt_authority",
+    "not_provider_or_runtime_authority"
+  ],
+  "review_id": "visual-grounding-review-ccb1bb5da5ada894c9c1b9db19974362",
+  "review_sha256": "0fc31c95821d629901a7560f2d0aabaf06f87a5db3aee1a1919dba400a468dde",
+  "reviewer_accountability_id": "m11-human-grounding-owner",
+  "schema_version": "1",
+  "visual_grounding_profile_sha256": "51e785c899f7331e51c7583edc4558f779864236dfa1501e826ace994a71b903"
+}

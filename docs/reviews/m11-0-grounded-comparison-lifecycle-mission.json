@@ -1,0 +1,23 @@
+{
+  "mission": {
+    "gap": "M10 grounded comparison has no governed way to derive a second distinct candidate after an initial profile candidate is USE-approved.",
+    "observable_result": "A bounded, deterministic comparison-candidate transition that preserves the exact profile and production binding without weakening create-once execution.",
+    "authority_alignment": "aligned",
+    "triggers": ["architecture_boundary"],
+    "heartbeat": [
+      {
+        "milestone_id": "m10-7",
+        "capability": "image",
+        "advanced": true,
+        "evidence": "src/vss_movie_storyboard/visual_production_set.py"
+      }
+    ],
+    "active_decisions": [
+      {
+        "id": "DEC-0001",
+        "disposition": "COMPLY",
+        "rationale": "This closes the bounded M10 comparison lifecycle gap without granting production or autonomous authority."
+      }
+    ]
+  }
+}

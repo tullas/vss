@@ -1,0 +1,182 @@
+{
+  "binding": {
+    "frame_id": "frame-fb0d79ba59d7781b0bad3e7e",
+    "option_id": "option-b5d2461f4ec95dc0377938ba",
+    "scene_id": "scene-91f5c8634519d8264e2dd5f8",
+    "shot_id": "shot-024b0d6352149eabb74df543"
+  },
+  "profile": {
+    "applicability": {
+      "character_ids": [
+        "vetala",
+        "vikramaditya"
+      ],
+      "scene_ids": [
+        "scene-91f5c8634519d8264e2dd5f8"
+      ]
+    },
+    "conflicts": [],
+    "contract_identity": "production_visual_grounding_profile",
+    "contract_version": "1",
+    "evidence_references": [
+      "m11-0-human-grounding-input"
+    ],
+    "groups": [
+      {
+        "explicit_unknowns": [
+          "exact dynasty-specific history",
+          "exact facial identity",
+          "exact costume colors, ornaments and motifs",
+          "exact distant architecture",
+          "minor vegetation, weathering, textiles and incidental set dressing",
+          "subtle lighting, haze and color treatment"
+        ],
+        "group_id": "m11.location-live-action.initial",
+        "limitations": [
+          "human-owned initial constraints; VSS assigns no domain meaning",
+          "not canon, prompt edit, provider authority or Runtime authority"
+        ],
+        "negative_constraints": [
+          "no modern objects, clothing, architecture, signage, vehicles, electronics or infrastructure",
+          "no European-medieval, Middle-Eastern-fantasy or generic-fantasy substitution",
+          "no cartoon, anime, illustration, painterly, game-render or plastic-CGI aesthetic",
+          "no gratuitous gore, decay, wounds, sexualization or monstrous anatomy",
+          "no zombie, vampire, generic demon or Western-horror Vetal",
+          "no glowing eyes, magic or overt supernatural spectacle unless source-established",
+          "no text, captions, logos or watermarks",
+          "no malformed anatomy, duplicate people or unnecessary crowds",
+          "no invented major characters, props, actions or events absent from authoritative source"
+        ],
+        "ordinal": 1,
+        "positive_constraints": [
+          "cinematic live-action historical Indian setting; grounded humans and natural proportions",
+          "culturally credible Indian architecture, clothing, materials and practical objects",
+          "physically plausible natural light/environment; cinematic depth, texture and atmospheric realism",
+          "restrained royal-era language; no fantasy spectacle",
+          "preserve authoritative characters, action, spatial relationships and narrative intent",
+          "high-quality basis for later image-to-video",
+          "mature banyan anchor when shot-compatible",
+          "Vetal uncanny, ancient, lean and intelligent; not generic horror"
+        ],
+        "source_reference_digests": [
+          "7c710d8bbf18fb8b4c1b1157cb94d266b56a777a70360b6e6ae06061b49c05de"
+        ]
+      }
+    ],
+    "lifecycle": "active",
+    "limitations": [
+      "human_owned_initial_grounding_profile",
+      "not_domain_truth",
+      "not_provider_or_runtime_authority",
+      "opaque_constraint_semantics"
+    ],
+    "mode": "required",
+    "profile_id": "visual-grounding-m11-location-live-action",
+    "profile_sha256": "51e785c899f7331e51c7583edc4558f779864236dfa1501e826ace994a71b903",
+    "reviewer_accountability_id": "m11-human-grounding-owner",
+    "revision": 1,
+    "schema_version": "1",
+    "scope": {
+      "production_id": "vikramaditya-local",
+      "tenant_id": "tenant-local",
+      "universe_id": "universe-local"
+    },
+    "uncertainty": [
+      "exact costume colors, ornaments and motifs",
+      "exact distant architecture",
+      "exact dynasty-specific history",
+      "exact facial identity",
+      "minor vegetation, weathering, textiles and incidental set dressing",
+      "subtle lighting, haze and color treatment"
+    ]
+  },
+  "request": {
+    "bounds": {
+      "maximum_content_credentials_bytes": 4194304,
+      "maximum_cost_usd": "0.100000",
+      "maximum_images": 1,
+      "maximum_output_bytes": 10485760,
+      "maximum_provider_attempts": 1
+    },
+    "candidate_variation": {
+      "identity": "comparison-candidate-1",
+      "ordinal": 1
+    },
+    "capability": {
+      "handler_sha256": "327ef8fb4afc6748330cd843ae4475d7f11aa75d3b2e90d95ad081d7be79b596",
+      "identity": "movie.controlled-review-frame",
+      "manifest_sha256": "ee21a8f2f973e2dd66b2a4e26bd4f824c657fefd560e1feb351b3b08e3d691b8",
+      "version": "1.1.0"
+    },
+    "contract_identity": "controlled_storyboard_frame_generation_request",
+    "contract_version": "3",
+    "eligibility": {
+      "classification": "public",
+      "permissions": [
+        "external_provider_processing",
+        "generate_development_review_media"
+      ],
+      "policy_identity": "vss.controlled-media-input-eligibility",
+      "policy_version": "1.0.0",
+      "restrictions": [],
+      "rights_qualification": "original",
+      "trust": "approved_fixture"
+    },
+    "environment": "development",
+    "lineage": {
+      "canon_snapshot": "ec18ba9b0a2d9a6e57784cb4a2ecfd4e4553980d9d25ddd2aee79a5e386f84d7",
+      "creative_decision_revision": "0cecd4cf42139fcb0ee86923f2109021a813212ea7da7ce2309bf4aa50ad5ae2",
+      "production_canon_binding": "1615b727abd3ea0141e7306618cb1a036053e1fd00c4fd05feed0531961bc140",
+      "production_option_set": "a94879bbcc995e769e87f04a2318589f076ffc2f06ed8328e981c5940adef806",
+      "review_decision": "870d2bc021eaa468488218bd29b9a27334d795e33701d1a5c00cc75a08467752",
+      "review_packet": "d02af5d27f605a237877c106eeddd809d86a690a856bb281c1b9af5fe4735e81",
+      "scene_breakdown": "61218d5359e9e5cf4162f1ef1c4b06b35ed50313dcebbf04acef51e667c2b43d",
+      "shot_plan_draft": "4e43c7d07f0b35b0a265a0d23141f6265f882843cba7d4326009e213522eed97",
+      "story_fragment": "b60c6a0c0ecc74068c107db44c4ca6e61b8f5cea124a4c5a9a3c34d94eddb8a3",
+      "storyboard_frame": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+      "storyboard_specification": "c8164b0134298e9d38d49e53c3f19d50cedc120859815a310ab5767bbbbad320"
+    },
+    "operation_identity": "generate_one_controlled_storyboard_review_frame",
+    "operation_version": "1",
+    "projection": {
+      "frame_grounding_sha256": "322560fba5c96fe01d2ea5dbf564283c9837cda08ea1a562c017800247989347",
+      "projection_sha256": "d33357ed3706810fb6c7f85dc1711ce7761521823a461117aca518a0235cab67",
+      "prompt": "Create one clean cinematic development storyboard review frame, not a document. Show no captions, labels, interface, borders, storyboard templates, production forms, watermarks, or control-plane text.\nStoryboard frame specification. Subject focus: vikramaditya, vetala. Action: Cover the source event: SCENE: At dawn, Vikramaditya pauses beneath the banyan tree as the vetala's riddle interrupts the road to Ujjayini.. Environment: banyan-road, ujjayini. Time or lighting cue: dawn. Framing: Medium structural coverage draft for the accepted location_live_action approach; human validation required. Camera angle: Not specified by validated upstream artifacts; requires human determination. Camera elevation: Not specified by validated upstream artifacts; requires human determination. Camera movement: Not specified by validated upstream artifacts; requires human determination. Composition: Draft composition should keep vikramaditya, vetala legible during the source event; exact blocking remains undetermined. Visual style: Apply accepted production option profile location_live_action (location_live_action) as visual style direction only; do not infer undeclared aesthetics. Render only supported facts; leave unspecified details unresolved for human review.\nContinuity constraints: Preserve source scene identity scene-91f5c8634519d8264e2dd5f8 and shot order 2.; Keep declared location continuity limited to: banyan-road, ujjayini.; Keep declared character continuity limited to: vikramaditya, vetala.; Not specified by validated upstream artifacts; requires human determination.\nDo not resolve these deliberate unknowns: Artistic scene intent is unknown.; The source may be incomplete.; Feasibility, cost, duration, quality, availability, rights, permits, and artistic suitability are unknown.; Shot feasibility has not been established.; Exact character appearance is not specified by validated upstream artifacts.; Exact blocking, lens, color palette, and set dressing are not specified by validated upstream artifacts.\nNegative constraints: Do not add characters, locations, actions, props, wardrobe, weather, or architecture not supported upstream.; Do not imply production approval, final selection, provider execution, or generated media.\nProduction visual grounding constraints: cinematic live-action historical Indian setting; grounded humans and natural proportions; culturally credible Indian architecture, clothing, materials and practical objects; physically plausible natural light/environment; cinematic depth, texture and atmospheric realism; restrained royal-era language; no fantasy spectacle; preserve authoritative characters, action, spatial relationships and narrative intent; high-quality basis for later image-to-video; mature banyan anchor when shot-compatible; Vetal uncanny, ancient, lean and intelligent; not generic horror\nProduction visual exclusions: no modern objects, clothing, architecture, signage, vehicles, electronics or infrastructure; no European-medieval, Middle-Eastern-fantasy or generic-fantasy substitution; no cartoon, anime, illustration, painterly, game-render or plastic-CGI aesthetic; no gratuitous gore, decay, wounds, sexualization or monstrous anatomy; no zombie, vampire, generic demon or Western-horror Vetal; no glowing eyes, magic or overt supernatural spectacle unless source-established; no text, captions, logos or watermarks; no malformed anatomy, duplicate people or unnecessary crowds; no invented major characters, props, actions or events absent from authoritative source\nGrounding unknowns that must remain unresolved: exact dynasty-specific history; exact facial identity; exact costume colors, ornaments and motifs; exact distant architecture; minor vegetation, weathering, textiles and incidental set dressing; subtle lighting, haze and color treatment; exact costume colors, ornaments and motifs; exact distant architecture; exact dynasty-specific history; exact facial identity; minor vegetation, weathering, textiles and incidental set dressing; subtle lighting, haze and color treatment\nV2:comparison-candidate-1",
+      "visual_grounding_profile_sha256": "51e785c899f7331e51c7583edc4558f779864236dfa1501e826ace994a71b903"
+    },
+    "provider": {
+      "data_policy_identity": "openai-images-generations-data-2026-08-24/1",
+      "endpoint": "https://api.openai.com/v1/images/generations",
+      "identity": "movie.storyboard-image.openai",
+      "implementation_identity": "vss.openai-gpt-image-2-opaque-cabx",
+      "implementation_sha256": "5c3699553693918d288e26bf1f0af4d82b9a5d2e40a3b6b34e8da43c1ad6e44c",
+      "manifest_sha256": "601cde9d8a393827a52793f20b338933c100c1ec5f0d2f6dd126ad2e02cd7a03",
+      "method": "POST",
+      "model_snapshot": "gpt-image-2-2026-04-21",
+      "output_policy_identity": "vss.opaque-provider-content-credentials.png/1",
+      "price_policy_identity": "openai-gpt-image-2-standard-2026-08-24/1",
+      "provider_request_sha256": "dd30b2dd121ed50d58fc7fa057cf8f0fc6ab75ae310e6c76e8030f4ff85d0f84",
+      "settings": {
+        "background": "opaque",
+        "moderation": "auto",
+        "n": 1,
+        "output_format": "png",
+        "quality": "medium",
+        "size": "1280x720",
+        "stream": false
+      },
+      "version": "1.1.0"
+    },
+    "purpose": "development_storyboard_review_candidate",
+    "request_sha256": "3ebdeced6133e558f26f4c6174580174ed7a070b31cd5749f5dd7800692691e6",
+    "schema_version": "1",
+    "scope": {
+      "frame_id": "frame-fb0d79ba59d7781b0bad3e7e",
+      "production_id": "vikramaditya-local",
+      "project_id": "vikramaditya-local",
+      "scene_id": "scene-91f5c8634519d8264e2dd5f8",
+      "tenant_id": "tenant-local",
+      "universe_id": "universe-local"
+    }
+  }
+}

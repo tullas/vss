@@ -9,6 +9,12 @@ from vss_movie_option_review import prepare_option_review, record_option_review_
 from vss_reasoning.gateway import ReasoningGateway
 
 
+# The executable local demo is a deterministic fixture path.  This timestamp
+# remains part of the sealed Context and its expiry window; it is fixed here
+# instead of being removed from the seal or taken from the wall clock.
+DEMO_PRODUCTION_OPTIONS_VALIDATION_TIME = "2026-08-17T00:00:00Z"
+
+
 @dataclass(frozen=True)
 class DemoPrepared:
     story: dict[str, Any]
@@ -66,6 +72,7 @@ def prepare_demo(story_data: dict[str, Any], *, correlation_id: str) -> DemoPrep
     }
     options_context = ContextAssembler().assemble_scene_production_options(
         options_request, breakdown, correlation_id=correlation_id, environment="development",
+        validation_time=DEMO_PRODUCTION_OPTIONS_VALIDATION_TIME,
     ).context.to_json_value()
     option_set = gateway.execute_scene_production_options(
         options_request, options_context, environment="development", correlation_id=correlation_id,
