@@ -53,6 +53,7 @@ from .validation import (
     validate_media_provenance_view,
     validate_rights_eligibility_reassessment_request,
     validate_rights_eligibility_reassessment_result,
+    validate_existing_media_revalidation_evidence,
 )
 
 __all__ = [
@@ -89,4 +90,5 @@ __all__ = [
     "validate_media_provenance_request", "validate_media_provenance_view",
     "validate_rights_eligibility_reassessment_request",
     "validate_rights_eligibility_reassessment_result",
+    "validate_existing_media_revalidation_evidence",
 ]

@@ -724,3 +724,43 @@ def validate_production_canon_binding(value, *, canon_snapshot, decisions,
     if value != expected:
         raise ResourceContractError("production canon authoritative binding mismatch")
     return ValidatedResourceArtifact._create(value)
+
+
+def validate_existing_media_revalidation_evidence(value, *, media=None, registry=None):
+    value = _validate(value, "existing_media_revalidation_evidence/1", registry)
+    review = value["human_grounding_review"]
+    target = value["current_authoritative_target"]
+    if any(review[key] != target[key] for key in ("scene_id", "shot_id", "frame_id", "option_id")):
+        raise ResourceContractError("revalidation current target mismatch")
+    expected_request = {**review, "review_request_sha256": "0" * 64}
+    if (review["status"] == "required_new_review"
+            and review["review_request_sha256"] != canonical_digest(expected_request)):
+        raise ResourceContractError("revalidation review request seal mismatch")
+    expected_id = "media-revalidation-" + canonical_digest(
+        {key: item for key, item in value.items() if key not in {"revalidation_id", "revalidation_sha256"}})[:32]
+    if value["revalidation_id"] != expected_id:
+        raise ResourceContractError("revalidation identity mismatch")
+    if value["revalidation_sha256"] != canonical_digest({**value, "revalidation_sha256": "0" * 64}):
+        raise ResourceContractError("revalidation seal mismatch")
+    if media is not None:
+        if type(media) is not bytes:
+            raise ResourceContractError("existing media must be bytes")
+        if hashlib.sha256(media).hexdigest() != value["media"]["media_sha256"]:
+            raise ResourceContractError("existing media digest mismatch")
+    if value["status"] == "awaiting_new_human_grounding_review" and (
+            review["status"] != "required_new_review" or review["disposition"] != "PENDING"
+            or review["review_sha256"] is not None or review["candidate_sha256"] is not None):
+        raise ResourceContractError("revalidation pending review state is invalid")
+    if value["status"] == "revalidated_review_only" and (
+            review["status"] != "complete" or review["disposition"] == "PENDING"
+            or review["review_sha256"] is None or review["candidate_sha256"] is None):
+        raise ResourceContractError("revalidation completed review state is invalid")
+    review_material = {key: review[key] for key in (
+        "review_sha256", "candidate_sha256", "scene_id", "shot_id", "frame_id",
+        "option_id", "disposition", "reviewer_accountability_id")}
+    if (review["status"] == "complete"
+            and review["review_sha256"] != canonical_digest({**review_material, "review_sha256": "0" * 64})):
+        raise ResourceContractError("revalidation human review seal mismatch")
+    if review["status"] == "complete" and review["candidate_sha256"] == value["historical_only"]["candidate_sha256"]:
+        raise ResourceContractError("revalidation human review is historical")
+    return ValidatedResourceArtifact._create(value)

@@ -1,0 +1,15 @@
+{
+  "id": "DEC-0002",
+  "status": "ACTIVE",
+  "scope": "Bounded existing-media revalidation against current movie lineage.",
+  "decision": "Existing review media may be revalidated only by exact byte digest, explicit historical-only lineage retention, deterministic current lineage reconstruction, and a new human grounding review. A separate current-shot binding is required after review.",
+  "rationale": "This preserves immutable historical evidence while preventing a historical candidate or review from being represented as produced from current lineage.",
+  "constraints": "The evidence remains inert and grants no canon, publication, production, Runtime, provider, deployment, regeneration, ranking, recommendation, or autonomous workflow authority. The historical shot-binding contract remains unchanged.",
+  "supersedes": null,
+  "superseded_by": null,
+  "references": [
+    "docs/adr/ADR-0029-existing-media-revalidation.md",
+    "docs/reviews/m11-0-existing-media-revalidation.json",
+    "docs/agent-coordination.md"
+  ]
+}

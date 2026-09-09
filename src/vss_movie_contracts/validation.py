@@ -30,6 +30,9 @@ def validate_story_fragment(value, registry=None):
         raise MovieContractError("story fragment text is empty")
     return artifact
 
+def validate_existing_media_current_shot_binding(value, registry=None):
+    return _validate(value, "existing_media_current_shot_binding/1", registry or MovieContractRegistry.built_in(), MAX_RESULT_BYTES)
+
 def validate_scene_task(value, registry=None):
     return _validate(value,"break_down_scenes/1",registry or MovieContractRegistry.built_in(),MAX_STORY_BYTES)
 

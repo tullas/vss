@@ -337,7 +337,7 @@ class CharacterContinuityContractTests(unittest.TestCase):
             admitted_result.value["payload"]["semantic_result_digest"],
             admitted_result.value["integrity"]["complete_result_sha256"],
         ),(
-            "011c1bcfcbd5442c8f6fe452b7858e043ac18d6c9a18ddc28c4f8dd2175da34b",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
+            "179520a167dceb2578690ad36772085a0533084a5cf0e5c9a8e56f862d402aa8",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
             "f58e461dfa72934457109b301c00faac53df3efe7f5e4c99c6e2356fa95a301b",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
             "23f6062d723c948e2f1f5c64717d0e0d7f7afa019e5ef60f3052099aefe1f6d9",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
             "0b182656c967875794fce9489b9e0f29095f219c39f5d1f79d642eba66745a6f",  # pragma: allowlist secret -- deterministic M5.1 fixture digest
