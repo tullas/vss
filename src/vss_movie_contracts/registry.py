@@ -45,6 +45,7 @@ FILES = MappingProxyType({
     "shot_cinematography_knowledge_admission/1":"shot-cinematography-knowledge-admission-v1.schema.json",
     "shot_cinematography_admitted_knowledge/1":"shot-cinematography-admitted-knowledge-v1.schema.json",
     "shot_cinematography_knowledge_lifecycle_event/1":"shot-cinematography-knowledge-lifecycle-event-v1.schema.json",
+    "existing_media_current_shot_binding/1":"existing-media-current-shot-binding-v1.schema.json",
 })
 COMPATIBILITY = MappingProxyType({
     "generate_scene_production_options/1": "scene_production_option_set/1",

@@ -6,6 +6,11 @@
       "id": "DEC-0001",
       "status": "ACTIVE",
       "record": "docs/architecture/decisions/DEC-0001-foundation-closure.json"
+    },
+    {
+      "id": "DEC-0002",
+      "status": "ACTIVE",
+      "record": "docs/architecture/decisions/DEC-0002-existing-media-revalidation.json"
     }
   ]
 }

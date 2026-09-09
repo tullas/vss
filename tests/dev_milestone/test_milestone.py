@@ -23,7 +23,9 @@ def mission_evidence() -> dict:
             "heartbeat": [{"milestone_id": "prior", "capability": "image", "advanced": True,
                            "evidence": "README.md"}],
             "active_decisions": [{"id": "DEC-0001", "disposition": "COMPLY",
-                                  "rationale": "The bounded milestone follows Foundation Closure."}]}
+                                  "rationale": "The bounded milestone follows Foundation Closure."},
+                                 {"id": "DEC-0002", "disposition": "COMPLY",
+                                  "rationale": "The bounded milestone preserves existing-media revalidation guardrails."}]}
 
 
 class MilestoneControllerTests(unittest.TestCase):
@@ -35,7 +37,7 @@ class MilestoneControllerTests(unittest.TestCase):
                      "schemas/dev-milestone-execution-packet-v1.schema.json",
                      "schemas/agent-harness-v2.schema.json", "schemas/agent-validation-evidence-v1.schema.json"):
             destination = self.root / path; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / path, destination)
-        for path in ("docs/architecture/decisions/index.json", "docs/architecture/decisions/DEC-0001-foundation-closure.json"):
+        for path in ("docs/architecture/decisions/index.json", "docs/architecture/decisions/DEC-0001-foundation-closure.json", "docs/architecture/decisions/DEC-0002-existing-media-revalidation.json"):
             destination = self.root / path; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / path, destination)
         (self.root / "scripts").mkdir(); shutil.copy2(ROOT / "scripts/vss-agent", self.root / "scripts/vss-agent")
         (self.root / "scripts/vss-agent").chmod(0o755)
@@ -100,7 +102,7 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(first["controller"]["next"], state["next"])
         self.assertEqual(first["controller"]["policy_sha256"], state["policy_sha256"])
         self.assertEqual(first["controller"]["harness"]["schema_version"], "2")
-        self.assertEqual(first["active_decisions"]["ids"], ["DEC-0001"])
+        self.assertEqual(first["active_decisions"]["ids"], ["DEC-0001", "DEC-0002"])
         self.assertRegex(first["active_decisions"]["index_sha256"], r"^[0-9a-f]{64}$")
         self.assertTrue(all(value is False for value in first["authority"].values()))
         self.assertLessEqual(len(json.dumps(first, sort_keys=True, separators=(",", ":")).encode()), 16_384)
@@ -617,7 +619,8 @@ class MilestoneControllerTests(unittest.TestCase):
         evidence["active_decisions"] = [{
             "id": "DEC-0001", "disposition": "CHALLENGE",
             "rationale": "New evidence supports a different Film #1 experiment.",
-        }]
+        }, {"id": "DEC-0002", "disposition": "COMPLY",
+            "rationale": "The revalidation guardrails remain applicable."}]
         state = self.controller.initialize("decision-challenge", self.base, 128, [], [],
                                            "Challenge an active decision.", evidence)
         self.assertEqual(state["mission_gate"]["required_reviews"], ["constitutional", "strategic"])
@@ -631,19 +634,19 @@ class MilestoneControllerTests(unittest.TestCase):
 
     def test_omitted_indexed_active_decision_fails_closed(self) -> None:
         index_path = self.root / "docs/architecture/decisions/index.json"
-        second_record = self.root / "docs/architecture/decisions/DEC-0002-test.json"
+        second_record = self.root / "docs/architecture/decisions/DEC-0003-test.json"
         second = json.loads((self.root / "docs/architecture/decisions/DEC-0001-foundation-closure.json").read_text())
-        second.update(id="DEC-0002", decision="A second active decision for omission testing.")
+        second.update(id="DEC-0003", decision="A third active decision for omission testing.")
         second_record.write_text(json.dumps(second), encoding="utf-8")
         index = json.loads(index_path.read_text())
-        index["decisions"].append({"id": "DEC-0002", "status": "ACTIVE",
-                                   "record": "docs/architecture/decisions/DEC-0002-test.json"})
+        index["decisions"].append({"id": "DEC-0003", "status": "ACTIVE",
+                                   "record": "docs/architecture/decisions/DEC-0003-test.json"})
         index_path.write_text(json.dumps(index), encoding="utf-8")
         with self.assertRaisesRegex(MilestoneFailure, "exactly cover active decisions"):
             self.controller.initialize("omitted-decision", self.base, 128, [], [],
                                        "Omitted decision.", mission_evidence())
         evidence = mission_evidence()
-        evidence["active_decisions"].append({"id": "DEC-0002", "disposition": "NOT_APPLICABLE",
+        evidence["active_decisions"].append({"id": "DEC-0003", "disposition": "NOT_APPLICABLE",
                                              "rationale": "The test decision does not govern this slice."})
         state = self.controller.initialize("covered-decisions", self.base, 128, [], [],
                                            "All decisions covered.", evidence)

@@ -1,5 +1,7 @@
 import copy
+import json
 import unittest
+from pathlib import Path
 
 from vss_resource_admission import create_production_artifact, create_universe_admission
 from tests.resource_test_support import admitted_pictorial_frame, pictorial_png
@@ -11,12 +13,14 @@ from vss_resource_contracts import (
     validate_reusable_asset_admission,
     validate_resource_resolution_request,
     validate_production_visual_grounding_profile,
+    validate_existing_media_revalidation_evidence,
 )
 from vss_movie_visual_grounding import create_production_visual_grounding_profile
 from vss_reasoning_contracts import canonical_digest
 
 
 CONTENT = pictorial_png()
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def artifact(**overrides):
@@ -34,16 +38,23 @@ def artifact(**overrides):
 
 
 class ResourceContractTests(unittest.TestCase):
+    def test_existing_media_revalidation_contract_is_registered_and_pending(self):
+        value = json.loads((ROOT / "docs/reviews/m11-0-existing-media-revalidation.json").read_text())
+        checked = validate_existing_media_revalidation_evidence(value)
+        self.assertEqual("awaiting_new_human_grounding_review", checked.value["status"])
+        self.assertEqual("existing_media_revalidation_evidence/1",
+                         ResourceContractRegistry.built_in().resolve("existing_media_revalidation_evidence/1").identity)
+
     def test_registry_is_exact_and_deterministic(self):
         first = ResourceContractRegistry.built_in()
         second = ResourceContractRegistry.built_in()
         self.assertEqual(first.digest, second.digest)
         self.assertEqual(
-            "308420c7fea6ce4ec9db93dd655679d04bfab6cf9aec5133ece4826acddc14a2",  # pragma: allowlist secret
+            "91b720a4ccc87ceb559f0843718ba1f8915db82148711c3140a1419991e00868",  # pragma: allowlist secret
             BUILT_IN_REGISTRY_SHA256,
         )
         self.assertEqual(BUILT_IN_REGISTRY_SHA256, first.digest)
-        self.assertEqual(29, len(first.registrations))
+        self.assertEqual(30, len(first.registrations))
         for invalid in ("reusable_asset/latest", "resource_resolution_request/latest",
                         "reusable_asset/*", "unknown/1"):
             with self.assertRaises(ResourceContractError):
