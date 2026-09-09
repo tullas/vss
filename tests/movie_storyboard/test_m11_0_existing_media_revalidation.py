@@ -14,7 +14,11 @@ from vss_reasoning_contracts import canonical_digest
 
 ROOT = Path(__file__).resolve().parents[2]
 STORY = json.loads((ROOT / "tests/fixtures/movie/vikramaditya-opening-story-fragment.json").read_text())
-MEDIA = (ROOT / ".local/movie/m10-0-controlled-review-frame/3ebdeced6133e558f26f4c6174580174ed7a070b31cd5749f5dd7800692691e6/image.png").read_bytes()
+DURABLE_REVIEW = json.loads((ROOT / "docs/reviews/m11-0-existing-media-revalidation.json").read_text())
+# The contract boundary accepts bytes and verifies their digest.  Keep this
+# test independent of host-local Runtime output; the retained production SHA
+# is asserted from the durable review artifact above.
+MEDIA = b"deterministic existing-media revalidation test bytes\n"
 SCENE, SHOT, FRAME, OPTION = "scene-91f5c8634519d8264e2dd5f8", "shot-024b0d6352149eabb74df543", "frame-fb0d79ba59d7781b0bad3e7e", "option-b5d2461f4ec95dc0377938ba"
 
 def lineage(result, story_digest):
@@ -42,6 +46,8 @@ class ExistingMediaRevalidationTests(unittest.TestCase):
         cls.pending = prepare_existing_media_revalidation(media=MEDIA, media_reference="local-review/candidate-1/image.png", historical_only=hist, current_target=target)
 
     def test_pending_artifact_verifies_bytes_and_requires_new_review(self):
+        self.assertEqual("2d23736bce6f76def26416841b81806262c0a172e29b6d994f140e4a39eb55aa",  # pragma: allowlist secret -- durable immutable media SHA
+                         DURABLE_REVIEW["media"]["media_sha256"])
         self.assertEqual(hashlib.sha256(MEDIA).hexdigest(), self.pending.to_json_value()["media"]["media_sha256"])
         with self.assertRaisesRegex(ResourceContractError, "digest mismatch"):
             validate_existing_media_revalidation_evidence(self.pending.to_json_value(), media=b"tampered")
