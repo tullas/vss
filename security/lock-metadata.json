@@ -9,7 +9,7 @@
     "requirements/locks/bootstrap-py311.lock.txt": "b5fe905842e10b8848747815c6346b5c4201bc7b6799d146d2a93ae5e6e6d299",
     "requirements/locks/bootstrap-py312.lock.txt": "a35d30fae49aa233f1285100fbf0009890f182b2e2e01fcc1fe53e369c6c943a",
     "requirements/locks/development.lock.txt": "dae609a3be6d5e391eed4fb06689ae2518379f37fae8fc72e3b4c4a80fad7634",
-    "requirements/locks/security-tools.lock.txt": "f1dbb56db268862fedc9e2f5d8f97c4b9c9b0d1df938f323c5cd2e4bc6077a75",
+    "requirements/locks/security-tools.lock.txt": "4512b7569ffdb07a2b6faa4349c0e34445df9b1be29cb009b4ad825439d83f30",
     "requirements/locks/runtime.lock.txt": "086f6c8339ba9d59282336559c763a9179309487e13725f5d18adb778a727ba4"
   },
   "policy_files": {
