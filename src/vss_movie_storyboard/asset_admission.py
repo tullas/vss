@@ -32,6 +32,7 @@ _CANDIDATE_KEYS = {
     "source_repository_lineage", "frame_grounding_sha256", "visual_grounding_profile",
     "provider", "sealed_review",
 }
+_CANDIDATE_VARIATION_KEYS = {"identity", "ordinal"}
 _SCOPE_KEYS = {"tenant_id", "universe_id", "production_id", "project_id", "scene_id", "frame_id"}
 _LINEAGE_KEYS = {
     "story_fragment", "scene_breakdown", "production_option_set", "review_packet",
@@ -130,7 +131,9 @@ def _expected_provider() -> dict[str, str]:
 
 
 def _valid_selected_candidate(candidate: Any) -> bool:
-    if not isinstance(candidate, dict) or set(candidate) != _CANDIDATE_KEYS:
+    if not isinstance(candidate, dict) or set(candidate) not in (
+        _CANDIDATE_KEYS, _CANDIDATE_KEYS | {"candidate_variation"},
+    ):
         return False
     scope = candidate.get("scope")
     lineage = candidate.get("source_repository_lineage")
@@ -142,6 +145,13 @@ def _valid_selected_candidate(candidate: Any) -> bool:
     if (set(scope) != _SCOPE_KEYS or set(lineage) != _LINEAGE_KEYS
             or set(profile) != _PROFILE_KEYS or set(provider) != _PROVIDER_KEYS
             or set(review) != _REVIEW_KEYS):
+        return False
+    variation = candidate.get("candidate_variation")
+    if variation is not None and (
+            not isinstance(variation, dict) or set(variation) != _CANDIDATE_VARIATION_KEYS
+            or not isinstance(variation["identity"], str)
+            or not re.fullmatch(r"^[a-z][a-z0-9._:-]{2,63}$", variation["identity"])
+            or variation["ordinal"] not in {1, 2}):
         return False
     return bool(
         isinstance(candidate["candidate_id"], str)

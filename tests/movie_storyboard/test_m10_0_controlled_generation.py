@@ -29,6 +29,7 @@ from vss_movie_storyboard import (
     register_grounded_storyboard_asset, lookup_grounded_storyboard_asset,
     bind_grounded_storyboard_asset_to_shot,
 )
+from vss_movie_storyboard.asset_admission import _valid_selected_candidate
 from vss_movie_visual_grounding import (
     create_grounded_movie_route,
     create_production_visual_grounding_profile,
@@ -1265,6 +1266,16 @@ class M100ControlledGenerationTests(unittest.TestCase):
             "m10-grounded-runner-incomplete")
         self.assertEqual(code, ExitCode.INVALID_INPUT, result)
         self.assertEqual(self.calls, [])
+
+    def test_m10_4_accepts_bounded_candidate_variation_from_comparison(self):
+        comparison = json.loads(
+            (ROOT / "docs/reviews/m11-0-grounded-comparison.json").read_text(encoding="utf-8")
+        )
+        candidate = comparison["candidates"][0]
+        self.assertTrue(_valid_selected_candidate(candidate))
+        invalid = copy.deepcopy(candidate)
+        invalid["candidate_variation"]["ordinal"] = 3
+        self.assertFalse(_valid_selected_candidate(invalid))
 
 
 if __name__ == "__main__":
