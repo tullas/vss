@@ -105,6 +105,7 @@
     {"pattern": "tests/architecture/**", "domain": "architecture", "minimum_level": "L1", "risk": "isolated", "profiles": ["architecture-tests"]},
     {"pattern": "tests/config_engine/**", "domain": "configuration", "minimum_level": "L1", "risk": "isolated", "profiles": ["configuration-tests"]},
     {"pattern": "tests/dev_milestone/**", "domain": "dev-milestone", "minimum_level": "L1", "risk": "isolated", "profiles": ["dev-milestone-tests"]},
+    {"pattern": "tests/fixtures/movie/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-storyboard-tests"]},
     {"pattern": "tests/movie_contracts/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-contract-tests"]},
     {"pattern": "tests/movie_scene_breakdown/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-scene-breakdown-tests"]},
     {"pattern": "tests/movie_shot_plan/**", "domain": "movie", "minimum_level": "L1", "risk": "isolated", "profiles": ["movie-shot-plan-tests"]},

@@ -1,0 +1,74 @@
+{
+  "schema_version": "1",
+  "contract_identity": "production_visual_grounding_profile",
+  "contract_version": "1",
+  "profile_id": "visual-grounding-m11-location-live-action",
+  "revision": 1,
+  "scope": {
+    "tenant_id": "tenant-local",
+    "universe_id": "universe-local",
+    "production_id": "vikramaditya-local"
+  },
+  "applicability": {
+    "scene_ids": ["scene-91f5c8634519d8264e2dd5f8"],
+    "character_ids": ["vetala", "vikramaditya"]
+  },
+  "mode": "required",
+  "groups": [{
+    "ordinal": 1,
+    "group_id": "m11.location-live-action.initial",
+    "positive_constraints": [
+      "cinematic live-action historical Indian setting; grounded humans and natural proportions",
+      "culturally credible Indian architecture, clothing, materials and practical objects",
+      "physically plausible natural light/environment; cinematic depth, texture and atmospheric realism",
+      "restrained royal-era language; no fantasy spectacle",
+      "preserve authoritative characters, action, spatial relationships and narrative intent",
+      "high-quality basis for later image-to-video",
+      "mature banyan anchor when shot-compatible",
+      "Vetal uncanny, ancient, lean and intelligent; not generic horror"
+    ],
+    "negative_constraints": [
+      "no modern objects, clothing, architecture, signage, vehicles, electronics or infrastructure",
+      "no European-medieval, Middle-Eastern-fantasy or generic-fantasy substitution",
+      "no cartoon, anime, illustration, painterly, game-render or plastic-CGI aesthetic",
+      "no gratuitous gore, decay, wounds, sexualization or monstrous anatomy",
+      "no zombie, vampire, generic demon or Western-horror Vetal",
+      "no glowing eyes, magic or overt supernatural spectacle unless source-established",
+      "no text, captions, logos or watermarks",
+      "no malformed anatomy, duplicate people or unnecessary crowds",
+      "no invented major characters, props, actions or events absent from authoritative source"
+    ],
+    "explicit_unknowns": [
+      "exact dynasty-specific history",
+      "exact facial identity",
+      "exact costume colors, ornaments and motifs",
+      "exact distant architecture",
+      "minor vegetation, weathering, textiles and incidental set dressing",
+      "subtle lighting, haze and color treatment"
+    ],
+    "limitations": [
+      "human-owned initial constraints; VSS assigns no domain meaning",
+      "not canon, prompt edit, provider authority or Runtime authority"
+    ],
+    "source_reference_digests": ["7c710d8bbf18fb8b4c1b1157cb94d266b56a777a70360b6e6ae06061b49c05de"]
+  }],
+  "uncertainty": [
+    "exact dynasty-specific history",
+    "exact facial identity",
+    "exact costume colors, ornaments and motifs",
+    "exact distant architecture",
+    "minor vegetation, weathering, textiles and incidental set dressing",
+    "subtle lighting, haze and color treatment"
+  ],
+  "conflicts": [],
+  "limitations": [
+    "human_owned_initial_grounding_profile",
+    "opaque_constraint_semantics",
+    "not_domain_truth",
+    "not_provider_or_runtime_authority"
+  ],
+  "evidence_references": ["m11-0-human-grounding-input"],
+  "lifecycle": "active",
+  "reviewer_accountability_id": "m11-human-grounding-owner",
+  "profile_sha256": "51e785c899f7331e51c7583edc4558f779864236dfa1501e826ace994a71b903"
+}

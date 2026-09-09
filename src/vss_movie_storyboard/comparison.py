@@ -130,7 +130,7 @@ def _candidate_evidence(generation: Any, candidate: Any, review: Any) -> dict[st
             or any(value is not False for value in review_value["authority"].values())):
         raise ResourceContractError("comparison candidate evidence binding mismatch")
 
-    return {
+    evidence = {
         "candidate_id": candidate_value["candidate_id"],
         "candidate_sha256": candidate_value["candidate_sha256"],
         "request_sha256": request["request_sha256"],
@@ -150,6 +150,9 @@ def _candidate_evidence(generation: Any, candidate: Any, review: Any) -> dict[st
             "visual_grounding_profile_sha256", "disposition",
         )},
     }
+    if "candidate_variation" in candidate_value:
+        evidence["candidate_variation"] = candidate_value["candidate_variation"]
+    return evidence
 
 
 def create_grounded_storyboard_comparison(

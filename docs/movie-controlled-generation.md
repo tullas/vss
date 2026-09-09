@@ -46,6 +46,24 @@ The approval and reservation ceiling is USD 0.10 under the pinned
 not provider-side atomic billing enforcement.
 
 Runtime creates `.local/movie/m10-0-controlled-review-frame/<request-digest>/`
+
+For the fixed M11 Candidate 2 host handoff, run from the repository root:
+
+`PYTHONPATH=src python3 scripts/m11-0-candidate-2-host-execute.py`
+
+For the fixed M11 Candidate 1 host handoff, run from the repository root:
+
+`PYTHONPATH=src python3 scripts/m11-0-candidate-1-host-execute.py`
+
+The Candidate 1 wrapper first reruns real-time host preflight with zero provider
+calls, then creates a fresh request-bound approval immediately before Runtime
+execution. It accepts no request path and consumes only
+`docs/reviews/m11-0-candidate-1-sealed-admission.json`.
+
+The Candidate 2 wrapper accepts no request path. It loads the sealed admission at
+`docs/reviews/m11-0-candidate-2-sealed-admission.json`, creates a fresh
+request-bound approval immediately before Runtime execution, and stops after
+the generated media is quarantined for human grounding review.
 with a create-once `attempt.json`. After strict untrusted-response and PNG
 validation, it stages `image.png`, `review.json`, and
 `generated-review-candidate.json`. Runtime audit is written before publication,

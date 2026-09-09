@@ -24,6 +24,16 @@ the exact human-authored revision and its predecessor evidence. This adds no
 profile, prompt, approval, reservation, Runtime, provider, product, canon, or
 rights authority.
 
+M10 comparison candidates support bounded derivation of comparison ordinals `1`
+and `2` from a v3 grounded admission. Each derived request seals a human-scoped
+comparison variation identity and ordinal while retaining the exact profile,
+canon, option, scene, shot, frame, overlays, and narrative lineage. The identity
+is a non-visual provider projection marker, not provider randomness or arbitrary
+prompt authority. The comparison set remains capped at two candidates; each
+derived request has its own request seal, approval, reservation, create-once
+output root, and candidate provenance. Existing `REGENERATE`/`REJECT`
+profile-revision semantics and `USE` meaning are unchanged.
+
 The grounded route is additive and versioned:
 
 ```text

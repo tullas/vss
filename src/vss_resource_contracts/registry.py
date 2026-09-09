@@ -47,7 +47,7 @@ FILES = MappingProxyType({
     "generated_review_candidate/2": "generated-review-candidate-v2.schema.json",
     "generated_review_candidate_review/1": "generated-review-candidate-review-v1.schema.json",
 })
-BUILT_IN_REGISTRY_SHA256 = "b0cbb5e2be8f55df26a8f5f61219256ffad75d03c3b9776b666d57f5da664414"  # pragma: allowlist secret
+BUILT_IN_REGISTRY_SHA256 = "308420c7fea6ce4ec9db93dd655679d04bfab6cf9aec5133ece4826acddc14a2"  # pragma: allowlist secret
 _BUILT_IN = {}
 _LOCK = Lock()
 

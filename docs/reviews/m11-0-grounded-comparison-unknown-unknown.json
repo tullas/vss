@@ -1,0 +1,8 @@
+{
+  "review": {
+    "mechanism": "unknown_unknown",
+    "disposition": "ACCEPT",
+    "owner": "architecture-review",
+    "evidence": "docs/reviews/m11-0-grounded-comparison-lifecycle-review.md"
+  }
+}

@@ -325,6 +325,8 @@ class ControlledGenerationArtifactPublisher:
                             "no_retention_guarantee"],
             "candidate_sha256": "0" * 64,
         }
+        if "candidate_variation" in self.request:
+            candidate["candidate_variation"] = dict(self.request["candidate_variation"])
         candidate["candidate_id"] = "generated-review-" + canonical_digest({
             key: item for key, item in candidate.items() if key not in {"candidate_id", "candidate_sha256"}
         })[:32]
