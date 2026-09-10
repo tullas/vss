@@ -13,6 +13,8 @@ from typing import Any, Iterator
 
 from jsonschema import Draft202012Validator
 
+from .improvement_backlog import ImprovementBacklog, ImprovementBacklogFailure
+
 
 PROTOCOL = "vss.dev-milestone"
 PACKET_PROTOCOL = "vss.dev-milestone-execution-packet"
@@ -1032,6 +1034,40 @@ class MilestoneController:
         return {"schema_version": "1", "protocol": "vss.dev-analysis", "milestone_id": state["milestone_id"],
                 "counts": counts, "findings": findings,
                 "unknown_opportunities": [], "authority": dict(AUTHORITY)}
+
+    def backlog_admit(self, milestone_id: str, candidate: dict[str, Any]) -> dict[str, Any]:
+        """Materialize one existing checkpoint observation as an advisory candidate."""
+        state = self.load(milestone_id)
+        observation_id = candidate.get("source_observation_id")
+        if type(observation_id) is not str:
+            raise MilestoneFailure("candidate source observation is required")
+        observation = None
+        for event in self._read_events(state["milestone_id"]):
+            value = event["data"].get("observation")
+            if value and value.get("id") == observation_id:
+                observation = value
+        if observation is None:
+            raise MilestoneFailure("candidate source observation is not in milestone history")
+        finding = candidate.get("finding")
+        if finding != observation["finding"]:
+            raise MilestoneFailure("candidate finding does not match source observation")
+        payload = {key: value for key, value in candidate.items()
+                   if key not in {"source_observation_id", "finding"}}
+        payload["source"] = {"milestone_id": state["milestone_id"],
+                              "observation_id": observation_id, "finding": finding}
+        payload["evidence"] = [{"reference": f"milestone:{state['milestone_id']}:observation:{observation_id}",
+                                 "digest": observation["evidence_sha256"]}]
+        try:
+            return ImprovementBacklog(self.root).admit(payload)
+        except ImprovementBacklogFailure as exc:
+            raise MilestoneFailure(str(exc)) from exc
+
+    def backlog_report(self, milestone_id: str | None = None) -> dict[str, Any]:
+        state = self.load(milestone_id)
+        try:
+            return ImprovementBacklog(self.root).due(state["milestone_id"])
+        except ImprovementBacklogFailure as exc:
+            raise MilestoneFailure(str(exc)) from exc
 
 
 def _read_external_json(raw: bytes) -> dict[str, Any]:

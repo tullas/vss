@@ -118,6 +118,11 @@ def _parser() -> argparse.ArgumentParser:
     ci_source.add_argument("--refresh", action="store_true")
     milestone_analyze = milestone_actions.add_parser("analyze")
     milestone_analyze.add_argument("--milestone-id")
+    milestone_backlog_admit = milestone_actions.add_parser("backlog-admit")
+    milestone_backlog_admit.add_argument("--milestone-id", required=True)
+    milestone_backlog_admit.add_argument("--input", type=Path, required=True)
+    milestone_backlog_report = milestone_actions.add_parser("backlog-report")
+    milestone_backlog_report.add_argument("--milestone-id")
     milestone_pr = milestone_actions.add_parser("pr")
     milestone_pr.add_argument("--milestone-id")
     reasoning = subparsers.add_parser("reasoning")
@@ -468,6 +473,10 @@ def main(argv: list[str] | None = None) -> int:
                         raise MilestoneFailure("CI observation is malformed")
             elif args.milestone_action == "analyze":
                 value = controller.analyze(args.milestone_id)
+            elif args.milestone_action == "backlog-admit":
+                value = controller.backlog_admit(args.milestone_id, _read_json(args.input, 8192))
+            elif args.milestone_action == "backlog-report":
+                value = controller.backlog_report(args.milestone_id)
             else:
                 state = controller.load(args.milestone_id)
                 value = {"milestone_id": state["milestone_id"], "status": state["status"], "pr_action": "status_only", "next": state["next"], "authority": state["authority"]}

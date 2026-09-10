@@ -206,6 +206,29 @@ are not authoritative. The packet is advisory coordination data and all Runtime,
 production, publication, workflow, security-exception, product, merge, and push authority fields
 remain constant false.
 
+### Durable improvement backlog
+
+`docs/engineering/improvement-backlog-v1.json` is the small Git-durable backlog for deferred
+engineering findings. Its strict candidate contract is
+`schemas/dev-improvement-candidate-v1.schema.json`. A candidate binds a stable deterministic ID
+to a milestone observation/finding, evidence references and digests, expected benefit dimensions,
+risk, architectural fit, disposition, trigger, priority, required review, and status. Candidates
+are advisory records only: `queued`, `implement-now`, and `prerequisite` never authorize
+implementation, Runtime, providers, production, publication, workflow activation, merge, or push.
+
+DEV-WF observations can be materialized only when the supplied finding exactly matches an
+observation already in that milestone's append-only history:
+
+```text
+vss dev milestone backlog-admit --milestone-id <id> --input candidate-spec.json
+vss dev milestone backlog-report --milestone-id <id>
+```
+
+The report selects queued candidates whose explicit trigger is a milestone boundary, ordered by
+priority and stable ID. It is a review list, not a scheduler or implementation queue. Admission
+does not change milestone routing or status. This slice does not implement deferred improvements,
+add autonomous scheduling, or create a generic governor.
+
 ### Mission checkpoint and stop/challenge contract
 
 The pre-implementation gate uses the existing controller's initialization,

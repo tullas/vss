@@ -10,7 +10,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from vss_dev import MilestoneController, MilestoneFailure
+from vss_dev import ImprovementBacklog, ImprovementBacklogFailure, MilestoneController, MilestoneFailure
 from vss_dev.milestone import BOOTSTRAP_REPAIR_PATHS
 
 
@@ -36,7 +36,8 @@ class MilestoneControllerTests(unittest.TestCase):
         for path in ("config/dev-milestone-policy-v1.json", "schemas/dev-milestone-policy-v1.schema.json",
                      "schemas/dev-milestone-record-v1.schema.json", "config/agent-harness-v2.json",
                      "schemas/dev-milestone-execution-packet-v1.schema.json",
-                     "schemas/agent-harness-v2.schema.json", "schemas/agent-validation-evidence-v1.schema.json"):
+                     "schemas/agent-harness-v2.schema.json", "schemas/agent-validation-evidence-v1.schema.json",
+                     "schemas/dev-improvement-candidate-v1.schema.json", "docs/engineering/improvement-backlog-v1.json"):
             destination = self.root / path; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / path, destination)
         for path in ("docs/architecture/decisions/index.json", "docs/architecture/decisions/DEC-0001-foundation-closure.json", "docs/architecture/decisions/DEC-0002-existing-media-revalidation.json"):
             destination = self.root / path; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / path, destination)
@@ -272,6 +273,50 @@ class MilestoneControllerTests(unittest.TestCase):
                          {"action": "request_merge", "human_boundary": True})
         for packet in (security_packet, architecture_packet, review_packet):
             self.assertTrue(all(value is False for value in packet["authority"].values()))
+
+    def test_durable_backlog_is_deterministic_advisory_and_due_report_only(self) -> None:
+        backlog = ImprovementBacklog(self.root)
+        candidate = {
+            "source": {"milestone_id": "dev-wf-2-engineering-observability",
+                       "observation_id": "obs-seeded", "finding": "known finding"},
+            "category": "validation", "problem_statement": "A bounded test problem.",
+            "evidence": [{"reference": "docs/agent-coordination.md", "digest": "a" * 64}],
+            "expected_benefit_dimensions": ["validation-speed"], "risk": "low",
+            "architectural_fit": "extend-existing", "disposition": "deferred",
+            "trigger": {"kind": "milestone-boundary", "condition": "At a later boundary."},
+            "priority": 2, "authority_required": ["human-review"], "status": "queued",
+        }
+        first = backlog.admit(candidate)
+        second = backlog.admit(candidate)
+        self.assertEqual(first, second)
+        self.assertFalse(first["implementation_authorized"])
+        report = backlog.due("dev-wf-1")
+        self.assertIn(first["candidate_id"], report["selected_for_review"])
+        self.assertFalse(report["implementation_authorized"])
+        tampered = json.loads((self.root / "docs/engineering/improvement-backlog-v1.json").read_text())
+        tampered["authority"]["merge"] = True
+        (self.root / "docs/engineering/improvement-backlog-v1.json").write_text(json.dumps(tampered), encoding="utf-8")
+        with self.assertRaises(ImprovementBacklogFailure):
+            backlog.load()
+
+    def test_checkpoint_observation_materializes_only_matching_advisory_candidate(self) -> None:
+        state = self.initialize()
+        observation = {"id": "obs-context-loss", "kind": "friction", "finding": "human-relay",
+                       "metric": "count", "value": 2, "unit": "count", "source": "milestone-controller",
+                       "recommendation": "inspect-environment", "evidence_sha256": "b" * 64}
+        state = self.controller.checkpoint("dev-wf-1", "checkpointed", "Observed relay friction.",
+                                           {"observation": observation}, state["generation"])
+        spec = {"source_observation_id": "obs-context-loss", "finding": "human-relay",
+                "category": "human-friction", "problem_statement": "Relay work is repeated.",
+                "expected_benefit_dimensions": ["human-friction"], "risk": "low",
+                "architectural_fit": "extend-existing", "disposition": "deferred",
+                "trigger": {"kind": "milestone-boundary", "condition": "At the next boundary."},
+                "priority": 2, "authority_required": ["human-review"], "status": "queued"}
+        admitted = self.controller.backlog_admit("dev-wf-1", spec)
+        self.assertEqual(admitted["source"]["milestone_id"], "dev-wf-1")
+        self.assertFalse(admitted["implementation_authorized"])
+        with self.assertRaisesRegex(MilestoneFailure, "does not match"):
+            self.controller.backlog_admit("dev-wf-1", {**spec, "finding": "slow-validation"})
 
     def test_external_effect_impact_preserves_harness_human_gate_without_execution_authority(self) -> None:
         self.initialize()
