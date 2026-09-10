@@ -16,3 +16,7 @@ LOCAL_PICTORIAL_FRAME_IMPLEMENTATION_IDENTITY = "vss.local-deterministic-pictori
 CONTROLLED_FRAME_PROVIDER_TYPE = "controlled_storyboard_image_generation"
 CONTROLLED_FRAME_PROVIDER_IDENTITY = "movie.storyboard-image.openai"
 CONTROLLED_FRAME_IMPLEMENTATION_IDENTITY = "vss.openai-gpt-image-2-opaque-cabx"
+
+CONTROLLED_VIDEO_PROVIDER_TYPE = "controlled_image_to_video_generation"
+CONTROLLED_VIDEO_PROVIDER_IDENTITY = "movie.image-to-video.vertex-veo"
+CONTROLLED_VIDEO_IMPLEMENTATION_IDENTITY = "vss.vertex-veo-3-1-image-to-video"

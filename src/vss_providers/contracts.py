@@ -78,3 +78,27 @@ class ControlledFrameResult:
 
 class ControlledFrameProvider(Protocol):
     def generate(self, request: ControlledFrameRequest, *, credential: str, transport: Any = None) -> ControlledFrameResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ImageToVideoRequest:
+    prompt: str
+    image: bytes
+    request_sha256: str
+    provider_request_sha256: str
+    duration_seconds: int
+    resolution: str
+    generate_audio: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ImageToVideoResult:
+    media: GeneratedMedia
+    latency_ms: int
+    response_sha256: str
+    provider_request_id: str
+    estimated_cost_usd: str
+
+
+class ImageToVideoProvider(Protocol):
+    def generate(self, request: ImageToVideoRequest, *, credential: str, transport: Any = None) -> ImageToVideoResult: ...

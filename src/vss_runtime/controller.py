@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
+import os
 import subprocess
 import time
 import uuid
@@ -22,6 +23,7 @@ from vss_capabilities import (
 from vss_commands.exit_codes import ExitCode
 from vss_providers import (
     CONTROLLED_FRAME_PROVIDER_IDENTITY,
+    CONTROLLED_VIDEO_PROVIDER_IDENTITY,
     LOCAL_CLOCK_IDENTITY,
     LOCAL_PICTORIAL_FRAME_IDENTITY,
     LOCAL_STORYBOARD_RENDER_IDENTITY,
@@ -71,6 +73,8 @@ class RuntimeController:
         controlled_provider_secret_reader=None,
         controlled_approver_secret_reader=None,
         controlled_now=None,
+        moving_shot_provider_transport=None,
+        moving_shot_secret_reader=None,
     ) -> None:
         self.root = (root or repository_root()).resolve()
         builtins_root = self.root / "capabilities"
@@ -78,7 +82,7 @@ class RuntimeController:
         self.loader = CapabilityLoader(builtins_root)
         self.policy = policy or RuntimePolicy(
             allowed_builtin_permissions=("provider_access",),
-            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, CONTROLLED_FRAME_PROVIDER_IDENTITY),
+            allowed_provider_identities=(LOCAL_CLOCK_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, CONTROLLED_FRAME_PROVIDER_IDENTITY, CONTROLLED_VIDEO_PROVIDER_IDENTITY),
             allowed_capability_permissions={
                 "bootstrap.check": ("filesystem_read", "subprocess"),
                 "movie.storyboard-render": ("provider_access", "filesystem_write"),
@@ -86,6 +90,7 @@ class RuntimeController:
                 "movie.m8-3-real-provider-smoke-2": ("filesystem_write", "network", "secrets"),
                 "movie.m8-3-real-provider-smoke-3": ("filesystem_write", "network", "secrets"),
                 "movie.controlled-review-frame": ("filesystem_write", "network", "provider_access", "secrets"),
+                "movie.moving-shot": ("filesystem_write", "network", "provider_access", "secrets"),
             },
         )
         self.provider_registry = provider_registry or ProviderRegistry(
@@ -101,6 +106,8 @@ class RuntimeController:
         self.controlled_provider_secret_reader = controlled_provider_secret_reader
         self.controlled_approver_secret_reader = controlled_approver_secret_reader
         self.controlled_now = controlled_now
+        self.moving_shot_provider_transport = moving_shot_provider_transport
+        self.moving_shot_secret_reader = moving_shot_secret_reader
 
     def _source_commit(self) -> str | None:
         try:
@@ -212,6 +219,12 @@ class RuntimeController:
                         or input_data.get("mode") != ("preflight" if dry_run else "generate")):
                     raise InvalidCapabilityInput("controlled generation requires authoritative admission")
                 self.policy.authorize_controlled_media()
+            elif command == "movie.moving-shot-generate":
+                from vss_movie_moving_shot import MovingShotAdmission
+                if (environment != "development" or type(admitted_request) is not MovingShotAdmission
+                        or input_data.get("mode") != ("preflight" if dry_run else "generate")):
+                    raise InvalidCapabilityInput("moving-shot generation requires authoritative admission")
+                self.policy.authorize_controlled_media()
             elif admitted_request is not None:
                 raise InvalidCapabilityInput("admitted request is not valid for this capability")
             provider_access = ProviderAccess()
@@ -225,12 +238,17 @@ class RuntimeController:
                 elif registration.metadata.provider_type == "storyboard_image_generation":
                     provider_access = ProviderAccess(pictorial=self.provider_registry.initialize(registration))
                 elif registration.metadata.provider_type == "controlled_storyboard_image_generation":
-                    import os
                     controlled_registration = registration
                     provider_access = ProviderAccess(
                         controlled=self.provider_registry.initialize(registration),
                         controlled_secret_reader=self.controlled_provider_secret_reader or os.environ.get,
                         controlled_transport=self.controlled_provider_transport,
+                    )
+                elif registration.metadata.provider_type == "controlled_image_to_video_generation":
+                    provider_access = ProviderAccess(
+                        video=self.provider_registry.initialize(registration),
+                        video_secret_reader=self.moving_shot_secret_reader or os.environ.get,
+                        video_transport=self.moving_shot_provider_transport,
                     )
             if capability.manifest.identity == "movie.storyboard-render" and "filesystem_write" in authorized:
                 artifact_publisher = StoryboardArtifactPublisher(self.root)
@@ -254,8 +272,6 @@ class RuntimeController:
                     SmokeProviderRequest,
                 )
                 from vss_movie_creative_smoke.provider import _https_post
-                import os
-
                 provider_audit.append({
                     "type": "experimental_image_generation",
                     "identity": "openai",
@@ -302,7 +318,6 @@ class RuntimeController:
                     verify_approval,
                 )
                 from vss_reasoning_contracts import canonical_digest
-                import os
                 request_capability = admitted_request.request["capability"]
                 request_provider = admitted_request.request["provider"]
                 handler_filename = capability.manifest.entry_point.split(":", 1)[0]
@@ -347,6 +362,26 @@ class RuntimeController:
                     except Exception as exc:
                         raise PermissionDenied("controlled media approval denied") from exc
                     reservation_preflight_spec = preflight_spec
+            if capability.manifest.identity == "movie.moving-shot":
+                if set(authorized) != {"filesystem_write", "network", "provider_access", "secrets"}:
+                    raise PermissionDenied("moving-shot requires exact Runtime permissions")
+                from vss_movie_moving_shot import MAXIMUM_COST_USD, SECRET_NAME
+                project = os.environ.get("VSS_VERTEX_AI_PROJECT_ID", "")
+                location = os.environ.get("VSS_VERTEX_AI_LOCATION", "us-central1")
+                endpoint = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/veo-3.1-generate-001:predictLongRunning"
+                if not project:
+                    raise RuntimeInternalFailure("Vertex project configuration is unavailable")
+                preflight_spec = ExternalExecutionPreflightSpec(
+                    endpoint=endpoint, credential_environment_variable=SECRET_NAME,
+                    provider_request_digest=admitted_request.request_sha256,
+                    authoritative_provider_request_digest=admitted_request.request_sha256,
+                    maximum_provider_attempts=1, maximum_estimated_cost_usd=MAXIMUM_COST_USD,
+                    authorized_cost_ceiling_usd=MAXIMUM_COST_USD,
+                )
+                if dry_run:
+                    self.external_execution_preflight.run(preflight_spec)
+                else:
+                    reservation_preflight_spec = preflight_spec
             if capability.manifest.sdk_api_version is not None:
                 try:
                     validate_input(input_data, command_record["input_schema"])
@@ -361,7 +396,9 @@ class RuntimeController:
                     authorized_permissions=authorized,
                     # M2.3 exposes no configuration keys until an explicit safe
                     # configuration contract is admitted for a capability.
-                    safe_configuration=freeze_configuration({}),
+                    safe_configuration=freeze_configuration({
+                        "artifact_root": str(self.root / ".local/movie/m11-0-moving-shot" / admitted_request.request_sha256),
+                    } if capability.manifest.identity == "movie.moving-shot" else {}),
                     providers=provider_access,
                     host_inspection=(
                         self.host_inspector

@@ -1,0 +1,48 @@
+schema_version: "1"
+namespace: movie
+name: moving-shot
+version: 1.0.0
+description: One governed Vertex Veo image-to-video review attempt
+runtime_api_version: "1"
+sdk_api_version: "1"
+required_providers:
+  - type: controlled_image_to_video_generation
+    identity: movie.image-to-video.vertex-veo
+    api_version: "1"
+entry_point: handler.py:execute
+commands:
+  - name: movie.moving-shot-generate
+    supports_dry_run: true
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [admission_id, mode]
+      properties:
+        admission_id: {type: string, pattern: "^[0-9a-f]{64}$"}
+        mode: {enum: [preflight, generate]}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [status, request_sha256, provider_call_count, attempt_reserved, artifact_root, video, evidence, authority]
+      properties:
+        status: {enum: [ready_for_paid_attempt, generated_quarantined]}
+        request_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
+        provider_call_count: {type: integer, minimum: 0, maximum: 1}
+        attempt_reserved: {type: boolean}
+        artifact_root: {type: [string, "null"], maxLength: 512}
+        video: {type: [string, "null"], maxLength: 512}
+        evidence: {type: [string, "null"], maxLength: 512}
+        authority:
+          type: object
+          additionalProperties: false
+          required: [production, publication, retry, fallback, workflow_activation]
+          properties:
+            production: {const: false}
+            publication: {const: false}
+            retry: {const: false}
+            fallback: {const: false}
+            workflow_activation: {const: false}
+permissions: [provider_access, filesystem_write, network, secrets]
+compatibility:
+  python: ">=3.11"
+lifecycle_status: active
