@@ -126,22 +126,27 @@ def validate_vertex_readiness_evidence(path: Path, *, project_id: str,
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("Vertex readiness evidence is unavailable or invalid") from exc
     if (not isinstance(evidence, dict)
-            or set(evidence) != {"api_enabled", "project_id", "project_number", "service_agent"}
+            or set(evidence) != {"api_enabled", "project_id", "project_number", "iam_policy", "audit_provisioning"}
             or evidence["api_enabled"] is not True
             or evidence["project_id"] != project_id
             or evidence["project_number"] != project_number):
         raise ValueError("Vertex readiness evidence binding is invalid")
-    agent = evidence["service_agent"]
+    policy = evidence["iam_policy"]
     expected_email = f"service-{project_number}@gcp-sa-aiplatform.iam.gserviceaccount.com"
-    if (not isinstance(agent, dict)
-            or set(agent) != {"email", "exists", "project_number", "roles"}
-            or agent["email"] != expected_email
-            or agent["exists"] is not True
-            or agent["project_number"] != project_number
-            or (not isinstance(agent["roles"], list) or not 1 <= len(agent["roles"])
-                or len(agent["roles"]) > 16 or agent["roles"] != sorted(set(agent["roles"]))
-                or any(not isinstance(role, str) or not re.fullmatch(r"roles/[a-zA-Z0-9.]{1,128}", role)
-                       for role in agent["roles"])
-                or VERTEX_SERVICE_AGENT_ROLE not in agent["roles"])):
+    if (not isinstance(policy, dict) or set(policy) != {"principal", "role"}
+            or policy["principal"] != expected_email
+            or policy["role"] != VERTEX_SERVICE_AGENT_ROLE):
         raise ValueError("Vertex service-agent readiness is unconfirmed")
+    audit = evidence["audit_provisioning"]
+    if (not isinstance(audit, dict)
+            or set(audit) != {"log", "service", "method", "actor", "delta", "principal", "role", "timestamp"}
+            or audit["log"] != "cloudaudit.googleapis.com/activity"
+            or audit["service"] != "cloudresourcemanager.googleapis.com"
+            or audit["method"] != "SetIamPolicy"
+            or audit["actor"] != "service-agent-manager@system.gserviceaccount.com"
+            or audit["delta"] != "ADD"
+            or audit["principal"] != expected_email
+            or audit["role"] != VERTEX_SERVICE_AGENT_ROLE
+            or not re.fullmatch(r"2026-09-10T21:12:37\.762713Z", audit["timestamp"])):
+        raise ValueError("Vertex service-agent provisioning evidence is unconfirmed")
     return hashlib.sha256(raw).hexdigest()

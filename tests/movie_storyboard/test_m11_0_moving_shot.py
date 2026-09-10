@@ -135,16 +135,25 @@ class MovingShotTests(unittest.TestCase):
             path.write_text(json.dumps({
                 "api_enabled": True, "project_id": "vss-film-poc",
                 "project_number": "1008607911742",
-                "service_agent": {
-                    "email": "service-1008607911742@gcp-sa-aiplatform.iam.gserviceaccount.com",
-                    "exists": True, "project_number": "1008607911742",
-                    "roles": ["roles/aiplatform.serviceAgent"],
+                "iam_policy": {
+                    "principal": "service-1008607911742@gcp-sa-aiplatform.iam.gserviceaccount.com",
+                    "role": "roles/aiplatform.serviceAgent",
+                },
+                "audit_provisioning": {
+                    "log": "cloudaudit.googleapis.com/activity",
+                    "service": "cloudresourcemanager.googleapis.com",
+                    "method": "SetIamPolicy",
+                    "actor": "service-agent-manager@system.gserviceaccount.com",
+                    "delta": "ADD",
+                    "principal": "service-1008607911742@gcp-sa-aiplatform.iam.gserviceaccount.com",
+                    "role": "roles/aiplatform.serviceAgent",
+                    "timestamp": "2026-09-10T21:12:37.762713Z",
                 },
             }), encoding="utf-8")
             self.assertEqual(len(validate_vertex_readiness_evidence(
                 path, project_id="vss-film-poc", project_number="1008607911742")), 64)
             value = json.loads(path.read_text())
-            value["service_agent"]["roles"] = []
+            value["audit_provisioning"]["principal"] = "service-other@gcp-sa-aiplatform.iam.gserviceaccount.com"
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaises(ValueError):
                 validate_vertex_readiness_evidence(path, project_id="vss-film-poc", project_number="1008607911742")

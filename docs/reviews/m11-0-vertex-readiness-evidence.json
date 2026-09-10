@@ -1,0 +1,19 @@
+{
+  "api_enabled": true,
+  "audit_provisioning": {
+    "actor": "service-agent-manager@system.gserviceaccount.com",
+    "delta": "ADD",
+    "log": "cloudaudit.googleapis.com/activity",
+    "method": "SetIamPolicy",
+    "principal": "service-1008607911742@gcp-sa-aiplatform.iam.gserviceaccount.com",
+    "role": "roles/aiplatform.serviceAgent",
+    "service": "cloudresourcemanager.googleapis.com",
+    "timestamp": "2026-09-10T21:12:37.762713Z"
+  },
+  "iam_policy": {
+    "principal": "service-1008607911742@gcp-sa-aiplatform.iam.gserviceaccount.com",
+    "role": "roles/aiplatform.serviceAgent"
+  },
+  "project_id": "vss-film-poc",
+  "project_number": "1008607911742"
+}
