@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -128,6 +129,16 @@ class MilestoneController:
             path = entry[3:].decode("utf-8")
             if path == PROTECTED_RESIDUE or path.startswith(".vss/milestones/"):
                 continue
+            if path == ".secrets.baseline":
+                validator = self.root / "scripts/security/validate-repository-governance.py"
+                governed = validator.is_file() and subprocess.run(
+                    [sys.executable, str(validator)], cwd=self.root,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+                ).returncode == 0
+                if governed:
+                    paths.append(path)
+                    continue
+                raise MilestoneFailure("unexpected sensitive changed path")
             if path.startswith(".local/") or re.search(r"(?i)(secret|credential|token|api[_-]?key|private[_-]?key)", path):
                 raise MilestoneFailure("unexpected sensitive changed path")
             paths.append(path)

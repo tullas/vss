@@ -165,6 +165,17 @@ def sensitive_path(path: str) -> bool:
     return path == ".local" or path.startswith(".local/") or SENSITIVE_PATH_TERMS.search(path) is not None
 
 
+def sanctioned_baseline_change() -> bool:
+    validator = Path("scripts/security/validate-repository-governance.py")
+    if not validator.is_file():
+        return False
+    result = subprocess.run(
+        [sys.executable, str(validator)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def delta(base: str) -> tuple[dict[str, Any], bool]:
     working_paths = status_paths()
     committed = [text(item, maximum=4096) for item in git("diff", "--name-only", "-z", base, "--").split(b"\0") if item]
@@ -311,6 +322,10 @@ def changed_paths(base: str) -> list[str]:
         fail("changed path count exceeded its bound")
     for path in paths:
         repository_path(path)
+        if path == ".secrets.baseline":
+            if sanctioned_baseline_change():
+                continue
+            fail("unexpected sensitive changed path")
         if sensitive_path(path) and path != PROTECTED_RESIDUE:
             fail("unexpected sensitive changed path")
     return [path for path in paths if path != PROTECTED_RESIDUE]

@@ -44,7 +44,7 @@ validate_changed_secrets() {
         # Validation must be read-only; the sanctioned updater owns mutations.
         local temporary_baseline
         temporary_baseline=$(mktemp)
-        trap 'rm -f "$temporary_baseline"' RETURN
+        trap 'rm -f "${temporary_baseline:-}"' RETURN
         cp .secrets.baseline "$temporary_baseline"
         "${scanner[@]}" --baseline "$temporary_baseline" "${changed_files[@]}"
     fi

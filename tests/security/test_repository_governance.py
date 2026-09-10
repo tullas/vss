@@ -25,6 +25,8 @@ class RepositoryGovernanceTests(unittest.TestCase):
             for relative in (".secrets.baseline", "scripts/security/validate-repository-governance.py"):
                 source = ROOT / relative; destination = root / relative
                 destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source, destination)
+            (root / "tests/movie_storyboard").mkdir(parents=True)
+            (root / "tests/performance").mkdir(parents=True)
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
             baseline = json.loads((root / ".secrets.baseline").read_text())
             baseline["results"]["tests/unauthorized.json"] = []
@@ -32,6 +34,43 @@ class RepositoryGovernanceTests(unittest.TestCase):
             result = self.run_check(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("scope expansion", result.stdout)
+
+    def test_sanctioned_baseline_update_is_admitted_without_general_sensitive_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(ROOT / "config", root / "config")
+            for relative in (".secrets.baseline", "scripts/security/validate-repository-governance.py"):
+                source = ROOT / relative; destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source, destination)
+            (root / "tests/movie_storyboard").mkdir(parents=True)
+            (root / "tests/performance").mkdir(parents=True)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                            "commit", "-qm", "fixture"], cwd=root, check=True)
+            baseline = json.loads((root / ".secrets.baseline").read_text())
+            baseline["generated_at"] = "2026-09-10T00:00:00Z"
+            (root / ".secrets.baseline").write_text(json.dumps(baseline), encoding="utf-8")
+            result = self.run_check(root, justification="")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_tampered_baseline_is_rejected_even_when_only_baseline_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(ROOT / "config", root / "config")
+            for relative in (".secrets.baseline", "scripts/security/validate-repository-governance.py"):
+                source = ROOT / relative; destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source, destination)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                            "commit", "-qm", "fixture"], cwd=root, check=True)
+            baseline = json.loads((root / ".secrets.baseline").read_text())
+            baseline["results"].pop("security/components.yml")
+            (root / ".secrets.baseline").write_text(json.dumps(baseline), encoding="utf-8")
+            result = self.run_check(root, justification="")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("scope expansion or drift", result.stdout)
 
     def test_protected_artifact_drift_requires_justification(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

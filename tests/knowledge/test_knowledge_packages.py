@@ -333,8 +333,8 @@ class KnowledgePackageTests(unittest.TestCase):
             "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",  # pragma: allowlist secret -- public GitHub Action commit
             "ece7cb06caefa5fff74198d8649806c4678c61a1",  # pragma: allowlist secret -- public GitHub Action commit
             "ea165f8d65b6e75b540449e92b4886f43607fa02",  # pragma: allowlist secret -- public GitHub Action commit
-            "dcedce43c6f43de0b836d1fe38946645c9c638dc",  # pragma: allowlist secret -- public GitHub Action commit
-            "9d84900f3238fab8cd84ce47d658d25dd008be2f",  # pragma: allowlist secret -- public GitHub Action commit
+            "e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e",  # pragma: allowlist secret -- public GitHub Action commit
+            "a1320f892987e89d278cc92dc5adc984fb93aca4",  # pragma: allowlist secret -- public GitHub Action commit
             "2031cfc080254a8a887f58cffee85186f0e49e48",  # pragma: allowlist secret -- public GitHub Action commit
             "3b0bd1d116c0bde30213346b22d4f634d96a2fb0",  # pragma: allowlist secret -- public GitHub Action commit
             "4eaacf0543bb3f2c246792bd56e8cdeffafb205a",  # pragma: allowlist secret -- public GitHub Action commit

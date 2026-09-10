@@ -219,6 +219,20 @@ class SupplyChainPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(SC.PolicyFailure, "not immutable"):
                 SC.validate_actions(root)
 
+    def test_node24_action_releases_are_exactly_pinned_and_registered(self) -> None:
+        expected = {
+            "gitleaks/gitleaks-action": ("action-gitleaks", "e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e", "v3 current; Node.js 24 runtime"),  # pragma: allowlist secret -- immutable upstream action commit SHA
+            "opentofu/setup-opentofu": ("action-setup-opentofu", "a1320f892987e89d278cc92dc5adc984fb93aca4", "v2.0.2 current; Node.js 24 runtime"),  # pragma: allowlist secret -- immutable upstream action commit SHA
+        }
+        registry = SC.component_map(ROOT)
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        for name, (component_id, sha, eol_support) in expected.items():
+            with self.subTest(name=name):
+                self.assertIn(f"{name}@{sha}", workflow)
+                self.assertEqual(registry[component_id]["version"], sha)
+                self.assertEqual(registry[component_id]["eol_support"], eol_support)
+        SC.validate_actions(ROOT)
+
     def test_mutable_production_image_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

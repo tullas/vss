@@ -41,6 +41,14 @@ class MilestoneControllerTests(unittest.TestCase):
         for path in ("docs/architecture/decisions/index.json", "docs/architecture/decisions/DEC-0001-foundation-closure.json", "docs/architecture/decisions/DEC-0002-existing-media-revalidation.json"):
             destination = self.root / path; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / path, destination)
         (self.root / "scripts").mkdir(); shutil.copy2(ROOT / "scripts/vss-agent", self.root / "scripts/vss-agent")
+        (self.root / "scripts/security").mkdir(parents=True)
+        shutil.copy2(ROOT / "scripts/security/validate-repository-governance.py",
+                     self.root / "scripts/security/validate-repository-governance.py")
+        for path in ("config/repository-governance-v1.json", "config/secrets-baseline-scope-v1.json",
+                     "config/test-classification-v1.json", ".secrets.baseline"):
+            destination = self.root / path; destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(ROOT / path, destination)
+        (self.root / "tests/movie_storyboard").mkdir(parents=True)
+        (self.root / "tests/performance").mkdir(parents=True)
         (self.root / "scripts/vss-agent").chmod(0o755)
         (self.root / "scripts/validate-change.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         (self.root / "scripts/validate-change.sh").chmod(0o755)
@@ -126,6 +134,18 @@ class MilestoneControllerTests(unittest.TestCase):
         replayed = self.controller.load("dev-wf-1")
         self.assertEqual(state, replayed)
         self.assertFalse((self.root / ".vss/milestones/current.json").read_text().find(".local") >= 0)
+
+    def test_governed_baseline_change_is_admitted_and_tampered_baseline_is_rejected(self) -> None:
+        baseline = json.loads((self.root / ".secrets.baseline").read_text())
+        baseline["generated_at"] = "2026-09-10T00:00:00Z"
+        (self.root / ".secrets.baseline").write_text(json.dumps(baseline), encoding="utf-8")
+        accepted = self.controller._repository(self.base)
+        self.assertEqual(accepted["head_sha"], self.base)
+
+        baseline["results"]["unauthorized.json"] = []
+        (self.root / ".secrets.baseline").write_text(json.dumps(baseline), encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "unexpected sensitive changed path"):
+            self.controller._repository(self.base)
 
     def test_execution_packet_is_strict_deterministic_bounded_and_references_only(self) -> None:
         state = self.initialize()

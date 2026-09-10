@@ -422,6 +422,39 @@ class AgentCoordinationTests(unittest.TestCase):
         self.assertEqual(result.stderr, "vss-agent: unexpected sensitive changed path\n")
         self.assertNotIn("credentials", result.stdout + result.stderr)
 
+    def test_governed_baseline_change_is_admitted_but_scope_tampering_is_rejected(self) -> None:
+        for relative in (".secrets.baseline", "config/repository-governance-v1.json",
+                         "config/secrets-baseline-scope-v1.json", "config/test-classification-v1.json",
+                         "scripts/security/validate-repository-governance.py"):
+            source = ROOT / relative; destination = self.root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source, destination)
+        (self.root / "tests/movie_storyboard").mkdir(parents=True)
+        (self.root / "tests/performance").mkdir(parents=True)
+        self.git("add", ".secrets.baseline", "config", "scripts/security/validate-repository-governance.py")
+        self.git("commit", "-qm", "governed baseline fixture")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        baseline = json.loads((self.root / ".secrets.baseline").read_text())
+        baseline["generated_at"] = "2026-09-10T00:00:00Z"
+        (self.root / ".secrets.baseline").write_text(json.dumps(baseline), encoding="utf-8")
+        accepted = self.agent("impact", "--base", self.base)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+        baseline["results"]["credentials/unauthorized.json"] = []
+        (self.root / ".secrets.baseline").write_text(json.dumps(baseline), encoding="utf-8")
+        rejected = self.agent("impact", "--base", self.base)
+        self.assertEqual(rejected.returncode, 2)
+        self.assertEqual(rejected.stderr, "vss-agent: unexpected sensitive changed path\n")
+
+    def test_validate_change_baseline_cleanup_completes_and_fails_without_unbound_trap(self) -> None:
+        validator = ROOT / "scripts/validate-change.sh"
+        source = validator.read_text(encoding="utf-8")
+        self.assertIn("trap 'rm -f \"${temporary_baseline:-}\"' RETURN", source)
+        probe = subprocess.run(
+            ["bash", "-u", "-c", "temporary_baseline=''; trap 'rm -f \"${temporary_baseline:-}\"' RETURN; true"],
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+
     def test_map_rejects_traversal_shell_and_executable_configuration(self) -> None:
         mapping_path = self.root / "config/agent-harness-v2.json"
         original = mapping_path.read_text(encoding="utf-8")

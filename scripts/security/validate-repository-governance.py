@@ -50,6 +50,11 @@ def validate(root: Path) -> dict[str, object]:
             raise GovernanceFailure(f"classified test is missing: {path}")
     changed = tracked_changed(root)
     protected = governance["protected_paths"]
+    baseline_path = governance["secrets_baseline"]["path"]
+    if (baseline_path != ".secrets.baseline"
+            or governance["secrets_baseline"]["scope_path"] != "config/secrets-baseline-scope-v1.json"
+            or governance["secrets_baseline"]["updater"] != "scripts/security/update-secrets-baseline.sh"):
+        raise GovernanceFailure("secrets baseline governance binding is invalid")
     def matches(pattern: str, path: str) -> bool:
         if pattern.endswith("/**"):
             return path.startswith(pattern[:-3])
@@ -57,7 +62,9 @@ def validate(root: Path) -> dict[str, object]:
             return path.endswith(pattern[3:])
         return path == pattern
     changed_protected = sorted(path for path in changed if any(matches(pattern, path) for pattern in protected))
-    if changed_protected and not os.environ.get("VSS_PROTECTED_UPDATE_JUSTIFICATION", "").strip():
+    sanctioned_baseline_change = changed_protected == [baseline_path]
+    if (changed_protected and not sanctioned_baseline_change
+            and not os.environ.get("VSS_PROTECTED_UPDATE_JUSTIFICATION", "").strip()):
         raise GovernanceFailure("protected artifact drift requires VSS_PROTECTED_UPDATE_JUSTIFICATION: " + ", ".join(changed_protected))
     return {"baseline_scope": paths, "classified_external_or_host": len(classified), "protected_changes": changed_protected}
 
