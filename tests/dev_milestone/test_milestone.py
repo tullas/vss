@@ -288,6 +288,13 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(event["data"]["change_identity"], initialized["repository"]["change_identity"])
         self.assertTrue(all(value is False for value in event["authority"].values()))
 
+    def test_analysis_is_bounded_and_advisory(self) -> None:
+        self.initialize()
+        result = self.controller.analyze("dev-wf-1")
+        self.assertEqual(result["findings"], [])
+        self.assertEqual(result["unknown_opportunities"], [])
+        self.assertTrue(all(value is False for value in result["authority"].values()))
+
     def test_legacy_initialization_recovers_through_sealed_transition(self) -> None:
         initialized = self.legacy_initialize()
         self.git("switch", "-c", "feature/dev-wf-1")
@@ -445,6 +452,21 @@ class MilestoneControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(MilestoneFailure, "protected boundary"):
             self.controller.checkpoint("dev-wf-1", "repair_started", "Unsafe repair.", expected_generation=state["generation"])
 
+    def test_checkpoint_persists_bounded_observation_record(self) -> None:
+        self.initialize()
+        observation = {"id": "obs-validation-friction", "kind": "friction",
+                       "finding": "human-relay", "metric": "count", "value": 2,
+                       "unit": "count", "source": "milestone-controller",
+                       "recommendation": "run-affected-validation", "evidence_sha256": "a" * 64}
+        state = self.controller.load("dev-wf-1")
+        updated = self.controller.checkpoint("dev-wf-1", "checkpointed",
+                                             "Recorded bounded friction observation.",
+                                             {"observation": observation}, state["generation"])
+        self.assertEqual(updated["generation"], 1)
+        event = json.loads((self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_text().splitlines()[-1])
+        self.assertEqual(event["data"]["observation"], observation)
+        self.assertTrue(all(value is False for value in event["authority"].values()))
+
     def test_cli_surface_stays_outside_runtime(self) -> None:
         mission_path = self.root / ".vss/mission-input.json"
         mission_path.parent.mkdir(parents=True, exist_ok=True)
@@ -585,7 +607,7 @@ class MilestoneControllerTests(unittest.TestCase):
                 self.assertEqual(packet["controller"]["next"],
                                  {"action": "request_design_review", "human_boundary": True})
                 self.assertTrue(packet["stop_and_challenge"])
-                self.assertTrue(all(value is False for value in packet["authority"].values()))
+        self.assertTrue(all(value is False for value in packet["authority"].values()))
         for event in ("repair_started", "repair_completed", "completed"):
             with self.assertRaisesRegex(MilestoneFailure, "mission review is required"):
                 self.controller.checkpoint("ungated", event, "Bypass attempt.")

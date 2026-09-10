@@ -371,6 +371,8 @@ class MilestoneController:
             "guidance_docs", "implementation", "tests", "validation_config_contracts"))
         if reference_count > MAX_PACKET_PATHS:
             raise MilestoneFailure("execution packet repository context exceeded its bound")
+        context["reference_count"] = reference_count
+        context["content_included"] = False
 
         tier_by_action = {"run_affected_validation": ("affected", "L1"),
                           "run_subsystem_validation": ("subsystem", "L2"),
@@ -832,6 +834,23 @@ class MilestoneController:
         checks = [{"name": item.get("name", ""), "status": item.get("status", ""), "conclusion": item.get("conclusion") or "",
                    "summary": ((item.get("output") or {}).get("summary") or "")[:512]} for item in value.get("check_runs", [])]
         return self.ingest_ci({"head_sha": head, "checks": checks}, state["milestone_id"])
+
+    def analyze(self, milestone_id: str | None = None) -> dict[str, Any]:
+        """Derive bounded, advisory findings from the existing milestone history."""
+        state = self.load(milestone_id)
+        events = self._read_events(state["milestone_id"])
+        counts = {kind: sum(event["event_type"] == kind for event in events)
+                  for kind in ("validation_completed", "ci_observed", "repair_started", "checkpointed")}
+        ci_failures = sum(event["data"].get("ci_status") == "failed" for event in events if event["event_type"] == "ci_observed")
+        findings: list[dict[str, str]] = []
+        if ci_failures and counts["validation_completed"]:
+            findings.append({"finding": "local-green-ci-failure-loop", "recommendation": "run-affected-validation"})
+        if counts["repair_started"] > 1:
+            findings.append({"finding": "human-relay", "recommendation": "inspect-environment"})
+        findings.sort(key=lambda item: item["finding"])
+        return {"schema_version": "1", "protocol": "vss.dev-analysis", "milestone_id": state["milestone_id"],
+                "counts": counts, "findings": findings,
+                "unknown_opportunities": [], "authority": dict(AUTHORITY)}
 
 
 def _read_external_json(raw: bytes) -> dict[str, Any]:

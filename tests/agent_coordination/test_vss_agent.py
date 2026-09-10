@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import runpy
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -481,6 +482,59 @@ class AgentCoordinationTests(unittest.TestCase):
         stale = self.agent("evidence", "--input", str(evidence_path), "--require-current-change")
         self.assertEqual(stale.returncode, 2)
         self.assertEqual(stale.stderr, "vss-agent: validation evidence is stale for current change\n")
+
+    def test_validation_emits_bounded_timing_and_resource_telemetry(self) -> None:
+        external = Path(tempfile.mkdtemp(prefix="vss-agent-telemetry-"))
+        self.external_directories.append(external)
+        evidence_path = external / "evidence.json"
+        result = self.agent("validate-change", "--base", self.base, "--level", "L3", "--output", str(evidence_path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        telemetry = evidence["telemetry"]
+        self.assertGreaterEqual(telemetry["elapsed_ms"], 0)
+        self.assertGreaterEqual(telemetry["peak_rss_high_water_mark"], 0)
+        self.assertIn(telemetry["peak_rss_unit"], {"bytes", "kibibytes"})
+        self.assertEqual(telemetry["peak_rss_semantics"], "process_children_high_water_mark")
+        self.assertTrue(telemetry["peak_rss_platform"])
+        self.assertEqual([item["profile"] for item in telemetry["profile_timings_ms"]], ["canonical"])
+        self.assertEqual(list(Draft202012Validator(EVIDENCE_SCHEMA).iter_errors(evidence)), [])
+
+    def test_validation_rejects_evidence_when_telemetry_crosses_existing_bound(self) -> None:
+        external = Path(tempfile.mkdtemp(prefix="vss-agent-telemetry-bound-"))
+        self.external_directories.append(external)
+        evidence_path = external / "evidence.json"
+        result = self.agent("validate-change", "--base", self.base, "--level", "L3", "--output", str(evidence_path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        telemetry = evidence.pop("telemetry")
+        telemetry["profile_timings_ms"] = [
+            {"profile": f"p{index:02d}-" + "x" * 58, "elapsed_ms": 0} for index in range(64)
+        ]
+        helper = runpy.run_path(str(HELPER), run_name="vss_agent_test")
+        for padding in range(221):
+            evidence["plan"]["unknown_paths"] = [f"observations/{index:02d}-" + "x" * padding for index in range(64)]
+            without_telemetry_size = len(helper["canonical"](evidence))
+            evidence["telemetry"] = telemetry
+            with_telemetry_size = len(helper["canonical"](evidence))
+            if without_telemetry_size <= helper["MAX_COMMENT_BYTES"] < with_telemetry_size:
+                with self.assertRaises(helper["AgentFailure"]):
+                    helper["validate_evidence"](evidence)
+                break
+            evidence.pop("telemetry")
+        else:
+            self.fail("could not construct evidence that only telemetry pushed over the bound")
+
+    def test_doctor_is_redacted_and_advisory(self) -> None:
+        result = self.agent("doctor", environment={"OPENAI_API_KEY": "not-a-secret-fixture", "CI": "true"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value["protocol"], "vss.agent-doctor")
+        self.assertIn("openai_context", value["environment"]["suspicious_names"])
+        self.assertEqual(value["findings"], [{"finding": "environment-leakage", "recommendation": "inspect-environment"}])
+        self.assertNotIn("OPENAI_API_KEY", result.stdout)
+        self.assertNotIn("not-a-secret-fixture", result.stdout)
+        self.assertEqual(value["recommendation"]["authority"], "advisory_only")
+        self.assertTrue(all(flag is False for flag in value["authority"].values()))
 
     def test_validation_rejects_level_downgrade_and_emits_failure_logs_only(self) -> None:
         (self.root / "unknown.txt").write_text("unknown\n", encoding="utf-8")

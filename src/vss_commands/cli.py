@@ -95,6 +95,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone_checkpoint.add_argument("--summary", required=True)
     milestone_checkpoint.add_argument("--expected-generation", type=int)
     milestone_checkpoint.add_argument("--stop-reason")
+    milestone_checkpoint.add_argument("--observation-input", type=Path)
     milestone_validate = milestone_actions.add_parser("validate")
     milestone_validate.add_argument("--milestone-id")
     milestone_validate.add_argument("--tier", required=True, choices=("affected", "subsystem", "canonical"))
@@ -103,6 +104,8 @@ def _parser() -> argparse.ArgumentParser:
     ci_source = milestone_ci.add_mutually_exclusive_group(required=True)
     ci_source.add_argument("--input", type=Path)
     ci_source.add_argument("--refresh", action="store_true")
+    milestone_analyze = milestone_actions.add_parser("analyze")
+    milestone_analyze.add_argument("--milestone-id")
     milestone_pr = milestone_actions.add_parser("pr")
     milestone_pr.add_argument("--milestone-id")
     reasoning = subparsers.add_parser("reasoning")
@@ -422,11 +425,17 @@ def main(argv: list[str] | None = None) -> int:
             elif args.milestone_action == "checkpoint":
                 if bool(args.input) != (args.type in {"mission_assessed", "mission_reviewed"}):
                     raise MilestoneFailure("mission checkpoints require --input; other checkpoints do not accept it")
+                if args.observation_input and args.type != "checkpointed":
+                    raise MilestoneFailure("observation input is only valid for checkpointed events")
+                if args.observation_input and args.input:
+                    raise MilestoneFailure("checkpoint accepts one input")
                 if args.input and args.stop_reason:
                     raise MilestoneFailure("mission checkpoints do not accept --stop-reason")
                 data = {"stop_reason": args.stop_reason} if args.stop_reason else None
                 if args.input:
                     data = _read_json(args.input, 2048)
+                if args.observation_input:
+                    data = {"observation": _read_json(args.observation_input, 2048)}
                 value = controller.checkpoint(args.milestone_id, args.type, args.summary, data, args.expected_generation)
             elif args.milestone_action == "validate":
                 value = controller.validate(args.tier, args.milestone_id)
@@ -438,6 +447,8 @@ def main(argv: list[str] | None = None) -> int:
                         value = controller.ingest_ci(json.loads(args.input.read_text(encoding="utf-8")), args.milestone_id)
                     except (OSError, UnicodeError, json.JSONDecodeError):
                         raise MilestoneFailure("CI observation is malformed")
+            elif args.milestone_action == "analyze":
+                value = controller.analyze(args.milestone_id)
             else:
                 state = controller.load(args.milestone_id)
                 value = {"milestone_id": state["milestone_id"], "status": state["status"], "pr_action": "status_only", "next": state["next"], "authority": state["authority"]}
