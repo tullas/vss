@@ -24,8 +24,6 @@ def execute(context, input_data, dry_run):
     if not isinstance(root, str):
         raise ValueError("moving-shot artifact destination is unavailable")
     destination = Path(root)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.mkdir(exist_ok=False)
     # Control records live beside the output directory so pre-recorded
     # authorization cannot make output allocation look already complete.
     # The authorization and attempt records are siblings of the output
@@ -40,6 +38,11 @@ def execute(context, input_data, dry_run):
     # the one execution slot. Reservation is not provider consumption.
     ledger.reserve_execution()
     try:
+        # Output allocation is post-reservation: a local collision is a
+        # terminal failure of this one authorized execution, never a reason
+        # to retry or create another attempt.
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.mkdir(exist_ok=False)
         # The provider handle's single generate call is the submission boundary.
         # Polling remains inside that call and cannot increment the ledger.
         ledger.mark_submitted()

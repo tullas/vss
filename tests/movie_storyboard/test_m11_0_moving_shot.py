@@ -40,6 +40,40 @@ class FakeVideoProvider:
 
 
 class MovingShotTests(unittest.TestCase):
+    def test_output_collision_after_reservation_consumes_without_provider_call(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "attempt-3"
+            basis = Path(directory) / "basis.png"
+            basis.write_bytes(b"authoritative-basis")
+            admission = admit_moving_shot(
+                shot_id="shot-024b0d6352149eabb74df543",
+                scene_id="scene-91f5c8634519d8264e2dd5f8",
+                visual_basis_path=basis,
+                visual_basis_sha256=hashlib.sha256(basis.read_bytes()).hexdigest(),
+                prompt="A bounded camera move preserves the source action.",
+                source_lineage={"shot_plan": "a" * 64},
+            )
+            output = root / "output" / admission.request_sha256
+            output.mkdir(parents=True)
+            record_existing_authorization(root / "authorization.json", admission.request_sha256)
+            provider = FakeVideoProvider()
+            context = type("Context", (), {
+                "environment": "development",
+                "admitted_request": admission,
+                "safe_configuration": {"artifact_root": str(output)},
+                "providers": ProviderAccess(video=provider, video_secret_reader=lambda _: "token"),
+            })()
+
+            with self.assertRaises(FileExistsError):
+                HANDLER_MODULE.execute(
+                    context, {"admission_id": admission.request_sha256, "mode": "generate"}, False
+                )
+
+            ledger = json.loads((root / f"{admission.request_sha256}.attempt.json").read_text())
+            self.assertEqual(ledger["status"], "failed")
+            self.assertEqual(ledger["attempts"], 1)
+            self.assertEqual(provider.calls, 0)
+
     def test_handler_uses_authorization_sibling_of_output_namespace(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "attempt-3"

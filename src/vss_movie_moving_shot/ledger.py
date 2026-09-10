@@ -131,11 +131,14 @@ class AttemptLedger:
         self._write(value)
 
     def terminal(self, status: str) -> None:
-        """Close a submitted attempt without creating another attempt."""
+        """Close a reserved or submitted attempt without creating another."""
         if status not in {"completed", "failed"}:
             raise AttemptLedgerError("terminal status is invalid")
         value = self._read()
-        if value["status"] != "submitted":
-            raise AttemptLedgerError("submitted attempt is not open")
+        if value["status"] not in {"reserved", "submitted"}:
+            raise AttemptLedgerError("reserved attempt is not open")
+        # Reservation commits the one authorized execution even when a local
+        # failure occurs before provider submission.
+        value["attempts"] = 1
         value["status"] = status
         self._write(value)
