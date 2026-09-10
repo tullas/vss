@@ -156,6 +156,20 @@ A reset session reconstructs state from the GitHub issue or PR, `AGENTS.md`, req
 router output, and the latest fresh checkpoint/evidence digest. Hidden agent memory and local
 evidence files are never authoritative.
 
+After an accepted implementation is committed, `vss dev milestone rebind-committed-head` may
+append one explicit identity-rebind event for a modern `CI_PENDING` milestone. It requires the
+expected generation, unchanged branch/base and reviewed change identity, a descendant HEAD, and
+a worktree containing only the protected residue. The event preserves review and validation
+history, clears any prior CI observation, and keeps `ingest_ci` as the next route; it grants no
+authority and does not rewrite history. Change identity includes committed diff paths so a commit
+does not itself appear as a semantic change to the reviewed implementation.
+
+The one-time `vss dev milestone bootstrap-controller-upgrade` transition is narrower: it is
+available only for `dev-wf-2-engineering-observability`, requires explicit base, old, reviewed,
+and target heads plus the expected generation, and accepts only the registered controller-repair
+path set between the reviewed and target commits. It records both controller identities and the
+repair digest, resets CI to `not_observed`, and cannot be replayed.
+
 ## Short handoff workflow
 
 ## DEV-WF-1 repository milestone controller

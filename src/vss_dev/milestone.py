@@ -23,6 +23,14 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MILESTONE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
+BOOTSTRAP_MILESTONE = "dev-wf-2-engineering-observability"
+BOOTSTRAP_REPAIR_PATHS = tuple(sorted((
+    "docs/agent-coordination.md",
+    "schemas/dev-milestone-record-v1.schema.json",
+    "src/vss_commands/cli.py",
+    "src/vss_dev/milestone.py",
+    "tests/dev_milestone/test_milestone.py",
+)))
 LEVELS = {"none": -1, "L0": 0, "L1": 1, "L2": 2, "L3": 3}
 MAX_PACKET_BYTES = 16_384
 MAX_PACKET_PATHS = 64
@@ -123,8 +131,21 @@ class MilestoneController:
             if path.startswith(".local/") or re.search(r"(?i)(secret|credential|token|api[_-]?key|private[_-]?key)", path):
                 raise MilestoneFailure("unexpected sensitive changed path")
             paths.append(path)
+        diff_paths = self._run(["git", "diff", "--name-only", "-z", base, "--"], 1_048_576).split(b"\0")
+        paths.extend(path.decode("utf-8") for path in diff_paths if path)
         diff = self._run(["git", "diff", "--binary", base, "--"], 16 * 1024 * 1024)
         return hashlib.sha256(_canonical({"base": base, "paths": sorted(set(paths)), "diff_sha256": hashlib.sha256(diff).hexdigest()})).hexdigest()
+
+    def _committed_change_identity(self, base: str, head: str,
+                                   excluded: tuple[str, ...] = ()) -> str:
+        names = [path.decode("utf-8") for path in self._run(
+            ["git", "diff", "--name-only", "-z", base, head, "--"], 1_048_576).split(b"\0") if path]
+        paths = sorted(set(names) - set(excluded))
+        diff = self._run(["git", "diff", "--binary", base, head, "--", *paths], 16 * 1024 * 1024) if paths else b""
+        return _digest({"base": base, "paths": paths, "diff_sha256": hashlib.sha256(diff).hexdigest()})
+
+    def _controller_identity(self, head: str, paths: tuple[str, ...], diff_sha256: str) -> str:
+        return _digest({"head_sha": head, "paths": list(paths), "diff_sha256": diff_sha256})
 
     def _paths(self, milestone_id: str) -> tuple[Path, Path, Path]:
         if MILESTONE.fullmatch(milestone_id) is None:
@@ -497,6 +518,14 @@ class MilestoneController:
                 validation = {"evidence_sha256": None, "level": "none"}
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 status, action, human = "LOCAL_VALIDATION_REQUIRED", "run_affected_validation", False
+            elif event["event_type"] == "identity_rebound":
+                ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
+                ci_subject_head = None; ci_change_identity = None
+                status, action, human = "CI_PENDING", "ingest_ci", False
+            elif event["event_type"] == "controller_bootstrap":
+                ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
+                ci_subject_head = None; ci_change_identity = None
+                status, action, human = "CI_PENDING", "ingest_ci", False
             elif event["event_type"] == "blocked": status, action, human, repair["stop_reason"] = "BLOCKED", "request_architecture_review", True, data.get("stop_reason")
             elif event["event_type"] == "completed": status, action, human = "COMPLETE", "none", True
         tail = events[-1]
@@ -581,7 +610,20 @@ class MilestoneController:
                 if (data.get("recovered_event_sha256") != events[index - 1]["event_sha256"]
                         or "change_identity" in events[index - 1]["data"]):
                     raise MilestoneFailure("milestone state identity recovery conflict")
-            if event["event_type"] != "branch_transitioned" and "change_identity" in data:
+            if event["event_type"] == "identity_rebound":
+                if (data.get("rebound_from_head") != bound_head
+                        or event["subject_head_sha"] == bound_head):
+                    raise MilestoneFailure("milestone state identity recovery conflict")
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
+            elif event["event_type"] == "controller_bootstrap":
+                if (data.get("old_head") != bound_head
+                        or data.get("new_head") != event["subject_head_sha"]
+                        or event["subject_head_sha"] == bound_head):
+                    raise MilestoneFailure("milestone state identity recovery conflict")
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
+            elif event["event_type"] != "branch_transitioned" and "change_identity" in data:
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
         historical_repository = {
@@ -725,6 +767,134 @@ class MilestoneController:
             with history.open("ab") as stream:
                 stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
             state = self._project(events + [event], repository)
+            self._atomic_json(state_path, state); self._write_pointer(state)
+        return self.load(milestone_id)
+
+    def rebind_committed_head(self, milestone_id: str, summary: str,
+                              expected_generation: int) -> dict[str, Any]:
+        """Explicitly bind a committed modern milestone head without rewriting history."""
+        if (MILESTONE.fullmatch(milestone_id) is None or not summary or len(summary) > 512
+                or type(expected_generation) is not int):
+            raise MilestoneFailure("milestone head rebind is invalid")
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id)
+            stored = _read_json(state_path); self._validate(stored)
+            if expected_generation != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            try:
+                repository = self._repository(stored["repository"]["base_sha"])
+            except MilestoneFailure as exc:
+                raise MilestoneFailure("milestone head rebind is unauthorized") from exc
+            historical = dict(stored["repository"])
+            if _digest(stored) != _digest(self._project(events, historical)):
+                raise MilestoneFailure("milestone state identity recovery conflict")
+            status = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 1_048_576)
+            entries = [entry for entry in status.split(b"\0") if entry]
+            if any(len(entry) < 4 or entry[2:3] != b" " or entry[3:].decode("utf-8") != PROTECTED_RESIDUE
+                   for entry in entries):
+                raise MilestoneFailure("milestone head rebind requires a clean worktree")
+            if (stored["status"] != "CI_PENDING"
+                    or stored["next"]["action"] != "ingest_ci"
+                    or repository["branch"] != stored["repository"]["branch"]
+                    or repository["base_sha"] != stored["repository"]["base_sha"]
+                    or repository["head_sha"] == stored["repository"]["head_sha"]
+                    or repository["change_identity"] != stored["repository"]["change_identity"]):
+                raise MilestoneFailure("milestone head rebind is unauthorized")
+            if subprocess.run(["git", "merge-base", "--is-ancestor", stored["repository"]["head_sha"], repository["head_sha"]],
+                              cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0:
+                raise MilestoneFailure("milestone head rebind is unauthorized")
+            data = {"rebound_from_head": stored["repository"]["head_sha"],
+                    "change_identity": repository["change_identity"]}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": milestone_id, "sequence": len(events) + 1,
+                     "event_type": "identity_rebound", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"], "summary": summary,
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event); self._validate(event)
+            if len(events) >= self.policy["limits"]["max_events"] or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]:
+                raise MilestoneFailure("milestone event exceeded its bound")
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            state = self._project(events + [event], repository)
+            self._atomic_json(state_path, state); self._write_pointer(state)
+        return self.load(milestone_id)
+
+    def bootstrap_controller_upgrade(self, milestone_id: str, base_head: str, old_head: str, reviewed_head: str,
+                                     target_head: str,
+                                     reason: str, expected_generation: int) -> dict[str, Any]:
+        """Perform the one-time exact controller-upgrade transition for the accepted milestone."""
+        if (milestone_id != BOOTSTRAP_MILESTONE or SHA1.fullmatch(base_head) is None
+                or SHA1.fullmatch(old_head) is None
+                or SHA1.fullmatch(reviewed_head) is None
+                or SHA1.fullmatch(target_head) is None or not reason or len(reason) > 512
+                or type(expected_generation) is not int):
+            raise MilestoneFailure("controller bootstrap is invalid")
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id)
+            stored = _read_json(state_path); self._validate(stored)
+            if expected_generation != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            if any(event["event_type"] == "controller_bootstrap" for event in events):
+                raise MilestoneFailure("controller bootstrap already recorded")
+            if stored["repository"]["base_sha"] != base_head or stored["repository"]["head_sha"] != old_head or stored["status"] != "CI_PENDING" \
+                    or stored["next"]["action"] != "ingest_ci":
+                raise MilestoneFailure("controller bootstrap is unauthorized")
+            try:
+                repository = self._repository(stored["repository"]["base_sha"])
+            except MilestoneFailure as exc:
+                raise MilestoneFailure("controller bootstrap is unauthorized") from exc
+            if (repository["branch"] != f"feature/{BOOTSTRAP_MILESTONE}"
+                    or repository["base_sha"] != stored["repository"]["base_sha"]
+                    or repository["head_sha"] != target_head
+                    or target_head == old_head):
+                raise MilestoneFailure("controller bootstrap is unauthorized")
+            status = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 1_048_576)
+            entries = [entry for entry in status.split(b"\0") if entry]
+            if any(len(entry) < 4 or entry[2:3] != b" " or entry[3:].decode("utf-8") != PROTECTED_RESIDUE
+                   for entry in entries):
+                raise MilestoneFailure("controller bootstrap requires a clean worktree")
+            if any(subprocess.run(["git", "merge-base", "--is-ancestor", source, target],
+                                  cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0
+                   for source, target in ((old_head, target_head), (old_head, reviewed_head), (reviewed_head, target_head))):
+                raise MilestoneFailure("controller bootstrap is unauthorized")
+            names = [path.decode("utf-8") for path in self._run(
+                ["git", "diff", "--name-only", "-z", reviewed_head, target_head, "--"], 1_048_576).split(b"\0") if path]
+            if sorted(set(names)) != list(BOOTSTRAP_REPAIR_PATHS):
+                raise MilestoneFailure("controller bootstrap repair boundary is unauthorized")
+            repair_diff = self._run(["git", "diff", "--binary", reviewed_head, target_head, "--", *BOOTSTRAP_REPAIR_PATHS], 16 * 1024 * 1024)
+            if not repair_diff:
+                raise MilestoneFailure("controller bootstrap repair is empty")
+            repair_digest = hashlib.sha256(repair_diff).hexdigest()
+            reviewed_identity = self._committed_change_identity(
+                stored["repository"]["base_sha"], reviewed_head, BOOTSTRAP_REPAIR_PATHS)
+            if reviewed_identity != stored["repository"]["change_identity"]:
+                raise MilestoneFailure("controller bootstrap reviewed identity changed")
+            previous_controller_identity = self._controller_identity(reviewed_head, BOOTSTRAP_REPAIR_PATHS, hashlib.sha256(b"").hexdigest())
+            new_controller_identity = self._controller_identity(target_head, BOOTSTRAP_REPAIR_PATHS, repair_digest)
+            resulting_state = {"status": "CI_PENDING", "next_action": "ingest_ci",
+                               "ci_status": "not_observed", "ci_head_sha": None}
+            data = {"previous_controller_identity": previous_controller_identity,
+                    "new_controller_identity": new_controller_identity, "old_head": old_head,
+                    "reviewed_head": reviewed_head,
+                    "new_head": target_head, "repair_paths": list(BOOTSTRAP_REPAIR_PATHS),
+                    "repair_change_sha256": repair_digest, "reviewed_change_identity": reviewed_identity,
+                    "change_identity": repository["change_identity"],
+                    "reason": reason, "expected_generation": expected_generation,
+                    "resulting_state": resulting_state}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": milestone_id, "sequence": len(events) + 1,
+                     "event_type": "controller_bootstrap", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": target_head, "summary": reason, "data": data,
+                     "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event); self._validate(event)
+            if len(events) >= self.policy["limits"]["max_events"] or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]:
+                raise MilestoneFailure("milestone event exceeded its bound")
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            state_repository = dict(repository)
+            state = self._project(events + [event], state_repository)
             self._atomic_json(state_path, state); self._write_pointer(state)
         return self.load(milestone_id)
 

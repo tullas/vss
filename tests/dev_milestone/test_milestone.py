@@ -11,6 +11,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from vss_dev import MilestoneController, MilestoneFailure
+from vss_dev.milestone import BOOTSTRAP_REPAIR_PATHS
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,6 +61,44 @@ class MilestoneControllerTests(unittest.TestCase):
 
     def initialize(self) -> dict:
         return self.controller.initialize("dev-wf-1", self.base, 114, ["agent-coordination"], ["src/demo"], "Approved bounded development milestone.", mission_evidence())
+
+    def committed_pending_milestone(self) -> tuple[dict, str, bytes]:
+        initialized = self.initialize()
+        self.git("switch", "-c", "feature/dev-wf-1")
+        transitioned = self.controller.transition_branch(
+            "dev-wf-1", "main", "feature/dev-wf-1", "Authorized milestone branch.", initialized["generation"])
+        changed = self.root / "README.md"
+        changed.write_text("accepted implementation\n", encoding="utf-8")
+        pending = self.controller.checkpoint(
+            "dev-wf-1", "validation_completed", "Canonical validation passed.",
+            {"validation_level": "L3", "evidence_sha256": "a" * 64}, transitioned["generation"])
+        history_before = (self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes()
+        self.git("add", "README.md"); self.git("commit", "-qm", "accepted implementation")
+        return pending, self.git("rev-parse", "HEAD").stdout.strip(), history_before
+
+    def committed_controller_upgrade(self) -> tuple[dict, str, str, str, bytes]:
+        initialized = self.controller.initialize(
+            "dev-wf-2-engineering-observability", self.base, 140,
+            ["agent-coordination", "architecture"], ["src/vss_dev"],
+            "Controller bootstrap fixture.", mission_evidence())
+        self.git("switch", "-c", "feature/dev-wf-2-engineering-observability")
+        transitioned = self.controller.transition_branch(
+            "dev-wf-2-engineering-observability", "main", "feature/dev-wf-2-engineering-observability",
+            "Authorized milestone branch.", initialized["generation"])
+        (self.root / "README.md").write_text("accepted implementation\n", encoding="utf-8")
+        pending = self.controller.checkpoint(
+            "dev-wf-2-engineering-observability", "validation_completed", "Canonical validation passed.",
+            {"validation_level": "L3", "evidence_sha256": "a" * 64}, transitioned["generation"])
+        old_head = pending["repository"]["head_sha"]
+        self.git("add", "README.md"); self.git("commit", "-qm", "accepted implementation")
+        reviewed_head = self.git("rev-parse", "HEAD").stdout.strip()
+        for path in BOOTSTRAP_REPAIR_PATHS:
+            target = self.root / path; target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("controller repair fixture\n", encoding="utf-8")
+        self.git("add", *BOOTSTRAP_REPAIR_PATHS); self.git("commit", "-qm", "controller repair")
+        target_head = self.git("rev-parse", "HEAD").stdout.strip()
+        history_before = (self.root / ".vss/milestones/dev-wf-2-engineering-observability/history.ndjson").read_bytes()
+        return pending, old_head, reviewed_head, target_head, history_before
 
     def legacy_initialize(self) -> dict:
         state = self.initialize()
@@ -405,6 +444,159 @@ class MilestoneControllerTests(unittest.TestCase):
             expected_generation=recovered["generation"])
         self.assertEqual(continued["status"], "LOCAL_VALIDATION_REQUIRED")
         self.assertEqual(continued["next"]["action"], "run_affected_validation")
+
+    def test_modern_post_commit_head_rebind_preserves_history_and_invalidates_ci(self) -> None:
+        pending, committed_head, history_before = self.committed_pending_milestone()
+        rebound = self.controller.rebind_committed_head(
+            "dev-wf-1", "Bind accepted committed implementation.", pending["generation"])
+        self.assertEqual(rebound["generation"], pending["generation"] + 1)
+        self.assertEqual(rebound["repository"]["head_sha"], committed_head)
+        self.assertEqual(rebound["status"], "CI_PENDING")
+        self.assertEqual(rebound["next"], {"action": "ingest_ci", "human_boundary": False})
+        self.assertEqual(rebound["validation"], pending["validation"])
+        self.assertEqual(rebound["ci"], {"head_sha": None, "status": "not_observed", "classification": "none"})
+        history = (self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes()
+        self.assertTrue(history.startswith(history_before))
+        event = json.loads(history.splitlines()[-1])
+        self.assertEqual(event["event_type"], "identity_rebound")
+        self.assertEqual(event["data"]["rebound_from_head"], pending["repository"]["head_sha"])
+        self.assertTrue(all(value is False for value in event["authority"].values()))
+
+    def test_modern_post_commit_rebind_rejects_changed_identity_and_dirty_worktree(self) -> None:
+        pending, _, history_before = self.committed_pending_milestone()
+        changed = self.root / "README.md"; changed.write_text("unauthorized change\n", encoding="utf-8")
+        self.git("add", "README.md"); self.git("commit", "-qm", "unauthorized change")
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.rebind_committed_head("dev-wf-1", "Reject changed identity.", pending["generation"])
+        self.assertEqual((self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes(), history_before)
+
+
+    def test_modern_post_commit_rebind_rejects_dirty_worktree(self) -> None:
+        pending, _, history_before = self.committed_pending_milestone()
+        (self.root / "src/demo").mkdir(parents=True, exist_ok=True)
+        (self.root / "src/demo/dirty.txt").write_text("dirty\n", encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "clean worktree"):
+            self.controller.rebind_committed_head("dev-wf-1", "Reject dirty worktree.", pending["generation"])
+        self.assertEqual((self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes(), history_before)
+
+    def test_modern_post_commit_rebind_rejects_wrong_branch_stale_generation_and_rewrite(self) -> None:
+        pending, _, history_before = self.committed_pending_milestone()
+        self.git("switch", "main")
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.rebind_committed_head("dev-wf-1", "Reject wrong branch.", pending["generation"])
+        self.assertEqual((self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes(), history_before)
+
+        self.git("switch", "feature/dev-wf-1")
+        with self.assertRaisesRegex(MilestoneFailure, "writer conflict"):
+            self.controller.rebind_committed_head("dev-wf-1", "Reject stale writer.", pending["generation"] - 1)
+
+        self.git("switch", "main")
+        self.git("branch", "-D", "feature/dev-wf-1")
+        self.git("switch", "--orphan", "feature/dev-wf-1")
+        (self.root / "README.md").write_text("rewritten\n", encoding="utf-8")
+        self.git("add", "-A"); self.git("commit", "-qm", "rewritten history")
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.rebind_committed_head("dev-wf-1", "Reject rewrite.", pending["generation"])
+
+    def test_modern_post_commit_rebind_rejects_tampered_identity_event(self) -> None:
+        pending, _, _ = self.committed_pending_milestone()
+        rebound = self.controller.rebind_committed_head(
+            "dev-wf-1", "Bind accepted committed implementation.", pending["generation"])
+        history = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
+        events = history.read_text(encoding="utf-8").splitlines()
+        tampered = json.loads(events[-1]); tampered["data"]["rebound_from_head"] = "f" * 40
+        events[-1] = json.dumps(tampered, sort_keys=True, separators=(",", ":"))
+        history.write_text("\n".join(events) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "history conflict"):
+            self.controller.load("dev-wf-1")
+        self.assertEqual(rebound["generation"], pending["generation"] + 1)
+
+    def test_controller_upgrade_bootstrap_succeeds_and_invalidates_ci(self) -> None:
+        pending, old_head, reviewed_head, target_head, history_before = self.committed_controller_upgrade()
+        bootstrapped = self.controller.bootstrap_controller_upgrade(
+            "dev-wf-2-engineering-observability", self.base, old_head, reviewed_head, target_head,
+            "Authorize the exact controller upgrade.", pending["generation"])
+        self.assertEqual(bootstrapped["generation"], pending["generation"] + 1)
+        self.assertEqual(bootstrapped["repository"]["head_sha"], target_head)
+        self.assertEqual(bootstrapped["status"], "CI_PENDING")
+        self.assertEqual(bootstrapped["next"], {"action": "ingest_ci", "human_boundary": False})
+        self.assertEqual(bootstrapped["validation"], pending["validation"])
+        self.assertEqual(bootstrapped["ci"]["status"], "not_observed")
+        self.assertTrue((self.root / ".vss/milestones/dev-wf-2-engineering-observability/history.ndjson").read_bytes().startswith(history_before))
+
+    def test_controller_upgrade_bootstrap_rejects_wrong_heads_base_and_generation(self) -> None:
+        pending, old_head, reviewed_head, target_head, history_before = self.committed_controller_upgrade()
+        cases = (("base", "f" * 40, old_head, reviewed_head, target_head, pending["generation"]),
+                 ("old", self.base, "f" * 40, reviewed_head, target_head, pending["generation"]),
+                 ("reviewed-head", self.base, old_head, "f" * 40, target_head, pending["generation"]),
+                 ("reviewed-identity", self.base, old_head, old_head, target_head, pending["generation"]),
+                 ("target", self.base, old_head, reviewed_head, "f" * 40, pending["generation"]),
+                 ("generation", self.base, old_head, reviewed_head, target_head, pending["generation"] - 1))
+        for name, base, old, reviewed, target, generation in cases:
+            with self.subTest(name=name), self.assertRaises(MilestoneFailure):
+                self.controller.bootstrap_controller_upgrade(
+                    "dev-wf-2-engineering-observability", base, old, reviewed, target, "Reject.", generation)
+        self.assertEqual((self.root / ".vss/milestones/dev-wf-2-engineering-observability/history.ndjson").read_bytes(), history_before)
+
+    def test_controller_upgrade_bootstrap_rejects_unrelated_dirty_or_stale_ci(self) -> None:
+        pending, old_head, reviewed_head, target_head, history_before = self.committed_controller_upgrade()
+        unrelated = self.root / "unrelated.py"; unrelated.write_text("unrelated\n", encoding="utf-8")
+        self.git("add", "unrelated.py"); self.git("commit", "-qm", "unrelated")
+        with self.assertRaisesRegex(MilestoneFailure, "boundary"):
+            self.controller.bootstrap_controller_upgrade(
+                "dev-wf-2-engineering-observability", self.base, old_head, reviewed_head,
+                self.git("rev-parse", "HEAD").stdout.strip(), "Reject unrelated.", pending["generation"])
+        self.assertEqual((self.root / ".vss/milestones/dev-wf-2-engineering-observability/history.ndjson").read_bytes(), history_before)
+
+    def test_controller_upgrade_bootstrap_rejects_dirty_worktree(self) -> None:
+        pending, old_head, reviewed_head, target_head, history_before = self.committed_controller_upgrade()
+        (self.root / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "clean worktree"):
+            self.controller.bootstrap_controller_upgrade(
+                "dev-wf-2-engineering-observability", self.base, old_head, reviewed_head, target_head,
+                "Reject dirty.", pending["generation"])
+        self.assertEqual((self.root / ".vss/milestones/dev-wf-2-engineering-observability/history.ndjson").read_bytes(), history_before)
+
+    def test_controller_upgrade_bootstrap_rejects_stale_ci(self) -> None:
+        pending, old_head, reviewed_head, target_head, history_before = self.committed_controller_upgrade()
+        self.controller.ingest_ci({"head_sha": old_head, "checks": []}, "dev-wf-2-engineering-observability")
+        current_generation = self.controller.load("dev-wf-2-engineering-observability")["generation"]
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.bootstrap_controller_upgrade(
+                "dev-wf-2-engineering-observability", self.base, old_head, reviewed_head, target_head,
+                "Reject stale CI.", current_generation)
+        current = (self.root / ".vss/milestones/dev-wf-2-engineering-observability/history.ndjson").read_text(encoding="utf-8")
+        self.assertNotIn('"event_type":"controller_bootstrap"', current)
+        self.assertTrue(current.encode().startswith(history_before))
+
+    def test_controller_upgrade_bootstrap_rejects_non_descendant_replay_and_tampering(self) -> None:
+        pending, old_head, reviewed_head, target_head, history_before = self.committed_controller_upgrade()
+        self.git("switch", "main"); self.git("branch", "-D", "feature/dev-wf-2-engineering-observability")
+        self.git("switch", "--orphan", "feature/dev-wf-2-engineering-observability")
+        (self.root / "README.md").write_text("rewritten\n", encoding="utf-8")
+        self.git("add", "-A"); self.git("commit", "-qm", "rewritten")
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.bootstrap_controller_upgrade(
+                "dev-wf-2-engineering-observability", self.base, old_head, reviewed_head,
+                self.git("rev-parse", "HEAD").stdout.strip(), "Reject rewrite.", pending["generation"])
+
+        self.assertTrue(history_before)
+
+    def test_controller_upgrade_bootstrap_rejects_replay_and_tampered_event(self) -> None:
+        pending, old_head, reviewed_head, target_head, _ = self.committed_controller_upgrade()
+        bootstrapped = self.controller.bootstrap_controller_upgrade(
+            "dev-wf-2-engineering-observability", self.base, old_head, reviewed_head, target_head,
+            "Bootstrap once.", pending["generation"])
+        with self.assertRaisesRegex(MilestoneFailure, "already recorded"):
+            self.controller.bootstrap_controller_upgrade(
+                "dev-wf-2-engineering-observability", self.base, old_head, reviewed_head, target_head,
+                "Replay.", bootstrapped["generation"])
+        history = self.root / ".vss/milestones/dev-wf-2-engineering-observability/history.ndjson"
+        lines = history.read_text(encoding="utf-8").splitlines(); event = json.loads(lines[-1])
+        event["data"]["new_head"] = "f" * 40
+        lines[-1] = json.dumps(event, sort_keys=True, separators=(",", ":")); history.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "history conflict"):
+            self.controller.load("dev-wf-2-engineering-observability")
 
     def test_event_substitution_and_two_writer_conflicts_fail_closed(self) -> None:
         state = self.initialize()

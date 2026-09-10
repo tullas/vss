@@ -88,6 +88,18 @@ def _parser() -> argparse.ArgumentParser:
     milestone_identity.add_argument("--milestone-id", required=True)
     milestone_identity.add_argument("--summary", required=True)
     milestone_identity.add_argument("--expected-generation", required=True, type=int)
+    milestone_rebind = milestone_actions.add_parser("rebind-committed-head")
+    milestone_rebind.add_argument("--milestone-id", required=True)
+    milestone_rebind.add_argument("--summary", required=True)
+    milestone_rebind.add_argument("--expected-generation", required=True, type=int)
+    milestone_bootstrap = milestone_actions.add_parser("bootstrap-controller-upgrade")
+    milestone_bootstrap.add_argument("--milestone-id", required=True)
+    milestone_bootstrap.add_argument("--base-head", required=True)
+    milestone_bootstrap.add_argument("--old-head", required=True)
+    milestone_bootstrap.add_argument("--reviewed-head", required=True)
+    milestone_bootstrap.add_argument("--target-head", required=True)
+    milestone_bootstrap.add_argument("--reason", required=True)
+    milestone_bootstrap.add_argument("--expected-generation", required=True, type=int)
     milestone_checkpoint = milestone_actions.add_parser("checkpoint")
     milestone_checkpoint.add_argument("--milestone-id")
     milestone_checkpoint.add_argument("--type", required=True, choices=("mission_assessed", "mission_reviewed", "checkpointed", "repair_started", "repair_completed", "blocked", "completed"))
@@ -422,6 +434,13 @@ def main(argv: list[str] | None = None) -> int:
             elif args.milestone_action == "recover-state-identity":
                 value = controller.recover_state_identity(
                     args.milestone_id, args.summary, args.expected_generation)
+            elif args.milestone_action == "rebind-committed-head":
+                value = controller.rebind_committed_head(
+                    args.milestone_id, args.summary, args.expected_generation)
+            elif args.milestone_action == "bootstrap-controller-upgrade":
+                value = controller.bootstrap_controller_upgrade(
+                    args.milestone_id, args.base_head, args.old_head, args.reviewed_head, args.target_head,
+                    args.reason, args.expected_generation)
             elif args.milestone_action == "checkpoint":
                 if bool(args.input) != (args.type in {"mission_assessed", "mission_reviewed"}):
                     raise MilestoneFailure("mission checkpoints require --input; other checkpoints do not accept it")
