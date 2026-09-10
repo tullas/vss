@@ -137,7 +137,7 @@ class SafeImageToVideoHandle:
                 or result.media.content[:8] != b"\x00\x00\x00\x18ftyp"):
             raise ProviderExecutionFailure("image-to-video provider returned invalid video")
         if (not isinstance(result.provider_request_id, str)
-                or not re.fullmatch(r"[A-Za-z0-9._:-]{1,256}", result.provider_request_id)
+                or not re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", result.provider_request_id)
                 or not re.fullmatch(r"[0-9a-f]{64}", result.response_sha256)
                 or not re.fullmatch(r"[0-9]+\.[0-9]{6}", result.estimated_cost_usd)
                 or not isinstance(result.latency_ms, int) or not 0 <= result.latency_ms <= 1_800_000):

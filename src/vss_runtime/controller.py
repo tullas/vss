@@ -365,9 +365,19 @@ class RuntimeController:
             if capability.manifest.identity == "movie.moving-shot":
                 if set(authorized) != {"filesystem_write", "network", "provider_access", "secrets"}:
                     raise PermissionDenied("moving-shot requires exact Runtime permissions")
-                from vss_movie_moving_shot import MAXIMUM_COST_USD, SECRET_NAME
+                from vss_movie_moving_shot import LOCATION, MAXIMUM_COST_USD, SECRET_NAME, validate_moving_shot_admission
+                try:
+                    validate_moving_shot_admission(admitted_request)
+                except ValueError as exc:
+                    raise InvalidCapabilityInput("moving-shot request contract is invalid") from exc
                 project = os.environ.get("VSS_VERTEX_AI_PROJECT_ID", "")
                 location = os.environ.get("VSS_VERTEX_AI_LOCATION", "us-central1")
+                if location != LOCATION:
+                    from .external_preflight import ExternalExecutionPreflightFailure
+                    raise ExternalExecutionPreflightFailure("endpoint_location")
+                if os.environ.get("VSS_VERTEX_AI_FIXED_QUOTA_CONFIRMED") != "true":
+                    from .external_preflight import ExternalExecutionPreflightFailure
+                    raise ExternalExecutionPreflightFailure("fixed_quota_unconfirmed")
                 endpoint = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/veo-3.1-generate-001:predictLongRunning"
                 if not project:
                     raise RuntimeInternalFailure("Vertex project configuration is unavailable")
@@ -488,6 +498,7 @@ class RuntimeController:
                 "movie.m8-3-real-provider-smoke-2",
                 "movie.m8-3-real-provider-smoke-3",
                 "movie.controlled-review-frame",
+                "movie.moving-shot",
             } and diagnostic is not None:
                 provider_diagnostic = diagnostic.as_dict()
             bounded_preflight = getattr(exc, "preflight_diagnostic", None)

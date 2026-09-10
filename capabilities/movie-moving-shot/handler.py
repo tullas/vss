@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from vss_capabilities import CapabilityResult, SDK_API_VERSION
-from vss_movie_moving_shot import MovingShotAdmission, validate_moving_shot_admission
+from vss_movie_moving_shot import IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECONDS, MovingShotAdmission, validate_moving_shot_admission
 from vss_providers import ImageToVideoRequest
 
 AUTHORITY = {"production": False, "publication": False, "retry": False, "fallback": False, "workflow_activation": False}
@@ -32,7 +32,8 @@ def execute(context, input_data, dry_run):
         prompt=admission.request["prompt"], image=admission.image,
         request_sha256=admission.request_sha256,
         provider_request_sha256=admission.request_sha256,
-        duration_seconds=4, resolution="720p", generate_audio=False,
+        duration_seconds=IMAGE_TO_VIDEO_DURATION_SECONDS, resolution="720p", generate_audio=False,
+        image_mime_type=IMAGE_MIME_TYPE,
     ))
     video = destination / "shot.mp4"; video.write_bytes(result.media.content)
     evidence = destination / "evidence.json"

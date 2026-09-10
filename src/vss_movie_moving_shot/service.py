@@ -9,6 +9,9 @@ from typing import Any, Mapping
 
 PROVIDER_IDENTITY = "movie.image-to-video.vertex-veo"
 MODEL_SNAPSHOT = "veo-3.1-generate-001"
+LOCATION = "us-central1"
+IMAGE_MIME_TYPE = "image/png"
+IMAGE_TO_VIDEO_DURATION_SECONDS = 8
 SECRET_NAME = "VSS_VERTEX_AI_ACCESS_TOKEN"  # pragma: allowlist secret
 MAXIMUM_COST_USD = "5.000000"
 MAXIMUM_OUTPUT_BYTES = 256 * 1024 * 1024
@@ -49,7 +52,7 @@ def admit_moving_shot(*, shot_id: str, scene_id: str, visual_basis_path: Path,
         "scope": {"production_id": production_id, "scene_id": scene_id, "shot_id": shot_id},
         "production_input": {"media_type": "image/png", "content_sha256": actual, "byte_count": len(image), "basis_path": str(visual_basis_path)},
         "source_lineage": dict(sorted(source_lineage.items())),
-        "provider": {"identity": PROVIDER_IDENTITY, "model_snapshot": MODEL_SNAPSHOT, "resolution": "720p", "duration_seconds": 4, "generate_audio": False},
+        "provider": {"identity": PROVIDER_IDENTITY, "model_snapshot": MODEL_SNAPSHOT, "location": LOCATION, "resolution": "720p", "duration_seconds": IMAGE_TO_VIDEO_DURATION_SECONDS, "generate_audio": False, "image_mime_type": IMAGE_MIME_TYPE},
         "bounds": {"maximum_provider_attempts": 1, "maximum_outputs": 1, "maximum_cost_usd": MAXIMUM_COST_USD},
         "prompt": prompt,
         "authority": {"production": False, "publication": False, "retry": False, "fallback": False, "workflow_activation": False},
@@ -69,7 +72,7 @@ def validate_moving_shot_admission(admission: MovingShotAdmission) -> MovingShot
     sealed = dict(request); sealed["request_sha256"] = "0" * 64
     if request.get("request_sha256") != _digest(sealed):
         raise ValueError("moving-shot request seal mismatch")
-    if request.get("provider") != {"identity": PROVIDER_IDENTITY, "model_snapshot": MODEL_SNAPSHOT, "resolution": "720p", "duration_seconds": 4, "generate_audio": False}:
+    if request.get("provider") != {"identity": PROVIDER_IDENTITY, "model_snapshot": MODEL_SNAPSHOT, "location": LOCATION, "resolution": "720p", "duration_seconds": IMAGE_TO_VIDEO_DURATION_SECONDS, "generate_audio": False, "image_mime_type": IMAGE_MIME_TYPE}:
         raise ValueError("moving-shot provider binding is invalid")
     if request.get("bounds") != {"maximum_provider_attempts": 1, "maximum_outputs": 1, "maximum_cost_usd": MAXIMUM_COST_USD}:
         raise ValueError("moving-shot bounds are invalid")

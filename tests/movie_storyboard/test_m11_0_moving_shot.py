@@ -48,6 +48,21 @@ class MovingShotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_moving_shot_admission(forged)
 
+    def test_admission_rejects_non_current_veo_image_to_video_contract(self):
+        admission = self.admission()
+        for field, value in (("duration_seconds", 4), ("image_mime_type", ""), ("location", "global")):
+            forged_request = dict(admission.request)
+            forged_provider = dict(forged_request["provider"])
+            forged_provider[field] = value
+            forged_request["provider"] = forged_provider
+            sealed = dict(forged_request)
+            sealed["request_sha256"] = "0" * 64
+            import json
+            forged_request["request_sha256"] = __import__("hashlib").sha256(
+                json.dumps(sealed, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validate_moving_shot_admission(type(admission)(forged_request, admission.image))
+
     def test_runtime_handle_enforces_one_call_and_bounds_video(self):
         provider = FakeVideoProvider()
         access = ProviderAccess(video=provider, video_secret_reader=lambda _: "token")
@@ -56,7 +71,7 @@ class MovingShotTests(unittest.TestCase):
             "prompt": admission.request["prompt"], "image": admission.image,
             "request_sha256": admission.request_sha256,
             "provider_request_sha256": admission.request_sha256,
-            "duration_seconds": 4, "resolution": "720p", "generate_audio": False,
+            "duration_seconds": 8, "resolution": "720p", "generate_audio": False, "image_mime_type": "image/png",
         })()
         result = access.get_image_to_video_generator().generate(request)
         self.assertEqual(result.media.media_type, "video/mp4")
@@ -73,7 +88,7 @@ class MovingShotTests(unittest.TestCase):
             "prompt": admission.request["prompt"], "image": admission.image,
             "request_sha256": admission.request_sha256,
             "provider_request_sha256": admission.request_sha256,
-            "duration_seconds": 4, "resolution": "720p", "generate_audio": False,
+            "duration_seconds": 8, "resolution": "720p", "generate_audio": False, "image_mime_type": "image/png",
         })()
         access.get_image_to_video_generator().generate(request)
         self.assertEqual(provider.calls, 1)

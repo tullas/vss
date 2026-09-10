@@ -89,6 +89,7 @@ class ImageToVideoRequest:
     duration_seconds: int
     resolution: str
     generate_audio: bool
+    image_mime_type: str = "image/png"
 
 
 @dataclass(frozen=True, slots=True)
