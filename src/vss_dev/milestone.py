@@ -27,6 +27,11 @@ MILESTONE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
 BOOTSTRAP_MILESTONE = "dev-wf-2-engineering-observability"
+IDENTITY_REPAIR_PATHS = tuple(sorted((
+    "src/vss_commands/cli.py",
+    "src/vss_dev/milestone.py",
+    "tests/dev_milestone/test_milestone.py",
+)))
 BOOTSTRAP_REPAIR_PATHS = tuple(sorted((
     "docs/agent-coordination.md",
     "schemas/dev-milestone-record-v1.schema.json",
@@ -119,7 +124,7 @@ class MilestoneController:
         return {"name_with_owner": match.group(1), "branch": branch, "base_sha": base_value, "head_sha": head,
                 "change_identity": self._change_identity(base_value)}
 
-    def _change_identity(self, base: str) -> str:
+    def _changed_paths(self, base: str) -> list[str]:
         raw = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 2_000_000)
         entries = raw.split(b"\0")
         paths: list[str] = []
@@ -146,16 +151,54 @@ class MilestoneController:
             paths.append(path)
         diff_paths = self._run(["git", "diff", "--name-only", "-z", base, "--"], 1_048_576).split(b"\0")
         paths.extend(path.decode("utf-8") for path in diff_paths if path)
-        diff = self._run(["git", "diff", "--binary", base, "--"], 16 * 1024 * 1024)
-        return hashlib.sha256(_canonical({"base": base, "paths": sorted(set(paths)), "diff_sha256": hashlib.sha256(diff).hexdigest()})).hexdigest()
+        return sorted(set(paths))
+
+    def _change_identity(self, base: str) -> str:
+        """Hash one complete worktree snapshot so commit state cannot change identity."""
+        paths = self._changed_paths(base)
+        snapshot: list[dict[str, Any]] = []
+        for path in paths:
+            candidate = self.root / path
+            try:
+                if not candidate.exists() and not candidate.is_symlink():
+                    snapshot.append({"path": path, "kind": "deleted"})
+                    continue
+                mode = candidate.lstat().st_mode & 0o777
+                if candidate.is_symlink():
+                    content = os.readlink(candidate).encode("utf-8")
+                    kind = "symlink"
+                elif candidate.is_file():
+                    content = candidate.read_bytes()
+                    kind = "file"
+                else:
+                    raise OSError("unsupported worktree entry")
+            except OSError as exc:
+                raise MilestoneFailure("change identity snapshot is unreadable") from exc
+            if len(content) > 16 * 1024 * 1024:
+                raise MilestoneFailure("change identity snapshot exceeded its bound")
+            snapshot.append({"path": path, "kind": kind, "mode": f"{mode:04o}",
+                             "sha256": hashlib.sha256(content).hexdigest()})
+        return _digest({"base": base, "paths": paths, "snapshot": snapshot})
 
     def _committed_change_identity(self, base: str, head: str,
                                    excluded: tuple[str, ...] = ()) -> str:
         names = [path.decode("utf-8") for path in self._run(
             ["git", "diff", "--name-only", "-z", base, head, "--"], 1_048_576).split(b"\0") if path]
         paths = sorted(set(names) - set(excluded))
-        diff = self._run(["git", "diff", "--binary", base, head, "--", *paths], 16 * 1024 * 1024) if paths else b""
-        return _digest({"base": base, "paths": paths, "diff_sha256": hashlib.sha256(diff).hexdigest()})
+        snapshot: list[dict[str, Any]] = []
+        for path in paths:
+            exists = subprocess.run(["git", "cat-file", "-e", f"{head}:{path}"], cwd=self.root,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
+            if not exists:
+                snapshot.append({"path": path, "kind": "deleted"})
+                continue
+            content = self._run(["git", "show", f"{head}:{path}"], 16 * 1024 * 1024)
+            tree = self._run(["git", "ls-tree", "-r", head, "--", path], 4096).decode("utf-8")
+            mode = tree.split(" ", 1)[0]
+            kind = "symlink" if mode == "120000" else "file"
+            snapshot.append({"path": path, "kind": kind, "mode": f"{int(mode, 8) & 0o777:04o}",
+                             "sha256": hashlib.sha256(content).hexdigest()})
+        return _digest({"base": base, "paths": paths, "snapshot": snapshot})
 
     def _controller_identity(self, head: str, paths: tuple[str, ...], diff_sha256: str) -> str:
         return _digest({"head_sha": head, "paths": list(paths), "diff_sha256": diff_sha256})
@@ -534,7 +577,11 @@ class MilestoneController:
             elif event["event_type"] == "identity_rebound":
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 ci_subject_head = None; ci_change_identity = None
-                status, action, human = "CI_PENDING", "ingest_ci", False
+                if data.get("validation_invalidated"):
+                    validation = {"evidence_sha256": None, "level": "none"}
+                    status, action, human = "LOCAL_VALIDATION_REQUIRED", "run_affected_validation", False
+                else:
+                    status, action, human = "CI_PENDING", "ingest_ci", False
             elif event["event_type"] == "controller_bootstrap":
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 ci_subject_head = None; ci_change_identity = None
@@ -784,7 +831,8 @@ class MilestoneController:
         return self.load(milestone_id)
 
     def rebind_committed_head(self, milestone_id: str, summary: str,
-                              expected_generation: int) -> dict[str, Any]:
+                              expected_generation: int, reviewed_head: str | None = None,
+                              validation_evidence: Path | None = None) -> dict[str, Any]:
         """Explicitly bind a committed modern milestone head without rewriting history."""
         if (MILESTONE.fullmatch(milestone_id) is None or not summary or len(summary) > 512
                 or type(expected_generation) is not int):
@@ -811,9 +859,56 @@ class MilestoneController:
                     or stored["next"]["action"] != "ingest_ci"
                     or repository["branch"] != stored["repository"]["branch"]
                     or repository["base_sha"] != stored["repository"]["base_sha"]
-                    or repository["head_sha"] == stored["repository"]["head_sha"]
-                    or repository["change_identity"] != stored["repository"]["change_identity"]):
+                    or repository["head_sha"] == stored["repository"]["head_sha"]):
                 raise MilestoneFailure("milestone head rebind is unauthorized")
+            identity_matches = repository["change_identity"] == stored["repository"]["change_identity"]
+            if not identity_matches:
+                if reviewed_head is None or validation_evidence is None:
+                    raise MilestoneFailure("milestone head rebind is unauthorized")
+                if SHA1.fullmatch(reviewed_head) is None or not validation_evidence.is_file():
+                    raise MilestoneFailure("milestone identity reconciliation is unauthorized")
+                evidence = _read_json(validation_evidence, 65_536)
+                if (_digest(evidence) != stored["validation"]["evidence_sha256"]
+                        or evidence.get("repository", {}).get("base_sha") != stored["repository"]["base_sha"]
+                        or evidence.get("repository", {}).get("branch") != stored["repository"]["branch"]
+                        or evidence.get("repository", {}).get("head_sha") != stored["repository"]["head_sha"]):
+                    raise MilestoneFailure("milestone identity reconciliation is unauthorized")
+                old_head = stored["repository"]["head_sha"]
+                if any(subprocess.run(["git", "merge-base", "--is-ancestor", ancestor, descendant],
+                                      cwd=self.root, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL, check=False).returncode != 0
+                       for ancestor, descendant in ((old_head, reviewed_head), (reviewed_head, repository["head_sha"]))):
+                    raise MilestoneFailure("milestone identity reconciliation is unauthorized")
+                repair_paths = [path.decode("utf-8") for path in self._run(
+                    ["git", "diff", "--name-only", "-z", reviewed_head, repository["head_sha"], "--"],
+                    1_048_576).split(b"\0") if path]
+                if sorted(set(repair_paths)) != list(IDENTITY_REPAIR_PATHS):
+                    raise MilestoneFailure("milestone identity reconciliation repair boundary is unauthorized")
+                committed_paths = self._run(
+                    ["git", "diff", "--name-only", "-z", stored["repository"]["base_sha"], reviewed_head, "--"],
+                    1_048_576).split(b"\0")
+                committed_paths = sorted(set(path.decode("utf-8") for path in committed_paths if path))
+                added_paths = set(path.decode("utf-8") for path in self._run(
+                    ["git", "diff", "--diff-filter=A", "--name-only", "-z", stored["repository"]["base_sha"], reviewed_head, "--"],
+                    1_048_576).split(b"\0") if path)
+                tracked_paths = [path for path in committed_paths if path not in added_paths]
+                patch = self._run(["git", "diff", "--binary", stored["repository"]["base_sha"], reviewed_head, "--", *tracked_paths], 16 * 1024 * 1024) if tracked_paths else b""
+                manifest = []
+                for path in sorted(added_paths):
+                    content = self._run(["git", "show", f"{reviewed_head}:{path}"], 16 * 1024 * 1024)
+                    mode = self._run(["git", "ls-tree", "-r", reviewed_head, "--", path], 4096).decode("utf-8").split(" ", 1)[0]
+                    manifest.append({"path": path, "mode": f"{int(mode, 8) & 0o777:04o}",
+                                     "sha256": hashlib.sha256(content).hexdigest()})
+                legacy_agent_identity = hashlib.sha256(
+                    b"vss-agent-change-v1\0" + hashlib.sha256(patch).digest()
+                    + _canonical({"untracked": manifest})).hexdigest()
+                if evidence.get("change_identity") != legacy_agent_identity:
+                    raise MilestoneFailure("milestone identity reconciliation is unauthorized")
+                legacy_controller_identity = _digest({
+                    "base": stored["repository"]["base_sha"], "paths": committed_paths,
+                    "diff_sha256": hashlib.sha256(patch).hexdigest()})
+                if legacy_controller_identity != stored["repository"]["change_identity"]:
+                    raise MilestoneFailure("milestone identity reconciliation is unauthorized")
             if subprocess.run(["git", "merge-base", "--is-ancestor", stored["repository"]["head_sha"], repository["head_sha"]],
                               cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0:
                 raise MilestoneFailure("milestone head rebind is unauthorized")

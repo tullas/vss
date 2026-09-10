@@ -92,6 +92,8 @@ def _parser() -> argparse.ArgumentParser:
     milestone_rebind.add_argument("--milestone-id", required=True)
     milestone_rebind.add_argument("--summary", required=True)
     milestone_rebind.add_argument("--expected-generation", required=True, type=int)
+    milestone_rebind.add_argument("--reviewed-head")
+    milestone_rebind.add_argument("--validation-evidence", type=Path)
     milestone_bootstrap = milestone_actions.add_parser("bootstrap-controller-upgrade")
     milestone_bootstrap.add_argument("--milestone-id", required=True)
     milestone_bootstrap.add_argument("--base-head", required=True)
@@ -441,7 +443,8 @@ def main(argv: list[str] | None = None) -> int:
                     args.milestone_id, args.summary, args.expected_generation)
             elif args.milestone_action == "rebind-committed-head":
                 value = controller.rebind_committed_head(
-                    args.milestone_id, args.summary, args.expected_generation)
+                    args.milestone_id, args.summary, args.expected_generation,
+                    args.reviewed_head, args.validation_evidence)
             elif args.milestone_action == "bootstrap-controller-upgrade":
                 value = controller.bootstrap_controller_upgrade(
                     args.milestone_id, args.base_head, args.old_head, args.reviewed_head, args.target_head,

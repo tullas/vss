@@ -191,6 +191,17 @@ class MilestoneControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(MilestoneFailure, "identity is stale"):
             self.controller.execution_packet("dev-wf-1")
 
+    def test_change_identity_is_stable_when_untracked_files_become_committed(self) -> None:
+        self.initialize()
+        new_file = self.root / "src/demo/new-contract.json"
+        new_file.parent.mkdir(parents=True, exist_ok=True)
+        new_file.write_bytes(b'{"stable":true}\n')
+        before = self.controller._repository(self.base)["change_identity"]
+        self.git("add", "src/demo/new-contract.json")
+        self.git("commit", "-qm", "commit intended new file")
+        after = self.controller._repository(self.base)["change_identity"]
+        self.assertEqual(before, after)
+
     def test_validation_ci_canonical_and_repair_packets_select_exact_next_requirements(self) -> None:
         initialized = self.initialize()
         changed = self.root / "src/vss_dev/change.py"; changed.parent.mkdir(parents=True); changed.write_text("value = 1\n")
