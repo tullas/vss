@@ -29,16 +29,22 @@ def _default_transport(url: str, body: bytes, headers: dict[str, str], timeout: 
 class VertexVeoProviderDiagnostic:
     """Bounded provider evidence safe to retain in the VSS audit record."""
 
-    __slots__ = ("http_response_received", "classification", "http_status", "error_code", "message")
+    __slots__ = ("http_response_received", "classification", "http_status", "error_code", "message", "stage", "operation_name", "poll_count", "submission_accepted")
 
     def __init__(self, http_response_received: bool, classification: str,
                  http_status: int | None = None, error_code: str | None = None,
-                 message: str | None = None) -> None:
+                 message: str | None = None, *, stage: str = "submission",
+                 operation_name: str | None = None, poll_count: int = 0,
+                 submission_accepted: bool = False) -> None:
         self.http_response_received = http_response_received
         self.classification = classification
         self.http_status = http_status
         self.error_code = error_code
         self.message = message
+        self.stage = stage
+        self.operation_name = operation_name
+        self.poll_count = poll_count
+        self.submission_accepted = submission_accepted
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -47,6 +53,10 @@ class VertexVeoProviderDiagnostic:
             "http_status": self.http_status,
             "error_code": self.error_code,
             "message": self.message,
+            "stage": self.stage,
+            "operation_name": self.operation_name,
+            "poll_count": self.poll_count,
+            "submission_accepted": self.submission_accepted,
         }
 
 
@@ -76,7 +86,9 @@ def _http_classification(status: int) -> str:
     }.get(status, "http_server" if 500 <= status <= 599 else "http_other")
 
 
-def _http_failure(exc: urllib.error.HTTPError) -> VertexVeoProviderFailure:
+def _http_failure(exc: urllib.error.HTTPError, *, stage: str = "submission",
+                  operation_name: str | None = None, poll_count: int = 0,
+                  submission_accepted: bool = False) -> VertexVeoProviderFailure:
     status = int(exc.code) if isinstance(exc.code, int) and 100 <= exc.code <= 599 else None
     code = message = None
     try:
@@ -92,17 +104,23 @@ def _http_failure(exc: urllib.error.HTTPError) -> VertexVeoProviderFailure:
         pass
     diagnostic = VertexVeoProviderDiagnostic(
         True, _http_classification(status) if status is not None else "http_other",
-        status, code, message,
+        status, code, message, stage=stage, operation_name=operation_name,
+        poll_count=poll_count, submission_accepted=submission_accepted,
     )
     return VertexVeoProviderFailure("image-to-video provider returned an HTTP error", diagnostic)
 
 
-def _transport_failure(exc: BaseException) -> VertexVeoProviderFailure:
+def _transport_failure(exc: BaseException, *, stage: str = "submission",
+                       operation_name: str | None = None, poll_count: int = 0,
+                       submission_accepted: bool = False) -> VertexVeoProviderFailure:
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
     classification = "timeout" if isinstance(reason, TimeoutError) else "transport"
     return VertexVeoProviderFailure(
         "image-to-video provider transport failed",
-        VertexVeoProviderDiagnostic(False, classification),
+        VertexVeoProviderDiagnostic(False, classification, stage=stage,
+                                    operation_name=operation_name,
+                                    poll_count=poll_count,
+                                    submission_accepted=submission_accepted),
     )
 
 
@@ -127,39 +145,44 @@ class VertexVeoImageToVideoProvider:
         try:
             raw = sender(endpoint, body, headers, 900.0, 128 * 1024 * 1024)
         except urllib.error.HTTPError as exc:
-            raise _http_failure(exc) from exc
+            raise _http_failure(exc, stage="submission") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise _transport_failure(exc) from exc
-        value = _parse_json(raw, "submission")
+            raise _transport_failure(exc, stage="submission") from exc
+        value = _parse_json(raw, "submission", submission_accepted=False)
         operation = value.get("name") if isinstance(value, dict) else None
         expected_prefix = f"projects/{project}/locations/{LOCATION}/publishers/google/models/{MODEL_SNAPSHOT}/operations/"
         if not isinstance(operation, str) or not operation.startswith(expected_prefix) or len(operation) > 512:
-            raise VertexVeoProviderFailure("image-to-video provider returned an invalid operation", VertexVeoProviderDiagnostic(True, "operation_invalid"))
+            raise VertexVeoProviderFailure("image-to-video provider returned an invalid operation", VertexVeoProviderDiagnostic(True, "operation_invalid", stage="submission"))
         poll_endpoint = endpoint.rsplit(":", 1)[0] + ":fetchPredictOperation"
         terminal_raw = None
         terminal = None
+        poll_count = 0
         for _ in range(360):
+            poll_count += 1
             try:
                 terminal_raw = sender(poll_endpoint, json.dumps({"operationName": operation}, separators=(",", ":")).encode(), headers, 30.0, 128 * 1024 * 1024)
             except urllib.error.HTTPError as exc:
-                raise _http_failure(exc) from exc
+                raise _http_failure(exc, stage="polling", operation_name=operation,
+                                    poll_count=poll_count, submission_accepted=True) from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
-                raise _transport_failure(exc) from exc
-            terminal = _parse_json(terminal_raw, "operation")
+                raise _transport_failure(exc, stage="polling", operation_name=operation,
+                                         poll_count=poll_count, submission_accepted=True) from exc
+            terminal = _parse_json(terminal_raw, "operation", operation_name=operation,
+                                   poll_count=poll_count, submission_accepted=True)
             if terminal.get("done") is True:
                 break
             time.sleep(POLL_INTERVAL_SECONDS)
         if not isinstance(terminal, dict) or terminal.get("done") is not True:
-            raise VertexVeoProviderFailure("image-to-video provider operation timed out", VertexVeoProviderDiagnostic(True, "operation_timeout"))
+            raise VertexVeoProviderFailure("image-to-video provider operation timed out", VertexVeoProviderDiagnostic(True, "operation_timeout", stage="polling", operation_name=operation, poll_count=poll_count, submission_accepted=True))
         if isinstance(terminal.get("error"), dict):
             error = terminal["error"]
-            raise VertexVeoProviderFailure("image-to-video provider operation failed", VertexVeoProviderDiagnostic(True, "operation_failed", error_code=_safe_message(str(error.get("status", error.get("code", "unknown")))), message=_safe_message(error.get("message"))))
+            raise VertexVeoProviderFailure("image-to-video provider operation failed", VertexVeoProviderDiagnostic(True, "operation_failed", error_code=_safe_message(str(error.get("status", error.get("code", "unknown")))), message=_safe_message(error.get("message")), stage="polling", operation_name=operation, poll_count=poll_count, submission_accepted=True))
         response = terminal.get("response") if isinstance(terminal.get("response"), dict) else terminal
         videos = response.get("videos") if isinstance(response, dict) else None
         prediction = videos[0] if isinstance(videos, list) and len(videos) == 1 and isinstance(videos[0], dict) else {}
         encoded = prediction.get("bytesBase64Encoded")
         if not isinstance(encoded, str):
-            raise VertexVeoProviderFailure("image-to-video provider returned no inline video", VertexVeoProviderDiagnostic(True, "output_missing"))
+            raise VertexVeoProviderFailure("image-to-video provider returned no inline video", VertexVeoProviderDiagnostic(True, "output_missing", stage="result_retrieval", operation_name=operation, poll_count=poll_count, submission_accepted=True))
         content = base64.b64decode(encoded, validate=True)
         if not content or len(content) > 256 * 1024 * 1024 or content[:8] != b"\x00\x00\x00\x18ftyp":
             raise ValueError("Vertex response is not a bounded MP4")
@@ -167,13 +190,14 @@ class VertexVeoImageToVideoProvider:
         return ImageToVideoResult(GeneratedMedia("video/mp4", content, 1280, 720, digest), max(0, int((time.monotonic() - started) * 1000)), hashlib.sha256(terminal_raw).hexdigest(), operation, "0.000000")
 
 
-def _parse_json(raw: bytes, stage: str) -> dict[str, Any]:
+def _parse_json(raw: bytes, stage: str, *, operation_name: str | None = None,
+                poll_count: int = 0, submission_accepted: bool = False) -> dict[str, Any]:
     try:
         value = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise VertexVeoProviderFailure("image-to-video provider returned invalid JSON", VertexVeoProviderDiagnostic(True, f"{stage}_json_invalid")) from exc
+        raise VertexVeoProviderFailure("image-to-video provider returned invalid JSON", VertexVeoProviderDiagnostic(True, f"{stage}_json_invalid", stage=stage, operation_name=operation_name, poll_count=poll_count, submission_accepted=submission_accepted)) from exc
     if not isinstance(value, dict):
-        raise VertexVeoProviderFailure("image-to-video provider returned an invalid object", VertexVeoProviderDiagnostic(True, f"{stage}_schema_invalid"))
+        raise VertexVeoProviderFailure("image-to-video provider returned an invalid object", VertexVeoProviderDiagnostic(True, f"{stage}_schema_invalid", stage=stage, operation_name=operation_name, poll_count=poll_count, submission_accepted=submission_accepted))
     return value
 
 

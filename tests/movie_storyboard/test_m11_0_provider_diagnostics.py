@@ -70,6 +70,10 @@ class VertexDiagnosticTests(unittest.TestCase):
             "http_status": 429,
             "error_code": "RESOURCE_EXHAUSTED",
             "message": "Quota exceeded for project; Bearer [redacted]",
+            "stage": "submission",
+            "operation_name": None,
+            "poll_count": 0,
+            "submission_accepted": False,
         })
 
     def test_provider_failure_diagnostic_survives_runtime_provider_handle(self):
@@ -91,6 +95,28 @@ class VertexDiagnosticTests(unittest.TestCase):
             access.get_image_to_video_generator().generate(request)
         self.assertEqual(raised.exception.diagnostic.http_status, 400)
         self.assertEqual(raised.exception.diagnostic.error_code, "INVALID_ARGUMENT")
+
+    def test_polling_failure_preserves_operation_and_stage(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        def transport(url, _body, _headers, _timeout, _maximum):
+            if url.endswith(":predictLongRunning"):
+                return json.dumps({"name": operation}).encode()
+            response = io.BytesIO(json.dumps({"error": {"code": 503, "status": "UNAVAILABLE", "message": "poll unavailable"}}).encode())
+            raise urllib.error.HTTPError(url, 503, "unavailable", {}, response)
+        provider = MODULE.VertexVeoImageToVideoProvider()
+        request = type("Request", (), {
+            "prompt": "prompt", "image": b"png", "request_sha256": "a" * 64,
+            "provider_request_sha256": "a" * 64, "duration_seconds": 8,
+            "resolution": "720p", "generate_audio": False, "image_mime_type": "image/png",
+        })()
+        with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}, clear=False):
+            with self.assertRaises(MODULE.VertexVeoProviderFailure) as raised:
+                provider.generate(request, credential="token", transport=transport)
+        self.assertEqual(raised.exception.diagnostic.as_dict(), {
+            "http_response_received": True, "classification": "http_server", "http_status": 503,
+            "error_code": "UNAVAILABLE", "message": "poll unavailable", "stage": "polling",
+            "operation_name": operation, "poll_count": 1, "submission_accepted": True,
+        })
 
 
 if __name__ == "__main__":
