@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError, LOCATION, MODEL_SNAPSHOT, QUOTA_METRIC, admit_moving_shot, validate_fixed_quota_evidence, validate_moving_shot_admission, validate_vertex_readiness_evidence
+from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError, LOCATION, MODEL_SNAPSHOT, QUOTA_METRIC, admit_moving_shot, classify_legacy_record, record_existing_authorization, validate_fixed_quota_evidence, validate_moving_shot_admission, validate_vertex_readiness_evidence
 from vss_providers import GeneratedMedia, ImageToVideoResult, ProviderAccess
 from vss_runtime import RuntimeController
 from vss_runtime.external_preflight import ExternalExecutionPreflight
@@ -74,6 +74,22 @@ class MovingShotTests(unittest.TestCase):
             with self.assertRaises(AttemptLedgerError):
                 ledger.reserve_execution()
             self.assertEqual(json.loads(path.read_text()), historical)
+
+    def test_legacy_reserved_attempt_is_classified_as_consumed_without_rewrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "attempt.json"
+            historical = {"attempts": 1, "maximum_cost_usd": "5.000000", "request_sha256": "e" * 64, "status": "reserved"}
+            path.write_text(json.dumps(historical), encoding="utf-8")
+            self.assertEqual(classify_legacy_record(path, "e" * 64)["status"], "consumed")
+            self.assertEqual(json.loads(path.read_text()), historical)
+
+    def test_existing_authorization_is_idempotently_recorded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "authorization.json"
+            record_existing_authorization(path, "f" * 64)
+            before = path.read_bytes()
+            record_existing_authorization(path, "f" * 64)
+            self.assertEqual(path.read_bytes(), before)
 
     def admission(self):
         with tempfile.TemporaryDirectory() as directory:

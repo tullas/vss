@@ -26,7 +26,12 @@ def execute(context, input_data, dry_run):
     destination = Path(root)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.mkdir(exist_ok=False)
-    ledger = AttemptLedger(destination / "attempt.json", admission.request_sha256)
+    # Control records live beside the output directory so pre-recorded
+    # authorization cannot make output allocation look already complete.
+    ledger = AttemptLedger(
+        destination.parent / f"{admission.request_sha256}.attempt.json",
+        admission.request_sha256,
+    )
     # The Runtime boundary has completed closed readiness and is now entering
     # the one execution slot. Reservation is not provider consumption.
     ledger.reserve_execution()

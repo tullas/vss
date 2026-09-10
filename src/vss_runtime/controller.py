@@ -420,7 +420,10 @@ class RuntimeController:
                     # M2.3 exposes no configuration keys until an explicit safe
                     # configuration contract is admitted for a capability.
                     safe_configuration=freeze_configuration({
-                        "artifact_root": str(self.root / ".local/movie/m11-0-moving-shot" / admitted_request.request_sha256),
+                        # Attempt 1/2 used the digest directory as their output
+                        # identity. Attempt 3 has a distinct namespace so
+                        # historical consumed evidence cannot block it.
+                        "artifact_root": str(self.root / ".local/movie/m11-0-moving-shot" / "attempt-3" / "output" / admitted_request.request_sha256),
                     } if capability.manifest.identity == "movie.moving-shot" else {}),
                     providers=provider_access,
                     host_inspection=(
