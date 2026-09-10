@@ -14,6 +14,8 @@ IMAGE_MIME_TYPE = "image/png"
 IMAGE_TO_VIDEO_DURATION_SECONDS = 8
 SECRET_NAME = "VSS_VERTEX_AI_ACCESS_TOKEN"  # pragma: allowlist secret
 MAXIMUM_COST_USD = "5.000000"
+QUOTA_EVIDENCE_ENV = "VSS_VERTEX_AI_QUOTA_EVIDENCE_FILE"
+QUOTA_METRIC = "aiplatform.googleapis.com/long_running_online_prediction_requests_per_base_model"
 MAXIMUM_OUTPUT_BYTES = 256 * 1024 * 1024
 REQUEST_LIMIT = 64 * 1024
 
@@ -79,3 +81,30 @@ def validate_moving_shot_admission(admission: MovingShotAdmission) -> MovingShot
     if hashlib.sha256(admission.image).hexdigest() != request.get("production_input", {}).get("content_sha256"):
         raise ValueError("moving-shot input reconstruction failed")
     return admission
+
+
+def validate_fixed_quota_evidence(path: Path, *, project_id: str) -> str:
+    """Validate a bounded, local copy of authoritative quota CLI evidence."""
+    if not isinstance(project_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{5,29}", project_id):
+        raise ValueError("quota evidence project is invalid")
+    try:
+        raw = path.read_bytes()
+        if len(raw) > 16 * 1024:
+            raise ValueError("quota evidence exceeds its bound")
+        evidence = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("quota evidence is unavailable or invalid") from exc
+    if not isinstance(evidence, dict) or set(evidence) != {"metric", "dimensions", "quota", "unit", "project_id"}:
+        raise ValueError("quota evidence shape is invalid")
+    if (evidence["metric"] != QUOTA_METRIC
+            or evidence["project_id"] != project_id
+            or evidence["unit"] != "1/min/{project}/{region}/{base_model}"
+            or evidence["dimensions"] != {"base_model": MODEL_SNAPSHOT, "region": LOCATION}):
+        raise ValueError("quota evidence binding is invalid")
+    quota = evidence["quota"]
+    if (not isinstance(quota, dict) or set(quota) != {"defaultLimit", "effectiveLimit"}
+            or type(quota["defaultLimit"]) is not int or type(quota["effectiveLimit"]) is not int
+            or quota["defaultLimit"] <= 0 or quota["effectiveLimit"] <= 0
+            or quota["effectiveLimit"] < quota["defaultLimit"]):
+        raise ValueError("quota evidence limits are invalid")
+    return hashlib.sha256(raw).hexdigest()

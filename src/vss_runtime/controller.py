@@ -365,7 +365,7 @@ class RuntimeController:
             if capability.manifest.identity == "movie.moving-shot":
                 if set(authorized) != {"filesystem_write", "network", "provider_access", "secrets"}:
                     raise PermissionDenied("moving-shot requires exact Runtime permissions")
-                from vss_movie_moving_shot import LOCATION, MAXIMUM_COST_USD, SECRET_NAME, validate_moving_shot_admission
+                from vss_movie_moving_shot import LOCATION, MAXIMUM_COST_USD, QUOTA_EVIDENCE_ENV, SECRET_NAME, validate_fixed_quota_evidence, validate_moving_shot_admission
                 try:
                     validate_moving_shot_admission(admitted_request)
                 except ValueError as exc:
@@ -375,7 +375,10 @@ class RuntimeController:
                 if location != LOCATION:
                     from .external_preflight import ExternalExecutionPreflightFailure
                     raise ExternalExecutionPreflightFailure("endpoint_location")
-                if os.environ.get("VSS_VERTEX_AI_FIXED_QUOTA_CONFIRMED") != "true":
+                quota_evidence = os.environ.get(QUOTA_EVIDENCE_ENV, "")
+                try:
+                    validate_fixed_quota_evidence(Path(quota_evidence), project_id=project)
+                except ValueError:
                     from .external_preflight import ExternalExecutionPreflightFailure
                     raise ExternalExecutionPreflightFailure("fixed_quota_unconfirmed")
                 endpoint = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/veo-3.1-generate-001:predictLongRunning"

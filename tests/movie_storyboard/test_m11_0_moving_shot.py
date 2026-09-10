@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vss_movie_moving_shot import admit_moving_shot, validate_moving_shot_admission
+from vss_movie_moving_shot import LOCATION, MODEL_SNAPSHOT, QUOTA_METRIC, admit_moving_shot, validate_fixed_quota_evidence, validate_moving_shot_admission
 from vss_providers import GeneratedMedia, ImageToVideoResult, ProviderAccess
 
 
@@ -62,6 +62,25 @@ class MovingShotTests(unittest.TestCase):
                 json.dumps(sealed, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             with self.subTest(field=field), self.assertRaises(ValueError):
                 validate_moving_shot_admission(type(admission)(forged_request, admission.image))
+
+    def test_fixed_quota_evidence_requires_exact_authoritative_dimensions(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quota.json"
+            path.write_text(json.dumps({
+                "metric": QUOTA_METRIC,
+                "dimensions": {"base_model": MODEL_SNAPSHOT, "region": LOCATION},
+                "quota": {"defaultLimit": 50, "effectiveLimit": 50},
+                "unit": "1/min/{project}/{region}/{base_model}",
+                "project_id": "vss-film-poc",
+            }), encoding="utf-8")
+            digest = validate_fixed_quota_evidence(path, project_id="vss-film-poc")
+            self.assertEqual(len(digest), 64)
+            value = json.loads(path.read_text())
+            value["dimensions"]["region"] = "global"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                validate_fixed_quota_evidence(path, project_id="vss-film-poc")
 
     def test_runtime_handle_enforces_one_call_and_bounds_video(self):
         provider = FakeVideoProvider()

@@ -8,7 +8,6 @@ import re
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from typing import Any
 
 from vss_movie_moving_shot import IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECONDS, LOCATION, MODEL_SNAPSHOT, MAXIMUM_COST_USD
@@ -27,15 +26,19 @@ def _default_transport(url: str, body: bytes, headers: dict[str, str], timeout: 
     return _https_json(url, body, headers, timeout)
 
 
-@dataclass(frozen=True, slots=True)
 class VertexVeoProviderDiagnostic:
     """Bounded provider evidence safe to retain in the VSS audit record."""
 
-    http_response_received: bool
-    classification: str
-    http_status: int | None = None
-    error_code: str | None = None
-    message: str | None = None
+    __slots__ = ("http_response_received", "classification", "http_status", "error_code", "message")
+
+    def __init__(self, http_response_received: bool, classification: str,
+                 http_status: int | None = None, error_code: str | None = None,
+                 message: str | None = None) -> None:
+        self.http_response_received = http_response_received
+        self.classification = classification
+        self.http_status = http_status
+        self.error_code = error_code
+        self.message = message
 
     def as_dict(self) -> dict[str, object]:
         return {
