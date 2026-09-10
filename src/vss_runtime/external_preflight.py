@@ -28,6 +28,7 @@ class ExternalExecutionPreflightFailure(CapabilityExecutionFailure):
         if classification not in {
             "configuration", "credential_unavailable", "dns", "dns_timeout",
             "proxy_environment_unsupported", "endpoint_location", "fixed_quota_unconfirmed",
+            "vertex_readiness_unconfirmed",
         }:
             classification = "configuration"
         super().__init__(f"external execution preflight failed: {classification}")

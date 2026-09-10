@@ -3,12 +3,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
-from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError, LOCATION, MODEL_SNAPSHOT, QUOTA_METRIC, admit_moving_shot, validate_fixed_quota_evidence, validate_moving_shot_admission
+from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError, LOCATION, MODEL_SNAPSHOT, QUOTA_METRIC, admit_moving_shot, validate_fixed_quota_evidence, validate_moving_shot_admission, validate_vertex_readiness_evidence
 from vss_providers import GeneratedMedia, ImageToVideoResult, ProviderAccess
+from vss_runtime import RuntimeController
+from vss_runtime.external_preflight import ExternalExecutionPreflight
 
 
 MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
@@ -123,6 +128,64 @@ class MovingShotTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaises(ValueError):
                 validate_fixed_quota_evidence(path, project_id="vss-film-poc")
+
+    def test_vertex_readiness_requires_api_project_service_agent_and_role(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "readiness.json"
+            path.write_text(json.dumps({
+                "api_enabled": True, "project_id": "vss-film-poc",
+                "project_number": "1008607911742",
+                "service_agent": {
+                    "email": "service-1008607911742@gcp-sa-aiplatform.iam.gserviceaccount.com",
+                    "exists": True, "project_number": "1008607911742",
+                    "roles": ["roles/aiplatform.serviceAgent"],
+                },
+            }), encoding="utf-8")
+            self.assertEqual(len(validate_vertex_readiness_evidence(
+                path, project_id="vss-film-poc", project_number="1008607911742")), 64)
+            value = json.loads(path.read_text())
+            value["service_agent"]["roles"] = []
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                validate_vertex_readiness_evidence(path, project_id="vss-film-poc", project_number="1008607911742")
+
+    def test_missing_vertex_readiness_blocks_before_attempt_reservation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            basis = Path(directory) / "basis.png"
+            basis.write_bytes(b"authoritative-basis")
+            admission = admit_moving_shot(
+                shot_id="shot-024b0d6352149eabb74df543",
+                scene_id="scene-91f5c8634519d8264e2dd5f8",
+                visual_basis_path=basis,
+                visual_basis_sha256=hashlib.sha256(basis.read_bytes()).hexdigest(),
+                prompt="A bounded camera move preserves the source action.",
+                source_lineage={"shot_plan": "a" * 64},
+            )
+            resolutions = []
+            controller = RuntimeController(
+                root=Path(__file__).resolve().parents[2],
+                audit_logger=type("MemoryAudit", (), {"append": lambda self, record: None})(),
+                external_execution_preflight=ExternalExecutionPreflight(
+                    environment_contains=lambda name: name == "VSS_VERTEX_AI_ACCESS_TOKEN",
+                    resolver=lambda *args: resolutions.append(args) or [("us-central1-aiplatform.googleapis.com", 443)],
+                ),
+            )
+            with patch.dict("os.environ", {
+                "VSS_VERTEX_AI_PROJECT_ID": "vss-film-poc",
+                "VSS_VERTEX_AI_LOCATION": "us-central1",
+                "VSS_VERTEX_AI_QUOTA_EVIDENCE_FILE": str(Path(__file__).resolve().parents[2] / ".local/config/m11-0-veo-quota-evidence.json"),
+                "VSS_VERTEX_AI_ACCESS_TOKEN": "token",
+            }, clear=False):
+                os.environ.pop("VSS_VERTEX_AI_READINESS_EVIDENCE_FILE", None)
+                response, code = controller.run(
+                    "movie.moving-shot-generate", "development", {},
+                    {"admission_id": admission.request_sha256, "mode": "preflight"},
+                    "readiness-test", datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"), 0.0,
+                    dry_run=True, admitted_request=admission,
+                )
+            self.assertEqual(code, 20, response)
+            self.assertEqual(response["errors"], ["external execution preflight failed: vertex_readiness_unconfirmed"])
+            self.assertEqual(resolutions, [])
 
     def test_runtime_handle_enforces_one_call_and_bounds_video(self):
         provider = FakeVideoProvider()

@@ -15,7 +15,9 @@ IMAGE_TO_VIDEO_DURATION_SECONDS = 8
 SECRET_NAME = "VSS_VERTEX_AI_ACCESS_TOKEN"  # pragma: allowlist secret
 MAXIMUM_COST_USD = "5.000000"
 QUOTA_EVIDENCE_ENV = "VSS_VERTEX_AI_QUOTA_EVIDENCE_FILE"
+READINESS_EVIDENCE_ENV = "VSS_VERTEX_AI_READINESS_EVIDENCE_FILE"
 QUOTA_METRIC = "aiplatform.googleapis.com/long_running_online_prediction_requests_per_base_model"
+VERTEX_SERVICE_AGENT_ROLE = "roles/aiplatform.serviceAgent"
 MAXIMUM_OUTPUT_BYTES = 256 * 1024 * 1024
 REQUEST_LIMIT = 64 * 1024
 
@@ -107,4 +109,39 @@ def validate_fixed_quota_evidence(path: Path, *, project_id: str) -> str:
             or quota["defaultLimit"] <= 0 or quota["effectiveLimit"] <= 0
             or quota["effectiveLimit"] < quota["defaultLimit"]):
         raise ValueError("quota evidence limits are invalid")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def validate_vertex_readiness_evidence(path: Path, *, project_id: str,
+                                       project_number: str) -> str:
+    """Validate bounded, read-only evidence for Vertex first-use readiness."""
+    if (not isinstance(project_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{5,29}", project_id)
+            or not isinstance(project_number, str) or not re.fullmatch(r"[0-9]{5,20}", project_number)):
+        raise ValueError("Vertex readiness project identity is invalid")
+    try:
+        raw = path.read_bytes()
+        if len(raw) > 16 * 1024:
+            raise ValueError("Vertex readiness evidence exceeds its bound")
+        evidence = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Vertex readiness evidence is unavailable or invalid") from exc
+    if (not isinstance(evidence, dict)
+            or set(evidence) != {"api_enabled", "project_id", "project_number", "service_agent"}
+            or evidence["api_enabled"] is not True
+            or evidence["project_id"] != project_id
+            or evidence["project_number"] != project_number):
+        raise ValueError("Vertex readiness evidence binding is invalid")
+    agent = evidence["service_agent"]
+    expected_email = f"service-{project_number}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+    if (not isinstance(agent, dict)
+            or set(agent) != {"email", "exists", "project_number", "roles"}
+            or agent["email"] != expected_email
+            or agent["exists"] is not True
+            or agent["project_number"] != project_number
+            or (not isinstance(agent["roles"], list) or not 1 <= len(agent["roles"])
+                or len(agent["roles"]) > 16 or agent["roles"] != sorted(set(agent["roles"]))
+                or any(not isinstance(role, str) or not re.fullmatch(r"roles/[a-zA-Z0-9.]{1,128}", role)
+                       for role in agent["roles"])
+                or VERTEX_SERVICE_AGENT_ROLE not in agent["roles"])):
+        raise ValueError("Vertex service-agent readiness is unconfirmed")
     return hashlib.sha256(raw).hexdigest()

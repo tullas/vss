@@ -365,7 +365,9 @@ class RuntimeController:
             if capability.manifest.identity == "movie.moving-shot":
                 if set(authorized) != {"filesystem_write", "network", "provider_access", "secrets"}:
                     raise PermissionDenied("moving-shot requires exact Runtime permissions")
-                from vss_movie_moving_shot import LOCATION, MAXIMUM_COST_USD, QUOTA_EVIDENCE_ENV, SECRET_NAME, validate_fixed_quota_evidence, validate_moving_shot_admission
+                from vss_movie_moving_shot import (LOCATION, MAXIMUM_COST_USD, QUOTA_EVIDENCE_ENV,
+                    READINESS_EVIDENCE_ENV, SECRET_NAME, validate_fixed_quota_evidence,
+                    validate_moving_shot_admission, validate_vertex_readiness_evidence)
                 try:
                     validate_moving_shot_admission(admitted_request)
                 except ValueError as exc:
@@ -375,6 +377,14 @@ class RuntimeController:
                 if location != LOCATION:
                     from .external_preflight import ExternalExecutionPreflightFailure
                     raise ExternalExecutionPreflightFailure("endpoint_location")
+                readiness_evidence = os.environ.get(READINESS_EVIDENCE_ENV, "")
+                try:
+                    validate_vertex_readiness_evidence(
+                        Path(readiness_evidence), project_id=project,
+                        project_number="1008607911742")
+                except ValueError:
+                    from .external_preflight import ExternalExecutionPreflightFailure
+                    raise ExternalExecutionPreflightFailure("vertex_readiness_unconfirmed")
                 quota_evidence = os.environ.get(QUOTA_EVIDENCE_ENV, "")
                 try:
                     validate_fixed_quota_evidence(Path(quota_evidence), project_id=project)
