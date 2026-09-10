@@ -131,12 +131,44 @@ fixed profile IDs, and pass results. Any HEAD, map, or worktree change makes it 
 `.local/**`, sensitive-looking, or unclassified paths are not silently omitted; only
 `.local/secrets/development.auto.tfvars.example` retains its narrow protected-residue exception.
 Failure output is bounded and written only as diagnostic material.
+
+Validation evidence also records bounded elapsed milliseconds, per-profile timing, and a
+`resource.getrusage(RUSAGE_CHILDREN)` process-children high-water mark. The RSS value is reported
+with its platform unit (`bytes` on macOS, `kibibytes` on Linux/other supported hosts) and platform
+identifier; it is not instantaneous usage, deterministically comparable across runs, or
+cross-platform comparable without interpretation. These observations are advisory only; they do
+not change validation requirements or grant authority.
+`scripts/vss-agent doctor` reports redacted platform, CPU, available memory, free disk, and
+environment-category signals, plus an advisory validation parallelism recommendation. It never
+returns environment values or credentials. The controller's `analyze` action derives only the
+known local-green/CI-failure-loop and repeated-repair relay findings from its existing history;
+unknown opportunities remain an explicit empty result for later governed work.
+
+Execution packets carry repository references only, a bounded reference count, and an explicit
+`content_included: false` marker. Durable friction observations may be appended through
+`vss dev milestone checkpoint --type checkpointed --observation-input <file>` using the strict
+observation contract. These records remain advisory development evidence and do not authorize
+Runtime, provider, production, publication, deployment, canon, or workflow activity.
 Evidence output paths must be absolute and outside the repository so writing evidence cannot make
 the evidence stale or turn a local artifact into repository authority.
 
 A reset session reconstructs state from the GitHub issue or PR, `AGENTS.md`, requested domain IDs,
 router output, and the latest fresh checkpoint/evidence digest. Hidden agent memory and local
 evidence files are never authoritative.
+
+After an accepted implementation is committed, `vss dev milestone rebind-committed-head` may
+append one explicit identity-rebind event for a modern `CI_PENDING` milestone. It requires the
+expected generation, unchanged branch/base and reviewed change identity, a descendant HEAD, and
+a worktree containing only the protected residue. The event preserves review and validation
+history, clears any prior CI observation, and keeps `ingest_ci` as the next route; it grants no
+authority and does not rewrite history. Change identity includes committed diff paths so a commit
+does not itself appear as a semantic change to the reviewed implementation.
+
+The one-time `vss dev milestone bootstrap-controller-upgrade` transition is narrower: it is
+available only for `dev-wf-2-engineering-observability`, requires explicit base, old, reviewed,
+and target heads plus the expected generation, and accepts only the registered controller-repair
+path set between the reviewed and target commits. It records both controller identities and the
+repair digest, resets CI to `not_observed`, and cannot be replayed.
 
 ## Short handoff workflow
 

@@ -4,9 +4,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import platform
 import re
+import resource
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -380,7 +385,9 @@ def change_identity(base: str) -> str:
 
 
 def validate_evidence(value: Any) -> dict[str, Any]:
-    root = exact_keys(value, {"schema_version", "protocol", "repository", "map", "change_identity", "plan", "results", "passed", "authority"}, "validation evidence")
+    if type(value) is not dict or set(value) - {"schema_version", "protocol", "repository", "map", "change_identity", "plan", "results", "passed", "authority", "telemetry"}:
+        fail("validation evidence is malformed")
+    root = exact_keys({key: value[key] for key in value if key != "telemetry"}, {"schema_version", "protocol", "repository", "map", "change_identity", "plan", "results", "passed", "authority"}, "validation evidence")
     if root["schema_version"] != "1" or root["protocol"] != "vss.agent-validation-evidence" or root["passed"] is not True:
         fail("validation evidence identity is invalid")
     repository = exact_keys(root["repository"], {"name_with_owner", "branch", "base_sha", "head_sha"}, "evidence repository")
@@ -416,6 +423,26 @@ def validate_evidence(value: Any) -> dict[str, Any]:
             or (plan["executed_level"] == "L3" and plan["profiles"] != ["canonical"])
             or exact_keys(root["authority"], set(HARNESS_AUTHORITY), "evidence authority") != HARNESS_AUTHORITY):
         fail("validation evidence is invalid")
+    if "telemetry" in value:
+        telemetry = exact_keys(value["telemetry"], {"elapsed_ms", "peak_rss_high_water_mark", "peak_rss_unit",
+                                                     "peak_rss_semantics", "peak_rss_platform", "profile_timings_ms"},
+                                "validation telemetry")
+        if (type(telemetry["elapsed_ms"]) is not int or not 0 <= telemetry["elapsed_ms"] <= 3_600_000
+                or type(telemetry["peak_rss_high_water_mark"]) is not int
+                or not 0 <= telemetry["peak_rss_high_water_mark"] <= 1_000_000_000
+                or telemetry["peak_rss_unit"] not in {"bytes", "kibibytes"}
+                or telemetry["peak_rss_semantics"] != "process_children_high_water_mark"
+                or type(telemetry["peak_rss_platform"]) is not str
+                or not 1 <= len(telemetry["peak_rss_platform"]) <= 32):
+            fail("validation telemetry is invalid")
+        timings = telemetry["profile_timings_ms"]
+        if type(timings) is not list or len(timings) > 64 or any(
+                type(item) is not dict or set(item) != {"profile", "elapsed_ms"}
+                or type(item["profile"]) is not str or NAME.fullmatch(item["profile"]) is None
+                or type(item["elapsed_ms"]) is not int or not 0 <= item["elapsed_ms"] <= 3_600_000
+                for item in timings) or [item["profile"] for item in timings] != sorted(set(item["profile"] for item in timings)):
+            fail("validation telemetry is invalid")
+        root["telemetry"] = value["telemetry"]
     if len(canonical(root)) > MAX_COMMENT_BYTES:
         fail("validation evidence exceeded its bound")
     return root
@@ -432,8 +459,11 @@ def run_validation(base: str, selected_level: str, output: str | None) -> None:
     initial_branch, initial_head = current_identity()
     before = change_identity(base)
     results = []
+    profile_timings = []
+    started = time.monotonic()
     for profile_id in selected:
         profile = profiles[profile_id]
+        profile_started = time.monotonic()
         try:
             result = subprocess.run(profile["argv"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     check=False, timeout=3600)
@@ -445,13 +475,18 @@ def run_validation(base: str, selected_level: str, output: str | None) -> None:
             sys.stderr.buffer.write(result.stdout[-65_536:])
             fail(f"validation profile failed: {profile_id}")
         results.append({"profile": profile_id, "status": "passed", "exit_code": 0})
+        profile_timings.append({"profile": profile_id, "elapsed_ms": max(0, round((time.monotonic() - profile_started) * 1000))})
     branch, head = current_identity()
     mapping_after, digest_after = harness_map()
     after = change_identity(base)
     if ((branch, head) != (initial_branch, initial_head) or mapping_after != mapping
             or digest_after != map_digest or after != before):
         fail("repository changed during validation")
-    evidence = validate_evidence({
+    peak_rss = int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
+    peak_rss_unit = "kibibytes"
+    if sys.platform == "darwin":
+        peak_rss_unit = "bytes"
+    evidence = {
         "schema_version": "1", "protocol": "vss.agent-validation-evidence",
         "repository": {"name_with_owner": repository_name(), "branch": branch, "base_sha": base, "head_sha": head},
         "map": {"schema_version": "2", "sha256": map_digest}, "change_identity": before,
@@ -459,7 +494,13 @@ def run_validation(base: str, selected_level: str, output: str | None) -> None:
                  "executed_level": selected_level, "profiles": selected, "human_gate_required": plan["human_gate_required"],
                  "unknown_paths": plan["unknown_paths"]},
         "results": results, "passed": True, "authority": dict(HARNESS_AUTHORITY),
-    })
+        "telemetry": {"elapsed_ms": max(0, round((time.monotonic() - started) * 1000)),
+                       "peak_rss_high_water_mark": max(0, peak_rss), "peak_rss_unit": peak_rss_unit,
+                       "peak_rss_semantics": "process_children_high_water_mark",
+                       "peak_rss_platform": platform.system().lower()[:32],
+                       "profile_timings_ms": profile_timings},
+    }
+    validate_evidence(evidence)
     encoded = canonical(evidence).decode("utf-8") + "\n"
     if output is None:
         print(encoded, end="")
@@ -700,7 +741,45 @@ def parser() -> argparse.ArgumentParser:
     evidence_parser = commands.add_parser("evidence")
     evidence_parser.add_argument("--input", required=True)
     evidence_parser.add_argument("--require-current-change", action="store_true")
+    commands.add_parser("doctor")
     return root
+
+
+def doctor() -> dict[str, Any]:
+    """Return redacted, bounded host signals for local validation planning."""
+    try:
+        disk = shutil.disk_usage(Path.cwd())
+    except OSError as exc:
+        raise AgentFailure("host diagnostics are unavailable") from exc
+    memory_available = 0
+    try:
+        for line_value in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
+            if line_value.startswith("MemAvailable:"):
+                memory_available = int(line_value.split()[1])
+                break
+    except (OSError, UnicodeError, ValueError):
+        memory_available = 0
+    categories = set()
+    for name in os.environ:
+        if name.startswith("CODEX_"): categories.add("codex_context")
+        elif name.startswith("OPENAI_"): categories.add("openai_context")
+        elif name.startswith("GITHUB_"): categories.add("github_context")
+        elif name.startswith("VSS_"): categories.add("vss_context")
+        elif name == "CI": categories.add("ci_context")
+        elif name == "PYTHONPATH": categories.add("pythonpath_context")
+    suspicious = sorted(categories)
+    cpu_count = max(1, min(os.cpu_count() or 1, 256))
+    recommended = max(1, min(cpu_count, 8, 8 if memory_available == 0 else max(1, memory_available // (512 * 1024))))
+    findings = ([{"finding": "environment-leakage", "recommendation": "inspect-environment"}]
+                if "openai_context" in suspicious or "github_context" in suspicious or "vss_context" in suspicious else [])
+    return {"schema_version": "1", "protocol": "vss.agent-doctor",
+            "host": {"platform": platform.system().lower()[:32], "python": platform.python_version(),
+                     "cpu_count": cpu_count, "memory_available_kib": max(0, min(memory_available, 1_000_000_000)),
+                     "disk_free_kib": max(0, min(disk.free // 1024, 1_000_000_000))},
+            "environment": {"suspicious_names": suspicious, "suspicious_count": len(suspicious)},
+            "recommendation": {"validation_parallelism": recommended, "authority": "advisory_only"},
+            "findings": findings,
+            "authority": dict(HARNESS_AUTHORITY)}
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -744,6 +823,9 @@ def main(arguments: list[str] | None = None) -> int:
             if not fresh:
                 fail("validation evidence is stale for current change")
         print(json.dumps({"status": "valid", "fresh": fresh, "evidence_sha256": hashlib.sha256(canonical(evidence)).hexdigest()}, sort_keys=True, separators=(",", ":")))
+        return 0
+    if args.command == "doctor":
+        print(json.dumps(doctor(), sort_keys=True, separators=(",", ":")))
         return 0
     if args.command == "validate":
         if args.input == "-":
