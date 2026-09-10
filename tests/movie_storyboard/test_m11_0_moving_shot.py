@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vss_movie_moving_shot import LOCATION, MODEL_SNAPSHOT, QUOTA_METRIC, admit_moving_shot, validate_fixed_quota_evidence, validate_moving_shot_admission
+from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError, LOCATION, MODEL_SNAPSHOT, QUOTA_METRIC, admit_moving_shot, validate_fixed_quota_evidence, validate_moving_shot_admission
 from vss_providers import GeneratedMedia, ImageToVideoResult, ProviderAccess
 
 
@@ -28,6 +28,48 @@ class FakeVideoProvider:
 
 
 class MovingShotTests(unittest.TestCase):
+    def test_authorization_does_not_consume_before_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = AttemptLedger(Path(directory) / "attempt.json", "a" * 64)
+            ledger.authorize()
+            self.assertEqual(json.loads(ledger.path.read_text()), {"attempts": 0, "maximum_cost_usd": "5.000000", "request_sha256": "a" * 64, "status": "authorized"})
+            ledger.reserve_execution()
+            self.assertEqual(json.loads(ledger.path.read_text())["attempts"], 0)
+
+    def test_approval_then_execution_consumes_once_and_duplicate_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = AttemptLedger(Path(directory) / "attempt.json", "b" * 64)
+            ledger.authorize(); ledger.reserve_execution(); ledger.mark_submitted(); ledger.terminal("completed")
+            self.assertEqual(json.loads(ledger.path.read_text())["attempts"], 1)
+            with self.assertRaises(AttemptLedgerError):
+                ledger.reserve_execution()
+
+    def test_failed_submission_consumes_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = AttemptLedger(Path(directory) / "attempt.json", "c" * 64)
+            ledger.authorize(); ledger.reserve_execution(); ledger.mark_submitted(); ledger.terminal("failed")
+            self.assertEqual(json.loads(ledger.path.read_text())["status"], "failed")
+            with self.assertRaises(AttemptLedgerError):
+                ledger.mark_submitted()
+
+    def test_polling_does_not_count_as_resubmission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = AttemptLedger(Path(directory) / "attempt.json", "d" * 64)
+            ledger.authorize(); ledger.reserve_execution(); ledger.mark_submitted()
+            for _ in range(3):
+                self.assertEqual(json.loads(ledger.path.read_text())["attempts"], 1)
+            ledger.terminal("failed")
+
+    def test_historical_attempt_is_not_migrated_or_reused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "attempt.json"
+            historical = {"attempts": 1, "maximum_cost_usd": "5.000000", "request_sha256": "e" * 64, "status": "reserved"}
+            path.write_text(json.dumps(historical), encoding="utf-8")
+            ledger = AttemptLedger(path, "e" * 64)
+            with self.assertRaises(AttemptLedgerError):
+                ledger.reserve_execution()
+            self.assertEqual(json.loads(path.read_text()), historical)
+
     def admission(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "basis.png"
