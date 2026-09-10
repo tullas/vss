@@ -868,7 +868,7 @@ class MilestoneController:
                 raise MilestoneFailure("controller bootstrap repair is empty")
             repair_digest = hashlib.sha256(repair_diff).hexdigest()
             reviewed_identity = self._committed_change_identity(
-                stored["repository"]["base_sha"], reviewed_head, BOOTSTRAP_REPAIR_PATHS)
+                stored["repository"]["base_sha"], reviewed_head)
             if reviewed_identity != stored["repository"]["change_identity"]:
                 raise MilestoneFailure("controller bootstrap reviewed identity changed")
             previous_controller_identity = self._controller_identity(reviewed_head, BOOTSTRAP_REPAIR_PATHS, hashlib.sha256(b"").hexdigest())
