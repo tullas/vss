@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 import tempfile
@@ -18,6 +19,12 @@ from vss_runtime.external_preflight import ExternalExecutionPreflight
 
 MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
 
+HANDLER_PATH = Path(__file__).resolve().parents[2] / "capabilities/movie-moving-shot/handler.py"
+HANDLER_SPEC = importlib.util.spec_from_file_location("m11_moving_shot_handler", HANDLER_PATH)
+assert HANDLER_SPEC and HANDLER_SPEC.loader
+HANDLER_MODULE = importlib.util.module_from_spec(HANDLER_SPEC)
+HANDLER_SPEC.loader.exec_module(HANDLER_MODULE)
+
 
 class FakeVideoProvider:
     def __init__(self):
@@ -33,6 +40,38 @@ class FakeVideoProvider:
 
 
 class MovingShotTests(unittest.TestCase):
+    def test_handler_uses_authorization_sibling_of_output_namespace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "attempt-3"
+            output = root / "output" / ("1" * 64)
+            basis = Path(directory) / "basis.png"
+            basis.write_bytes(b"authoritative-basis")
+            admission = admit_moving_shot(
+                shot_id="shot-024b0d6352149eabb74df543",
+                scene_id="scene-91f5c8634519d8264e2dd5f8",
+                visual_basis_path=basis,
+                visual_basis_sha256=hashlib.sha256(basis.read_bytes()).hexdigest(),
+                prompt="A bounded camera move preserves the source action.",
+                source_lineage={"shot_plan": "a" * 64},
+            )
+            # Use the admission digest for the real ledger path while keeping
+            # the output destination isolated from the repository.
+            output = root / "output" / admission.request_sha256
+            record_existing_authorization(root / "authorization.json", admission.request_sha256)
+            context = type("Context", (), {
+                "environment": "development",
+                "admitted_request": admission,
+                "safe_configuration": {"artifact_root": str(output)},
+                "providers": ProviderAccess(video=FakeVideoProvider(), video_secret_reader=lambda _: "token"),
+            })()
+            result = HANDLER_MODULE.execute(
+                context, {"admission_id": admission.request_sha256, "mode": "generate"}, False
+            )
+            ledger_path = root / f"{admission.request_sha256}.attempt.json"
+            self.assertEqual(result.output["status"], "generated_quarantined")
+            self.assertEqual(json.loads(ledger_path.read_text())["status"], "completed")
+            self.assertFalse((output / "authorization.json").exists())
+
     def test_authorization_does_not_consume_before_execution(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = AttemptLedger(Path(directory) / "attempt.json", "a" * 64)

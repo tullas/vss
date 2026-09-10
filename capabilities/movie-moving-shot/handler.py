@@ -28,8 +28,12 @@ def execute(context, input_data, dry_run):
     destination.mkdir(exist_ok=False)
     # Control records live beside the output directory so pre-recorded
     # authorization cannot make output allocation look already complete.
+    # The authorization and attempt records are siblings of the output
+    # namespace.  Keep the ledger beside ``authorization.json``; placing it
+    # under ``output`` makes an already-authorized attempt appear unauthorized
+    # and fails before the provider boundary.
     ledger = AttemptLedger(
-        destination.parent / f"{admission.request_sha256}.attempt.json",
+        destination.parent.parent / f"{admission.request_sha256}.attempt.json",
         admission.request_sha256,
     )
     # The Runtime boundary has completed closed readiness and is now entering
