@@ -26,6 +26,29 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
+def build_moving_shot_request(*, shot_id: str, scene_id: str, visual_basis_sha256: str,
+                              visual_basis_byte_count: int, prompt: str,
+                              source_lineage: Mapping[str, str],
+                              production_id: str = "vikramaditya-local") -> dict[str, Any]:
+    """Build the single canonical request binding used by planning and Runtime."""
+    return {
+        "schema_version": "1", "contract_identity": "moving_shot_generation_request", "contract_version": "1",
+        "scope": {"production_id": production_id, "scene_id": scene_id, "shot_id": shot_id},
+        "production_input": {"media_type": "image/png", "content_sha256": visual_basis_sha256,
+                             "byte_count": visual_basis_byte_count},
+        "source_lineage": dict(sorted(source_lineage.items())),
+        "provider": {"identity": PROVIDER_IDENTITY, "model_snapshot": MODEL_SNAPSHOT, "location": LOCATION,
+                     "resolution": "720p", "duration_seconds": IMAGE_TO_VIDEO_DURATION_SECONDS,
+                     "generate_audio": False, "image_mime_type": IMAGE_MIME_TYPE},
+        "bounds": {"maximum_provider_attempts": 1, "maximum_outputs": 1,
+                   "maximum_cost_usd": MAXIMUM_COST_USD},
+        "prompt": prompt,
+        "authority": {"production": False, "publication": False, "retry": False,
+                       "fallback": False, "workflow_activation": False},
+        "request_sha256": "0" * 64,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class MovingShotAdmission:
     request: Mapping[str, Any]
@@ -51,18 +74,12 @@ def admit_moving_shot(*, shot_id: str, scene_id: str, visual_basis_path: Path,
             not isinstance(k, str) or not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{64}", v)
             for k, v in source_lineage.items()):
         raise ValueError("source lineage is invalid")
-    request = {
-        "schema_version": "1", "contract_identity": "moving_shot_generation_request", "contract_version": "1",
-        "scope": {"production_id": production_id, "scene_id": scene_id, "shot_id": shot_id},
-        "production_input": {"media_type": "image/png", "content_sha256": actual, "byte_count": len(image), "basis_path": str(visual_basis_path)},
-        "source_lineage": dict(sorted(source_lineage.items())),
-        "provider": {"identity": PROVIDER_IDENTITY, "model_snapshot": MODEL_SNAPSHOT, "location": LOCATION, "resolution": "720p", "duration_seconds": IMAGE_TO_VIDEO_DURATION_SECONDS, "generate_audio": False, "image_mime_type": IMAGE_MIME_TYPE},
-        "bounds": {"maximum_provider_attempts": 1, "maximum_outputs": 1, "maximum_cost_usd": MAXIMUM_COST_USD},
-        "prompt": prompt,
-        "authority": {"production": False, "publication": False, "retry": False, "fallback": False, "workflow_activation": False},
-        "request_sha256": "0" * 64,
-    }
-    raw = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+    request = build_moving_shot_request(
+        shot_id=shot_id, scene_id=scene_id, visual_basis_sha256=actual,
+        visual_basis_byte_count=len(image), prompt=prompt,
+        source_lineage=source_lineage, production_id=production_id,
+    )
+    raw = json.dumps(request, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     if len(raw) > REQUEST_LIMIT:
         raise ValueError("moving-shot request exceeds its bound")
     request["request_sha256"] = _digest(request)
