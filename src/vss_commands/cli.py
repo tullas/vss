@@ -94,6 +94,14 @@ def _parser() -> argparse.ArgumentParser:
     milestone_rebind.add_argument("--expected-generation", required=True, type=int)
     milestone_rebind.add_argument("--reviewed-head")
     milestone_rebind.add_argument("--validation-evidence", type=Path)
+    milestone_reconcile = milestone_actions.add_parser("reconcile-source-identity")
+    milestone_reconcile.add_argument("--milestone-id", required=True)
+    milestone_reconcile.add_argument("--summary", required=True)
+    milestone_reconcile.add_argument("--reason", required=True)
+    milestone_reconcile.add_argument("--authorization", required=True)
+    milestone_reconcile.add_argument("--validation-evidence", required=True, type=Path)
+    milestone_reconcile.add_argument("--historical-evidence-sha256", required=True)
+    milestone_reconcile.add_argument("--expected-generation", required=True, type=int)
     milestone_bootstrap = milestone_actions.add_parser("bootstrap-controller-upgrade")
     milestone_bootstrap.add_argument("--milestone-id", required=True)
     milestone_bootstrap.add_argument("--base-head", required=True)
@@ -445,6 +453,10 @@ def main(argv: list[str] | None = None) -> int:
                 value = controller.rebind_committed_head(
                     args.milestone_id, args.summary, args.expected_generation,
                     args.reviewed_head, args.validation_evidence)
+            elif args.milestone_action == "reconcile-source-identity":
+                value = controller.reconcile_source_identity(
+                    args.milestone_id, args.summary, args.reason, args.authorization,
+                    args.validation_evidence, args.historical_evidence_sha256, args.expected_generation)
             elif args.milestone_action == "bootstrap-controller-upgrade":
                 value = controller.bootstrap_controller_upgrade(
                     args.milestone_id, args.base_head, args.old_head, args.reviewed_head, args.target_head,
