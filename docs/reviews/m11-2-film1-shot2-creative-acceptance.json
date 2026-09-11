@@ -1,0 +1,51 @@
+{
+  "schema_version": "1",
+  "contract_identity": "moving_shot_creative_acceptance_review",
+  "contract_version": "1",
+  "review_id": "moving-shot-creative-review-2f90f65337a06c4b",
+  "film_id": "film-1",
+  "shot_id": "shot-024b0d6352149eabb74df544",
+  "decision": "ACCEPT",
+  "disposition": "USE",
+  "reviewer_accountability_id": "human-creative-review-owner",
+  "request_sha256": "095e28b8fade7033c9dc9d927815a5f2dbeb21789dbb13058e848d013bce0b9d",
+  "provider": {
+    "operation_name": "projects/vss-film-poc/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/0f704ef2-e5e4-442a-90d2-c29f59123d4e",
+    "submission_count": 1,
+    "actual_cost_usd": "1.600000",
+    "terminal_outcome": "succeeded"
+  },
+  "artifact": {
+    "reference": ".local/movie/m11-0-moving-shot/shot-024b0d6352149eabb74df544/output/095e28b8fade7033c9dc9d927815a5f2dbeb21789dbb13058e848d013bce0b9d/shot.mp4",
+    "mime_type": "video/mp4",
+    "sha256": "2f90f65337a06c4b586021e2892cd876d5d5f02721007bbeaa9faaea49aed902",
+    "duration_seconds": 8.0,
+    "resolution": "1280x720",
+    "frame_rate": "24/1",
+    "audio": false
+  },
+  "admission": {
+    "technical": "PASSED",
+    "recovery": "same_provider_operation",
+    "evidence_reference": ".local/movie/m11-0-moving-shot/shot-024b0d6352149eabb74df544/output/095e28b8fade7033c9dc9d927815a5f2dbeb21789dbb13058e848d013bce0b9d/evidence.json"
+  },
+  "authority": {
+    "canon": false,
+    "production": false,
+    "publication": false,
+    "provider": false,
+    "regeneration": false,
+    "runtime": false,
+    "workflow_activation": false
+  },
+  "limitations": [
+    "accountability_evidence_only",
+    "exact_artifact_digest_only",
+    "review_acceptance_is_not_production_approval",
+    "not_runtime_or_provider_authority",
+    "not_publication_or_workflow_authority",
+    "does_not_authorize_attempt_6",
+    "does_not_authorize_regeneration_or_scaling"
+  ],
+  "review_sha256": "df07642cda107af53f3b6f8783cf5372f738c336541251ad71e186b87223e4c8"
+}
