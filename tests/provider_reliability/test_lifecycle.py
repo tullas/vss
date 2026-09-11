@@ -1,4 +1,6 @@
 import unittest
+import hashlib
+from pathlib import Path
 
 from vss_provider_reliability import (
     ApprovedShotPackage,
@@ -9,6 +11,7 @@ from vss_provider_reliability import (
     ProviderDigitalTwin,
     kpis,
 )
+from vss_movie_moving_shot import admit_moving_shot
 
 
 class OfflineProductionLifecycleTests(unittest.TestCase):
@@ -25,6 +28,24 @@ class OfflineProductionLifecycleTests(unittest.TestCase):
         self.assertEqual(result.states, tuple(state.value for state in LifecycleState))
         self.assertNotIn("Shot 1", str(result.to_json()))
         self.assertNotIn("Shot 2", str(result.to_json()))
+
+    def test_real_moving_shot_admission_binds_into_offline_lifecycle(self):
+        image = b"offline-admitted-png"
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "basis.png"
+            image_path.write_bytes(image)
+            admission = admit_moving_shot(
+                shot_id="shot-0123456789abcdef01234567", scene_id="scene-0123456789abcdef01234567",
+                visual_basis_path=image_path, visual_basis_sha256=hashlib.sha256(image).hexdigest(),
+                prompt="A new adjacent shot", source_lineage={"storyboard": "a" * 64}, production_id="film1",
+            )
+        package = ApprovedShotPackage.from_moving_shot_request(admission.request)
+        result = self.lifecycle.run(package)
+        self.assertEqual(package.request_digest, admission.request_sha256)
+        self.assertEqual(package.execution_namespace, "film1/shot-0123456789abcdef01234567")
+        self.assertEqual(result.request_digest, admission.request_sha256)
+        self.assertEqual(result.state, LifecycleState.CREATIVELY_REVIEWED)
 
     def test_identity_and_namespace_fail_before_provider_call(self):
         stale = self.lifecycle.run(self.package, supplied_request_digest="0" * 64)

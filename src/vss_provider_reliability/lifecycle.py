@@ -58,6 +58,22 @@ class ApprovedShotPackage:
         digest = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return cls(shot_id, scene_id, prompt, digest, f"film1/{scene_id}/{shot_id}")
 
+    @classmethod
+    def from_moving_shot_request(cls, request: Mapping[str, Any]) -> "ApprovedShotPackage":
+        """Bind the lifecycle rehearsal to an admitted moving-shot request."""
+        if not isinstance(request, Mapping):
+            raise ValueError("moving-shot request is invalid")
+        scope = request.get("scope")
+        if not isinstance(scope, Mapping):
+            raise ValueError("moving-shot request scope is invalid")
+        shot_id, scene_id, production_id = scope.get("shot_id"), scope.get("scene_id"), scope.get("production_id")
+        digest, prompt = request.get("request_sha256"), request.get("prompt")
+        if not all(isinstance(value, str) and value for value in (shot_id, scene_id, production_id, digest, prompt)):
+            raise ValueError("moving-shot request identity is incomplete")
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError("moving-shot request digest is invalid")
+        return cls(shot_id, scene_id, prompt, digest, f"{production_id}/{shot_id}")
+
 
 @dataclass(frozen=True, slots=True)
 class LifecycleResult:

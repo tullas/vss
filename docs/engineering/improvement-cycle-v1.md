@@ -91,3 +91,9 @@ The golden-path test proves a new adjacent-shot package is consumed without
 shot-specific source changes and reaches the provider boundary/reviewable
 state offline. It does not prove real-provider readiness, credential validity,
 paid cost, controller recovery, or permission to resume production.
+
+The lifecycle package now accepts the real admitted moving-shot request shape
+for offline rehearsal, binding its authoritative request digest and
+shot-specific namespace. The provider handler remains independently governed
+by Runtime, its one-attempt ledger, and persisted provider evidence; this bridge
+is an integration check, not a second execution path.
