@@ -1,0 +1,46 @@
+{
+  "schema_version": "1",
+  "contract_identity": "moving_shot_creative_acceptance_review",
+  "contract_version": "1",
+  "review_id": "moving-shot-creative-review-1008b512047b98451cf6b3760eb7b18d",
+  "film_id": "film-1",
+  "attempt": 5,
+  "decision": "ACCEPT",
+  "reviewer_accountability_id": "human-creative-review-owner",
+  "artifact": {
+    "reference": ".local/recovery/attempt-5/attempt-5-recovered.mp4",
+    "mime_type": "video/mp4",
+    "sha256": "1008b512047b98451cf6b3760eb7b18d1909ed319474a24c103b4db2e6e0bda3"
+  },
+  "evidence": {
+    "recovery_record": {
+      "reference": "docs/reviews/m11-0-attempt-5-recovery.json",
+      "sha256": "02116e3656dc4e27b320ee9dd19b563e803fa5ebde6fb94022c6252cd23e2361"
+    },
+    "attempt_provenance": {
+      "reference": ".local/movie/m11-0-moving-shot/attempt-5/output/9a7fb8229afabd087db5128efc4a1cb788a0a1fe4d8e34aec09185854320e76b/operation.json",
+      "sha256": "462f0f9dfb12eee88d5bf5f5a56f882639a09e717fb9be479fb1b8436cf5eed9"
+    },
+    "operation_name": "projects/vss-film-poc/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/aa6b2f4a-f242-40ca-ae85-1ec420b653f8",
+    "request_sha256": "9a7fb8229afabd087db5128efc4a1cb788a0a1fe4d8e34aec09185854320e76b"
+  },
+  "authority": {
+    "canon": false,
+    "production": false,
+    "publication": false,
+    "provider": false,
+    "regeneration": false,
+    "runtime": false,
+    "workflow_activation": false
+  },
+  "limitations": [
+    "accountability_evidence_only",
+    "exact_artifact_digest_only",
+    "review_acceptance_is_not_production_approval",
+    "not_runtime_or_provider_authority",
+    "not_publication_or_workflow_authority",
+    "attempt_5_only",
+    "no_attempt_6"
+  ],
+  "review_sha256": "72043a636a6194adbcfc6444f0c148349378d7becf1eaffbbce79010d520c9a4"
+}
