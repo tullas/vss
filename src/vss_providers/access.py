@@ -146,6 +146,34 @@ class SafeImageToVideoHandle:
             raise ProviderExecutionFailure("image-to-video provider exceeded its cost ceiling")
         return result
 
+    def recover(self, request: ImageToVideoRequest, operation_name: str) -> ImageToVideoResult:
+        """Fetch one persisted operation; this path has no submission capability."""
+        if self.__calls:
+            raise ProviderAccessDenied("image-to-video provider call ceiling exceeded")
+        if not isinstance(operation_name, str) or not operation_name:
+            raise ProviderAccessDenied("accepted operation identity is required")
+        object.__setattr__(self, "_SafeImageToVideoHandle__calls", 1)
+        from vss_movie_moving_shot import SECRET_NAME
+        try:
+            secret = self.__secret_reader(SECRET_NAME)
+        except Exception as exc:
+            raise ProviderExecutionFailure("image-to-video provider credential is unavailable") from exc
+        if not isinstance(secret, str) or not secret or len(secret) > 4096:
+            raise ProviderExecutionFailure("image-to-video provider credential is unavailable")
+        try:
+            result = self.__provider.recover(request, operation_name, credential=secret, transport=self.__transport)
+        except (ProviderAccessDenied, ProviderExecutionFailure):
+            raise
+        except Exception as exc:
+            raise ProviderExecutionFailure("image-to-video provider recovery failed") from exc
+        if (not isinstance(result, ImageToVideoResult) or not isinstance(result.media, GeneratedMedia)
+                or result.media.media_type != "video/mp4" or result.media.width != 1280
+                or result.media.height != 720 or not result.media.content
+                or result.media.content_sha256 != hashlib.sha256(result.media.content).hexdigest()
+                or result.media.content[:8] != b"\x00\x00\x00\x18ftyp"):
+            raise ProviderExecutionFailure("image-to-video provider returned invalid recovered video")
+        return result
+
 
 class SafeStoryboardRenderHandle:
     __slots__ = ("__provider",)

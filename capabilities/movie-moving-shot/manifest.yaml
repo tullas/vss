@@ -19,13 +19,13 @@ commands:
       required: [admission_id, mode]
       properties:
         admission_id: {type: string, pattern: "^[0-9a-f]{64}$"}
-        mode: {enum: [preflight, generate]}
+        mode: {enum: [preflight, generate, recover]}
     output_schema:
       type: object
       additionalProperties: false
       required: [status, request_sha256, provider_call_count, attempt_reserved, artifact_root, video, evidence, authority]
       properties:
-        status: {enum: [ready_for_paid_attempt, generated_quarantined]}
+        status: {enum: [ready_for_paid_attempt, generated_quarantined, recovered_quarantined]}
         request_sha256: {type: string, pattern: "^[0-9a-f]{64}$"}
         provider_call_count: {type: integer, minimum: 0, maximum: 1}
         attempt_reserved: {type: boolean}

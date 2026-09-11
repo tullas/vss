@@ -144,7 +144,7 @@ class AttemptLedger:
         if status not in {"completed", "failed"}:
             raise AttemptLedgerError("terminal status is invalid")
         value = self._read()
-        if value["status"] != "submitted":
+        if value["status"] not in {"submitted", "failed"}:
             raise AttemptLedgerError("submitted attempt is not open")
         value["status"] = status
         self._write(value)
