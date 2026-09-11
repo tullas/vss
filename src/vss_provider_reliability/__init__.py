@@ -13,6 +13,14 @@ from .foundation import (
     assess_readiness,
 )
 from .digital_twin import DigitalTwinScenario, ProviderDigitalTwin
+from .lifecycle import (
+    ApprovedShotPackage,
+    LifecycleFailure,
+    LifecycleResult,
+    LifecycleState,
+    OfflineProductionLifecycle,
+    kpis,
+)
 
 __all__ = (
     "DigitalTwinScenario",
@@ -23,4 +31,10 @@ __all__ = (
     "ProviderReadiness",
     "ProviderReliabilityEngineer",
     "assess_readiness",
+    "ApprovedShotPackage",
+    "LifecycleFailure",
+    "LifecycleResult",
+    "LifecycleState",
+    "OfflineProductionLifecycle",
+    "kpis",
 )
