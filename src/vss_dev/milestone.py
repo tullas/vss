@@ -29,6 +29,15 @@ PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
 RECONCILIATION_AUTHORIZATION = ("I authorize reconciliation of the m11-0-veo-shot controller source identity "
     "from a9c6ea... to descendant HEAD cf9106298ad485a55475099249d533b3908cf69b, provided "
     "canonical/governed validation passes, Attempts 1–5 remain unchanged, and no execution authority is granted.")
+POST_MERGE_RECONCILIATION_AUTHORIZATION = ("I authorize reconciliation of the m11-0-veo-shot controller source identity "
+    "from the reviewed PR #141 head b8bed0e973959521a5a67ed592e239c381b176d4 to the resulting merged main HEAD "
+    "953b32772f0381d1c2842032ee3c05cff82142af, provided the merge ancestry is verified, canonical/governed validation passes, "
+    "Attempts 1–5 remain unchanged, and no execution authority is granted.")
+POST_REPAIR_RECONCILIATION_AUTHORIZATION = ("I authorize post-repair reconciliation of the m11-0-veo-shot controller source identity "
+    "from the reviewed PR #141 head b8bed0e973959521a5a67ed592e239c381b176d4 through the verified merged-main history to current committed HEAD "
+    "841fa9c55733beec26ca0429e88edf443dd180ad, provided descendant ancestry is verified, fresh canonical/governed L3 validation passes, "
+    "Attempts 1–5 and historical execution evidence remain unchanged, and no execution authority is granted. This does not authorize Attempt 6, "
+    "provider execution, spending, retry, production, publication, merge, push, or workflow activation.")
 BOOTSTRAP_MILESTONE = "dev-wf-2-engineering-observability"
 IDENTITY_REPAIR_PATHS = tuple(sorted((
     "src/vss_commands/cli.py",
@@ -694,6 +703,12 @@ class MilestoneController:
             elif event["event_type"] != "branch_transitioned" and "change_identity" in data:
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
+                if (event["event_type"] == "identity_reconciled"
+                        and data.get("human_authorization") in {
+                            POST_MERGE_RECONCILIATION_AUTHORIZATION,
+                            POST_REPAIR_RECONCILIATION_AUTHORIZATION,
+                        }):
+                    bound_branch = repository["branch"]
         historical_repository = {
             "name_with_owner": repository["name_with_owner"], "branch": bound_branch,
             "base_sha": base_sha, "head_sha": bound_head,
@@ -811,21 +826,29 @@ class MilestoneController:
                                   expected_generation: int) -> dict[str, Any]:
         """Append an explicit, evidence-backed recovery event for a stale source identity."""
         if (milestone_id != "m11-0-veo-shot" or not summary or len(summary) > 512
-                or not reason or len(reason) > 512 or authorization != RECONCILIATION_AUTHORIZATION
+                or not reason or len(reason) > 512
+                or authorization not in {RECONCILIATION_AUTHORIZATION, POST_MERGE_RECONCILIATION_AUTHORIZATION,
+                                         POST_REPAIR_RECONCILIATION_AUTHORIZATION}
                 or not isinstance(validation_evidence, Path) or not SHA256.fullmatch(historical_evidence_sha256)
                 or type(expected_generation) is not int):
             raise MilestoneFailure("source identity reconciliation is unauthorized")
         directory, state_path, history = self._paths(milestone_id)
         with self._locked(directory):
             events = self._read_events(milestone_id); stored = _read_json(state_path); self._validate(stored)
-            if any(event["event_type"] == "identity_reconciled" for event in events):
-                return self.load(milestone_id)
             if expected_generation != stored["generation"]:
                 raise MilestoneFailure("milestone writer conflict")
-            if stored["status"] != "READY_FOR_IMPLEMENTATION":
-                raise MilestoneFailure("source identity reconciliation requires original ready state")
             repository = self._repository(stored["repository"]["base_sha"])
-            if (repository["branch"] != stored["repository"]["branch"]
+            if any(event["event_type"] == "identity_reconciled"
+                   and event["data"].get("new_head") == repository["head_sha"]
+                   for event in events):
+                return self.load(milestone_id)
+            post_merge = authorization in {POST_MERGE_RECONCILIATION_AUTHORIZATION,
+                                           POST_REPAIR_RECONCILIATION_AUTHORIZATION}
+            allowed_statuses = {"READY_FOR_IMPLEMENTATION", "REVIEW_READY"} if post_merge else {"READY_FOR_IMPLEMENTATION"}
+            if stored["status"] not in allowed_statuses:
+                raise MilestoneFailure("source identity reconciliation requires original ready state")
+            if ((post_merge and repository["branch"] != "main")
+                    or (not post_merge and repository["branch"] != stored["repository"]["branch"])
                     or repository["base_sha"] != stored["repository"]["base_sha"]
                     or repository["head_sha"] == stored["repository"]["head_sha"]):
                 raise MilestoneFailure("source identity reconciliation is unauthorized")
