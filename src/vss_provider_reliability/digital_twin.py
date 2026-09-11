@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any
 
 from .foundation import FailureClass, FlightRecorder
+from .lifecycle import ApprovedShotPackage, LifecycleFailure, OfflineProductionLifecycle
 
 
 class DigitalTwinScenario(str, Enum):
@@ -20,6 +21,18 @@ class DigitalTwinScenario(str, Enum):
     UNEXPECTED_TERMINAL_SHAPE = "unexpected_terminal_shape"
     LOCAL_PERSISTENCE_FAILURE = "local_persistence_failure"
     LEDGER_STATE_FAILURE = "ledger_state_failure"
+    EXPIRED_CREDENTIAL = "expired_credential"
+    MISSING_CREDENTIAL = "missing_credential"
+    FAILURE_BEFORE_PROVIDER_ACCEPTANCE = "failure_before_provider_acceptance"
+    ACCEPTED_PROCESS_INTERRUPTION = "accepted_process_interruption"
+    POLLING_FAILURE = "polling_failure"
+    PROVIDER_TERMINAL_FAILURE = "provider_terminal_failure"
+    MALFORMED_TERMINAL_RESPONSE = "malformed_terminal_response"
+    MEDIA_ADMISSION_FAILURE = "media_admission_failure"
+    DUPLICATE_EXECUTION_INVOCATION = "duplicate_execution_invocation"
+    STALE_REQUEST_DIGEST = "stale_request_digest"
+    WRONG_EXECUTION_NAMESPACE = "wrong_execution_namespace"
+    RECOVERY_FROM_ACCEPTED_OPERATION = "recovery_from_accepted_operation"
 
 
 _OPERATION = "offline/providers/example/operations/twin-1"
@@ -32,6 +45,37 @@ class ProviderDigitalTwin:
     def rehearse(self, scenario: DigitalTwinScenario) -> dict[str, Any]:
         if not isinstance(scenario, DigitalTwinScenario):
             raise ValueError("digital-twin scenario is invalid")
+        lifecycle_scenarios = {
+            DigitalTwinScenario.EXPIRED_CREDENTIAL: LifecycleFailure.CREDENTIAL_READINESS,
+            DigitalTwinScenario.MISSING_CREDENTIAL: LifecycleFailure.CREDENTIAL_READINESS,
+            DigitalTwinScenario.FAILURE_BEFORE_PROVIDER_ACCEPTANCE: LifecycleFailure.PRE_PROVIDER,
+            DigitalTwinScenario.ACCEPTED_PROCESS_INTERRUPTION: LifecycleFailure.POLLING,
+            DigitalTwinScenario.POLLING_FAILURE: LifecycleFailure.POLLING,
+            DigitalTwinScenario.PROVIDER_TERMINAL_FAILURE: LifecycleFailure.TERMINAL_PROVIDER,
+            DigitalTwinScenario.MALFORMED_TERMINAL_RESPONSE: LifecycleFailure.MALFORMED_TERMINAL,
+            DigitalTwinScenario.MEDIA_ADMISSION_FAILURE: LifecycleFailure.MEDIA_ADMISSION,
+            DigitalTwinScenario.DUPLICATE_EXECUTION_INVOCATION: LifecycleFailure.DUPLICATE_EXECUTION,
+        }
+        if scenario in lifecycle_scenarios or scenario in {
+            DigitalTwinScenario.STALE_REQUEST_DIGEST, DigitalTwinScenario.WRONG_EXECUTION_NAMESPACE,
+            DigitalTwinScenario.RECOVERY_FROM_ACCEPTED_OPERATION,
+        }:
+            package = ApprovedShotPackage.build("adjacent-shot", "scene-1", "offline rehearsal")
+            lifecycle = OfflineProductionLifecycle()
+            if scenario == DigitalTwinScenario.STALE_REQUEST_DIGEST:
+                outcome = lifecycle.run(package, supplied_request_digest="0" * 64)
+            elif scenario == DigitalTwinScenario.WRONG_EXECUTION_NAMESPACE:
+                outcome = lifecycle.run(package, supplied_namespace="wrong/namespace")
+            elif scenario == DigitalTwinScenario.RECOVERY_FROM_ACCEPTED_OPERATION:
+                accepted = lifecycle.run(package, failure=LifecycleFailure.POLLING)
+                outcome = lifecycle.recover_accepted(package, accepted.operation_name or "")
+            else:
+                outcome = lifecycle.run(package, failure=lifecycle_scenarios[scenario])
+            value = outcome.to_json()
+            value.update({"scenario": scenario.value, "calls": ["submission"] if outcome.provider_call_count else [],
+                          "poll_count": 1 if outcome.provider_call_count else 0})
+            value["flight_recorder"] = outcome.flight_recorder
+            return value
         recorder = FlightRecorder({"provider": "offline-digital-twin", "scenario": scenario.value})
         calls: list[str] = []
         if scenario == DigitalTwinScenario.MALFORMED_CREDENTIALS:
