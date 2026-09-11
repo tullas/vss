@@ -1,0 +1,148 @@
+{
+  "package_identity": "film-1-shot-2-continuity-plan",
+  "package_version": "1",
+  "status": "offline_provider_execution_plan",
+  "creative_decision": {
+    "decision": "APPROVE",
+    "shot_id": "shot-024b0d6352149eabb74df544",
+    "decision_text": "Vikramaditya turns toward the Vetala and takes one measured step on the same dawn banyan-road axis; the riddle remains unresolved.",
+    "recorded_for": "offline planning only",
+    "provider_authority": false,
+    "production_authority": false
+  },
+  "authority": {
+    "canon": false,
+    "production": false,
+    "publication": false,
+    "provider_execution": false,
+    "runtime_execution": false,
+    "workflow_activation": false
+  },
+  "shot_2": {
+    "film_id": "film-1",
+    "project_id": "vikramaditya-local",
+    "scene_id": "scene-91f5c8634519d8264e2dd5f8",
+    "shot_id": "shot-024b0d6352149eabb74df544",
+    "shot_order": 3,
+    "narrative_purpose": "Continue the accepted banyan-road interruption: Vikramaditya turns toward the Vetala and takes one measured step, making the riddle's interruption become an immediate face-to-face exchange without resolving the riddle.",
+    "relationship_to_shot_1": "adjacent_consecutive",
+    "source_context": {
+      "story_fragment": "tests/fixtures/movie/vikramaditya-opening-story-fragment.json",
+      "story_fragment_sha256": "b60c6a0c0ecc74068c107db44c4ca6e61b8f5cea124a4c5a9a3c34d94eddb8a3",
+      "scene_breakdown_sha256": "1385a3123aad50e5f0e17e1a345bb84da9cc8f328218a63571701fbec83038a8",
+      "storyboard_specification_sha256": "ee2cebe3d40c2ab76a4b2659ebaf53435cadb304495f3b651c3517acbc5f0865",
+      "production_option_id": "option-b5d2461f4ec95dc0377938ba",
+      "production_option": "location_live_action"
+    }
+  },
+  "shot_1_anchor": {
+    "accepted_attempt": 5,
+    "acceptance_reference": "docs/reviews/m11-0-attempt-5-creative-acceptance.json",
+    "accepted_artifact": ".local/recovery/attempt-5/attempt-5-recovered.mp4",
+    "accepted_artifact_sha256": "1008b512047b98451cf6b3760eb7b18d1909ed319474a24c103b4db2e6e0bda3",
+    "duration_seconds": 8,
+    "resolution": "1280x720",
+    "frame_rate": "24/1",
+    "audio": false,
+    "historical_request_sha256": "9a7fb8229afabd087db5128efc4a1cb788a0a1fe4d8e34aec09185854320e76b",
+    "use": "continuity_review_anchor_only"
+  },
+  "continuity_contract": {
+    "inherits": [
+      "same scene scene-91f5c8634519d8264e2dd5f8",
+      "same dawn lighting period and banyan-road location",
+      "same Vikramaditya and Vetala relationship and screen direction",
+      "same restrained cinematic live-action historical Indian grounding",
+      "same 16:9 1280x720 visual language and natural proportions"
+    ],
+    "shot_1_to_shot_2": [
+      "begin on the accepted Shot 1 end-state; no spatial reset",
+      "preserve the established camera axis and left-right character relationship",
+      "Vikramaditya turns toward the Vetala, then takes one measured step toward him",
+      "the Vetala remains present and watchful; the riddle remains unresolved",
+      "no new character, location, prop, supernatural effect, crowd, or time jump"
+    ],
+    "deliberate_unknowns": [
+      "exact facial identity",
+      "exact costume colors, ornaments and motifs",
+      "exact lens, blocking distance, color treatment and set dressing",
+      "whether dialogue or sound effects are later added"
+    ]
+  },
+  "source_visual_reference": {
+    "primary_image_reference": ".local/movie/storyboard-images/da9e10e3c11838131019a5969bd1403ad384881a868ea3956bf5869b4b3788a8/frame-55a9d7015fdf1f72571b74c5/4ff4ddc7ef42122d935ce5c1cfbe5bed68fd4e157789862a1597943eebcb02bb.png",
+    "primary_image_sha256": "4ff4ddc7ef42122d935ce5c1cfbe5bed68fd4e157789862a1597943eebcb02bb",
+    "primary_image_role": "authoritative_storyboard_reference_for_later_image_to_video_input",
+    "continuity_anchor_role": "accepted Shot 1 video is reviewed for adjacent action and end-state; it is not substituted into the image input field",
+    "frame_id": "frame-fb0d79ba59d7781b0bad3e7e",
+    "frame_specification_sha256": "4ff516866b0123661613c2d47aec059ee802822fcf22776314cca7a1ad5f12d6"
+  },
+  "provider_request": {
+    "provider_identity": "movie.image-to-video.vertex-veo",
+    "model_snapshot": "veo-3.1-generate-001",
+    "location": "us-central1",
+    "resolution": "720p",
+    "duration_seconds": 8,
+    "generate_audio": false,
+    "image_mime_type": "image/png",
+    "maximum_provider_attempts": 1,
+    "maximum_outputs": 1,
+    "maximum_cost_usd": "5.000000",
+    "prompt": "Continue directly from the accepted preceding shot on the same dawn banyan-road axis. Vikramaditya turns toward the already-present Vetala and takes one measured step toward him as the Vetala watches; preserve the interrupted riddle without resolving it. Keep both characters legible, preserve their established left-right relationship and natural screen direction, and make the movement restrained and physically plausible. Cinematic live-action historical Indian setting, natural dawn light, grounded human proportions, mature banyan anchor, restrained royal-era detail, Vetala ancient, lean, uncanny and intelligent without generic horror. No camera-axis reset, no time jump, no new characters, no new location, no new props, no magic or glowing effects, no crowd, no captions, no logos, no watermarks, no control-plane text, no modern objects, no fantasy spectacle, no malformed anatomy or duplicated people.",
+    "authority": {
+      "production": false,
+      "publication": false,
+      "retry": false,
+      "fallback": false,
+      "workflow_activation": false
+    }
+  },
+  "cost": {
+    "expected_cost_usd": "1.600000",
+    "rate_basis": "8 billable seconds x $0.20/second for current official video-only Veo 3.1 pricing; pricing evidence supplied by the human decision",
+    "hard_ceiling_usd": "5.000000",
+    "ceiling_behavior": "fail closed before reservation or provider transport when the confirmed quote exceeds the ceiling",
+    "paid_attempts_planned": 1,
+    "paid_attempts_made": 0
+  },
+  "acceptance_criteria": [
+    "Shot 2 is visibly consecutive with Shot 1: same dawn banyan-road, axis, screen direction and character presence",
+    "Vikramaditya's turn and one measured step are legible; the Vetala remains watchful",
+    "no invented character, location, prop, event, supernatural spectacle or control-plane text",
+    "output is exactly one 8-second, 1280x720, 24fps video with no audio stream",
+    "provider response and media pass the existing moving-shot admission and output validation",
+    "creative reviewer records USE, REGENERATE, or REJECT; acceptance remains development review only"
+  ],
+  "deterministic_binding": {
+    "digest_algorithm": "sha256(canonical_json(provider_request_with_request_sha256_zeroed))",
+    "provider_request_sha256": "c697e9c9455bc89cbb4a0ebb63075e3f7cefb496b6209aec9d107b26dffc1651",
+    "package_digest_algorithm": "sha256(canonical_json(package_with_package_sha256_zeroed))",
+    "package_sha256": "d41a309bd0c35bc5cba5d23568926181bc01361f2ae8ce49e41c11d8923eea9c",
+    "input_set": [
+      "shot-1 accepted artifact digest",
+      "storyboard frame digest",
+      "frame specification digest",
+      "scene/storyboard lineage digests",
+      "fixed provider settings and prompt"
+    ],
+    "nondeterministic_inputs_excluded": ["timestamps", "uuid", "paths as semantic identity", "randomness", "unordered iteration", "audit metadata"]
+  },
+  "offline_rehearsal": {
+    "result": "passed",
+    "provider_invoked": false,
+    "provider_call_count": 0,
+    "paid_attempt": false,
+    "attempt_number": null,
+    "rehearsal": "canonical request binding, input digest, fixed bounds, continuity assertions, and provider-boundary guard were checked locally",
+    "evidence": "tests/movie_storyboard/test_m11_2_film1_shot2_plan.py",
+    "no_provider_call_evidence": "The rehearsal uses no Runtime invocation, credential, network transport, provider handle, reservation, or attempt ledger write. Existing Attempt 5/controller evidence is read-only reference material."
+  },
+  "limitations": [
+    "planning package only",
+    "not production approval",
+    "not provider or Runtime authority",
+    "not publication, scheduling, workflow, asset, rights, or training authority",
+    "does not authorize Attempt 6 or create an execution attempt",
+    "visual continuity remains a human judgment until a later candidate exists"
+  ]
+}
