@@ -1,6 +1,7 @@
 """Regression coverage for the recovered M11.0 Attempt 5 terminal response."""
 
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -13,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "providers/builtin/movie-image-to-video-vertex-veo/implementation.py"
 FIXTURE = ROOT / "tests/fixtures/movie/m11-attempt5-google-terminal-response.json"
 RECOVERY = ROOT / "docs/reviews/m11-0-attempt-5-recovery.json"
+CREATIVE_ACCEPTANCE = ROOT / "docs/reviews/m11-0-attempt-5-creative-acceptance.json"
 SPEC = importlib.util.spec_from_file_location("m11_attempt5_vertex_veo_provider", MODULE_PATH)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -80,3 +82,25 @@ def test_attempt5_recovery_evidence_preserves_verified_artifact_identity():
     assert recovery["recovered_media"]["duration_seconds"] == "8.000000"
     assert recovery["recovered_media"]["audio_stream_present"] is False
     assert recovery["root_cause"]["provider_generation_failed"] is False
+
+
+def test_attempt5_creative_acceptance_is_bound_to_recovery_and_provenance():
+    acceptance = json.loads(CREATIVE_ACCEPTANCE.read_text())
+    recovery = json.loads(RECOVERY.read_text())
+    provenance_path = ROOT / acceptance["evidence"]["attempt_provenance"]["reference"]
+    recovery_path = ROOT / acceptance["evidence"]["recovery_record"]["reference"]
+
+    assert acceptance["decision"] == "ACCEPT"
+    assert acceptance["film_id"] == "film-1"
+    assert acceptance["attempt"] == 5
+    assert acceptance["artifact"]["sha256"] == recovery["recovered_media"]["sha256"]
+    assert acceptance["artifact"]["reference"] == recovery["recovered_media"]["local_reference"]
+    assert acceptance["evidence"]["operation_name"] == recovery["provider_execution"]["operation_name"]
+    assert acceptance["evidence"]["request_sha256"] == json.loads(provenance_path.read_text())["request_sha256"]
+    assert hashlib.sha256(recovery_path.read_bytes()).hexdigest() == acceptance["evidence"]["recovery_record"]["sha256"]
+    assert hashlib.sha256(provenance_path.read_bytes()).hexdigest() == acceptance["evidence"]["attempt_provenance"]["sha256"]
+    review_material = {**acceptance, "review_sha256": "0" * 64}
+    assert acceptance["review_sha256"] == hashlib.sha256(
+        json.dumps(review_material, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    assert all(value is False for value in acceptance["authority"].values())
