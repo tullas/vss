@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import json
+
 from vss_capabilities import CapabilityResult, SDK_API_VERSION
 from vss_movie_moving_shot import AttemptLedger, IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECONDS, MovingShotAdmission, validate_moving_shot_admission
 from vss_providers import ImageToVideoRequest
 
 AUTHORITY = {"production": False, "publication": False, "retry": False, "fallback": False, "workflow_activation": False}
+
+
+def _provider_acceptance_evidenced(exc, evidence_path) -> bool:
+    diagnostic = getattr(exc, "diagnostic", None)
+    if (diagnostic is not None and getattr(diagnostic, "submission_accepted", False)
+            and isinstance(getattr(diagnostic, "operation_name", None), str)
+            and getattr(diagnostic, "operation_name")):
+        return True
+    try:
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return (isinstance(evidence, dict) and evidence.get("submission_accepted") is True
+            and isinstance(evidence.get("operation_name"), str)
+            and bool(evidence["operation_name"]))
 
 
 def execute(context, input_data, dry_run):
@@ -37,6 +54,7 @@ def execute(context, input_data, dry_run):
     # The Runtime boundary has completed closed readiness and is now entering
     # the one execution slot. Reservation is not provider consumption.
     ledger.reserve_execution()
+    accepted = False
     try:
         # Output allocation is post-reservation: a local collision is a
         # terminal failure of this one authorized execution, never a reason
@@ -45,7 +63,6 @@ def execute(context, input_data, dry_run):
         destination.mkdir(exist_ok=False)
         # The provider handle's single generate call is the submission boundary.
         # Polling remains inside that call and cannot increment the ledger.
-        ledger.mark_submitted()
         result = context.providers.get_image_to_video_generator().generate(ImageToVideoRequest(
             prompt=admission.request["prompt"], image=admission.image,
             request_sha256=admission.request_sha256,
@@ -54,13 +71,32 @@ def execute(context, input_data, dry_run):
             image_mime_type=IMAGE_MIME_TYPE,
             operation_evidence_path=destination / "operation.json",
         ))
+        # A returned result proves the provider accepted the operation. Consume
+        # the authorization before any local media/evidence admission work.
+        ledger.mark_submitted()
+        accepted = True
+    except Exception as exc:
+        accepted = accepted or _provider_acceptance_evidenced(exc, destination / "operation.json")
+        if accepted:
+            if json.loads(ledger.path.read_text(encoding="utf-8"))["status"] == "reserved":
+                ledger.mark_submitted()
+            ledger.terminal("failed")
+        else:
+            ledger.release_execution()
+            try:
+                destination.rmdir()
+            except OSError:
+                pass
+        raise
+    try:
+        video = destination / "shot.mp4"; video.write_bytes(result.media.content)
+        evidence = destination / "evidence.json"
+        evidence.write_text(json.dumps({"request_sha256": admission.request_sha256, "shot_id": admission.request["scope"]["shot_id"], "visual_basis_sha256": admission.request["production_input"]["content_sha256"], "provider": "Google Vertex AI", "model": "veo-3.1-generate-001", "provider_request_id": result.provider_request_id, "response_sha256": result.response_sha256, "video_sha256": hashlib.sha256(result.media.content).hexdigest(), "byte_count": len(result.media.content), "estimated_cost_usd": result.estimated_cost_usd, "attempts": 1, "audio": False, "authority": AUTHORITY}, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        ledger.terminal("completed")
     except Exception:
+        # Acceptance was already sealed above; local failures cannot reopen it.
         ledger.terminal("failed")
         raise
-    video = destination / "shot.mp4"; video.write_bytes(result.media.content)
-    evidence = destination / "evidence.json"
-    evidence.write_text(json.dumps({"request_sha256": admission.request_sha256, "shot_id": admission.request["scope"]["shot_id"], "visual_basis_sha256": admission.request["production_input"]["content_sha256"], "provider": "Google Vertex AI", "model": "veo-3.1-generate-001", "provider_request_id": result.provider_request_id, "response_sha256": result.response_sha256, "video_sha256": hashlib.sha256(result.media.content).hexdigest(), "byte_count": len(result.media.content), "estimated_cost_usd": result.estimated_cost_usd, "attempts": 1, "audio": False, "authority": AUTHORITY}, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-    ledger.terminal("completed")
     return CapabilityResult.success({**common, "status": "generated_quarantined", "provider_call_count": 1, "attempt_reserved": True, "artifact_root": str(destination), "video": str(video), "evidence": str(evidence)})
 
 

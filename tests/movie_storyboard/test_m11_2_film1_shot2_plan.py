@@ -54,9 +54,10 @@ class Film1Shot2PlanTests(unittest.TestCase):
             self.assertEqual(historical_path.read_bytes(), historical_bytes)
             self.assertEqual(json.loads((shot_2 / "authorization.json").read_text())["request_sha256"], "b" * 64)
             self.assertEqual(json.loads(ledger.path.read_text())["status"], "reserved")
-            ledger.terminal("failed")
-            with self.assertRaises(AttemptLedgerError):
-                ledger.reserve_execution()
+            ledger.release_execution()
+            self.assertEqual(json.loads(ledger.path.read_text())["attempts"], 0)
+            ledger.reserve_execution()
+            self.assertEqual(json.loads(ledger.path.read_text())["status"], "reserved")
 
     def test_plan_is_one_inert_adjacent_shot_with_fixed_bound(self):
         plan = json.loads(PACKAGE.read_text(encoding="utf-8"))
