@@ -202,9 +202,26 @@ class VertexVeoImageToVideoProvider:
         encoded = prediction.get("bytesBase64Encoded")
         if not isinstance(encoded, str):
             raise VertexVeoProviderFailure("image-to-video provider returned no inline video", VertexVeoProviderDiagnostic(True, "output_missing", stage="result_retrieval", operation_name=operation, poll_count=poll_count, submission_accepted=True))
-        content = base64.b64decode(encoded, validate=True)
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise VertexVeoProviderFailure(
+                "image-to-video provider returned invalid inline video",
+                VertexVeoProviderDiagnostic(
+                    True, "output_invalid", stage="result_retrieval",
+                    operation_name=operation, poll_count=poll_count,
+                    submission_accepted=True,
+                ),
+            ) from exc
         if not content or len(content) > 256 * 1024 * 1024 or content[:8] != b"\x00\x00\x00\x18ftyp":
-            raise ValueError("Vertex response is not a bounded MP4")
+            raise VertexVeoProviderFailure(
+                "image-to-video provider returned invalid inline video",
+                VertexVeoProviderDiagnostic(
+                    True, "output_invalid", stage="result_retrieval",
+                    operation_name=operation, poll_count=poll_count,
+                    submission_accepted=True,
+                ),
+            )
         digest = hashlib.sha256(content).hexdigest()
         return ImageToVideoResult(GeneratedMedia("video/mp4", content, 1280, 720, digest), max(0, int((time.monotonic() - started) * 1000)), hashlib.sha256(terminal_raw).hexdigest(), operation, "0.000000")
 

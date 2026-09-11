@@ -170,6 +170,30 @@ class VertexDiagnosticTests(unittest.TestCase):
             "operation_name": operation, "poll_count": 1, "submission_accepted": True,
         })
 
+    def test_invalid_terminal_inline_video_preserves_accepted_lro_diagnostics(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+
+        def transport(url, _body, _headers, _timeout, _maximum):
+            if url.endswith(":predictLongRunning"):
+                return json.dumps({"name": operation}).encode()
+            return json.dumps({"done": True, "response": {"videos": [
+                {"bytesBase64Encoded": "not-base64"},
+            ]}}).encode()
+
+        provider = MODULE.VertexVeoImageToVideoProvider()
+        request = self._request()
+        with patch.dict("os.environ", {
+            "VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1",
+        }, clear=False):
+            with self.assertRaises(MODULE.VertexVeoProviderFailure) as raised:
+                provider.generate(request, credential="token", transport=transport)
+        self.assertEqual(raised.exception.diagnostic.as_dict(), {
+            "http_response_received": True, "classification": "output_invalid",
+            "http_status": None, "error_code": None, "message": None,
+            "stage": "result_retrieval", "operation_name": operation,
+            "poll_count": 1, "submission_accepted": True,
+        })
+
 
 if __name__ == "__main__":
     unittest.main()
