@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/provider-flight-recorder-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_identity", "contract_version", "recorder_id", "request_summary", "events", "evidence_sha256"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "contract_identity": {"const": "vss.provider-flight-recorder"},
+    "contract_version": {"const": "1"},
+    "recorder_id": {"type": "string", "maxLength": 128},
+    "request_summary": {"type": "object"},
+    "events": {"type": "array", "maxItems": 512, "items": {"type": "object"}},
+    "readiness": {"type": "object"},
+    "terminal_response": {"type": "object"},
+    "media_admission": {"type": "object"},
+    "diagnosis": {"type": "object"},
+    "evidence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

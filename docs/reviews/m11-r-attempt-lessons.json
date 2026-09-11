@@ -1,0 +1,12 @@
+{
+  "schema_version": "1",
+  "contract_identity": "vss.provider-reliability-historical-lessons",
+  "contract_version": "1",
+  "attempts": [
+    {"attempt": 1, "status": "consumed", "classification": "ledger_state", "evidence_reference": "historical M11.0 Attempt 1 evidence", "regression": "ledger_state_failure", "readiness_check": "lro_persistence", "known_facts": "the first execution consumed an attempt but retained status reserved; the original provider failure details are not retained in the current workspace"},
+    {"attempt": 2, "status": "consumed", "classification": "authorization_iam", "evidence_reference": "docs/reviews/m11-0-attempt-2-google-iam-evidence.md", "regression": "auth_rejection", "readiness_check": "network_readiness", "known_facts": "Vertex service-agent IAM binding was recovered; causal relation to Veo failure remains unproven"},
+    {"attempt": 3, "status": "consumed", "classification": "local_execution", "evidence_reference": ".local/movie/m11-0-moving-shot/attempt-3/stale-diagnostics/reconciliation.json", "regression": "local_persistence_failure", "readiness_check": "lro_persistence", "known_facts": "empty output namespace collided before reservation; provider_call_count was 0"},
+    {"attempt": 4, "status": "consumed", "classification": "terminal_provider_failure", "evidence_reference": "runtime audit record for correlation vikramaditya-m11-moving-shot", "regression": "accepted_lro", "readiness_check": "terminal_result_observability", "known_facts": "accepted LRO then terminal provider failure; exact Google error is retained in runtime audit"},
+    {"attempt": 5, "status": "consumed", "classification": "media_container_admission", "evidence_reference": ".local/movie/m11-0-moving-shot/attempt-5/output/9a7fb8229afabd087db5128efc4a1cb788a0a1fe4d8e34aec09185854320e76b/operation.json", "regression": "malformed_inline_media", "readiness_check": "result_parser", "known_facts": "accepted LRO, done=true, one submission, terminal response and original validation cause were not retained"}
+  ]
+}

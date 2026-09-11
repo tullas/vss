@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from vss_movie_moving_shot import IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECONDS, LOCATION, MODEL_SNAPSHOT, MAXIMUM_COST_USD
+from vss_provider_reliability import FailureClass
 from vss_providers import GeneratedMedia, ImageToVideoRequest, ImageToVideoResult, ProviderExecutionFailure
 
 POLL_INTERVAL_SECONDS = 5.0
@@ -269,7 +270,9 @@ def _record_result_failure(evidence: dict[str, Any] | None, path: Path | None,
     if evidence is None:
         return
     result = evidence.setdefault("result_admission", {})
-    result.update({"status": "rejected", "classification": classification,
+    taxonomy = FailureClass.MEDIA_DECODING.value if check == "base64_decode" else (
+        FailureClass.MEDIA_CONTAINER_ADMISSION.value if check in {"empty_payload", "payload_size", "encoded_payload_size"} or check.startswith(("valid_", "invalid_", "unsupported_", "truncated_", "ftyp_")) else FailureClass.RESULT_REPRESENTATION.value)
+    result.update({"status": "rejected", "classification": classification, "failure_taxonomy": taxonomy,
                    "validation_check": check, "message": _safe_message(message)})
     if cause is not None:
         result["underlying_exception"] = _exception_metadata(cause)
