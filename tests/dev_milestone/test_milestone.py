@@ -11,7 +11,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from vss_dev import ImprovementBacklog, ImprovementBacklogFailure, MilestoneController, MilestoneFailure
-from vss_dev.milestone import BOOTSTRAP_REPAIR_PATHS
+from vss_dev.milestone import BOOTSTRAP_REPAIR_PATHS, POST_MERGE_RECONCILIATION_AUTHORIZATION, RECONCILIATION_AUTHORIZATION
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -70,6 +70,84 @@ class MilestoneControllerTests(unittest.TestCase):
 
     def initialize(self) -> dict:
         return self.controller.initialize("dev-wf-1", self.base, 114, ["agent-coordination"], ["src/demo"], "Approved bounded development milestone.", mission_evidence())
+
+    def moving_shot_reconciliation_fixture(self, *, merge: bool = True) -> tuple[dict, str, str]:
+        state = self.controller.initialize("m11-0-veo-shot", self.base, 132, ["movie"], ["src", "tests"], "Moving-shot reconciliation fixture.", mission_evidence())
+        self.git("switch", "-c", "feature/m11-0-veo-shot")
+        state = self.controller.transition_branch("m11-0-veo-shot", "main", "feature/m11-0-veo-shot", "branch", state["generation"])
+        (self.root / "README.md").write_text("reviewed\n", encoding="utf-8")
+        self.git("add", "README.md"); self.git("commit", "-qm", "reviewed PR")
+        reviewed = self.git("rev-parse", "HEAD").stdout.strip()
+        self.controller.ingest_ci({"head_sha": reviewed, "checks": []}, "m11-0-veo-shot")
+        state = self.controller.load("m11-0-veo-shot")
+        state = self.controller.checkpoint("m11-0-veo-shot", "validation_completed", "L3", {"validation_level": "L3", "evidence_sha256": "a" * 64}, state["generation"])
+        for attempt in range(1, 6):
+            path = self.root / ".local/movie/m11-0-moving-shot" / (f"attempt-{attempt}.attempt.json")
+            path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps({"attempt": attempt}), encoding="utf-8")
+        self.git("add", ".local"); self.git("commit", "-qm", "historical attempts")
+        if merge:
+            self.git("switch", "main"); self.git("merge", "--no-ff", "feature/m11-0-veo-shot", "-qm", "merge PR")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        repository = self.controller._repository(self.base)
+        evidence = self.root / ".vss/validation.json"
+        evidence.write_text(json.dumps({"protocol": "vss.agent-validation-evidence", "passed": True, "repository": {key: repository[key] for key in ("name_with_owner", "branch", "base_sha", "head_sha")}, "plan": {"executed_level": "L3"}}), encoding="utf-8")
+        snapshot = self.controller.historical_evidence_snapshot("m11-0-veo-shot")
+        return state, evidence, snapshot["sha256"]
+
+    def reconcile(self, evidence: Path, historical: str, authorization: str = POST_MERGE_RECONCILIATION_AUTHORIZATION) -> dict:
+        generation = json.loads((self.root / ".vss/milestones/m11-0-veo-shot/state.json").read_text())["generation"]
+        return self.controller.reconcile_source_identity("m11-0-veo-shot", "reconcile", "bounded test", authorization, evidence, historical, generation)
+
+    def test_post_merge_reconciliation_requires_separate_authorization_and_preserves_authority(self) -> None:
+        _, evidence, historical = self.moving_shot_reconciliation_fixture()
+        result = self.reconcile(evidence, historical)
+        self.assertEqual(result["status"], "CI_PENDING")
+        self.assertEqual(result["generation"], 4)
+        self.assertTrue(all(value is False for value in result["authority"].values()))
+
+    def test_post_merge_reconciliation_rejects_unrelated_or_rebased_head(self) -> None:
+        _, evidence, historical = self.moving_shot_reconciliation_fixture(merge=False)
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.reconcile(evidence, historical)
+
+    def test_post_merge_reconciliation_rejects_dirty_or_failed_validation(self) -> None:
+        _, evidence, historical = self.moving_shot_reconciliation_fixture()
+        failed = json.loads(evidence.read_text()); failed["passed"] = False
+        evidence.write_text(json.dumps(failed), encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "fresh canonical"):
+            self.reconcile(evidence, historical)
+        repository = self.controller._repository(self.base)
+        evidence.write_text(json.dumps({"protocol": "vss.agent-validation-evidence", "passed": True, "repository": {key: repository[key] for key in ("name_with_owner", "branch", "base_sha", "head_sha")}, "plan": {"executed_level": "L3"}}), encoding="utf-8")
+        (self.root / "README.md").write_text("dirty\n", encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "clean worktree"):
+            self.reconcile(evidence, historical)
+
+    def test_post_merge_reconciliation_rejects_changed_history_and_missing_authorization(self) -> None:
+        _, evidence, historical = self.moving_shot_reconciliation_fixture()
+        with self.assertRaisesRegex(MilestoneFailure, "historical execution evidence"):
+            self.reconcile(evidence, "0" * 64)
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.reconcile(evidence, historical, RECONCILIATION_AUTHORIZATION + " changed")
+
+    def test_post_merge_reconciliation_is_idempotent(self) -> None:
+        _, evidence, historical = self.moving_shot_reconciliation_fixture()
+        result = self.reconcile(evidence, historical)
+        repeated = self.controller.reconcile_source_identity("m11-0-veo-shot", "reconcile", "bounded test", POST_MERGE_RECONCILIATION_AUTHORIZATION, evidence, historical, result["generation"])
+        self.assertEqual(repeated, result)
+
+    def test_existing_descendant_reconciliation_remains_valid(self) -> None:
+        state = self.controller.initialize("m11-0-veo-shot", self.base, 132, ["movie"], ["src", "tests"], "Moving-shot reconciliation fixture.", mission_evidence())
+        self.git("switch", "-c", "feature/m11-0-veo-shot")
+        state = self.controller.transition_branch("m11-0-veo-shot", "main", "feature/m11-0-veo-shot", "branch", state["generation"])
+        (self.root / "README.md").write_text("descendant\n", encoding="utf-8"); self.git("add", "README.md"); self.git("commit", "-qm", "descendant")
+        for attempt in range(1, 6):
+            path = self.root / ".local/movie/m11-0-moving-shot" / (f"attempt-{attempt}.attempt.json"); path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps({"attempt": attempt}), encoding="utf-8")
+        self.git("add", ".local"); self.git("commit", "-qm", "historical attempts")
+        repository = self.controller._repository(self.base)
+        evidence = self.root / ".vss/validation.json"; evidence.write_text(json.dumps({"protocol": "vss.agent-validation-evidence", "passed": True, "repository": {key: repository[key] for key in ("name_with_owner", "branch", "base_sha", "head_sha")}, "plan": {"executed_level": "L3"}}), encoding="utf-8")
+        historical = self.controller.historical_evidence_snapshot("m11-0-veo-shot")["sha256"]
+        result = self.controller.reconcile_source_identity("m11-0-veo-shot", "reconcile", "bounded test", RECONCILIATION_AUTHORIZATION, evidence, historical, state["generation"])
+        self.assertEqual(result["status"], "CI_PENDING")
 
     def committed_pending_milestone(self) -> tuple[dict, str, bytes]:
         initialized = self.initialize()
