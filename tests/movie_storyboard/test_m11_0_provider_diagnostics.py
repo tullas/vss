@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import tempfile
 import sys
 import unittest
 import urllib.error
@@ -192,6 +193,77 @@ class VertexDiagnosticTests(unittest.TestCase):
             "http_status": None, "error_code": None, "message": None,
             "stage": "result_retrieval", "operation_name": operation,
             "poll_count": 1, "submission_accepted": True,
+        })
+
+    def test_terminal_provider_error_preserves_accepted_lro_diagnostics(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+
+        def transport(url, _body, _headers, _timeout, _maximum):
+            if url.endswith(":predictLongRunning"):
+                return json.dumps({"name": operation}).encode()
+            return json.dumps({"done": True, "error": {
+                "code": 400, "status": "INVALID_ARGUMENT", "message": "provider rejected request",
+            }}).encode()
+
+        provider = MODULE.VertexVeoImageToVideoProvider()
+        with patch.dict("os.environ", {
+            "VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1",
+        }, clear=False):
+            with self.assertRaises(MODULE.VertexVeoProviderFailure) as raised:
+                provider.generate(self._request(), credential="token", transport=transport)
+        self.assertEqual(raised.exception.diagnostic.as_dict(), {
+            "http_response_received": True, "classification": "operation_failed",
+            "http_status": None, "error_code": "INVALID_ARGUMENT",
+            "message": "provider rejected request", "stage": "polling",
+            "operation_name": operation, "poll_count": 1, "submission_accepted": True,
+        })
+
+    def test_accepted_operation_is_persisted_before_polling(self):
+        from pathlib import Path
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "operation.json"
+            calls = []
+
+            def transport(url, _body, _headers, _timeout, _maximum):
+                calls.append((url, evidence.exists()))
+                if url.endswith(":predictLongRunning"):
+                    return json.dumps({"name": operation}).encode()
+                return json.dumps({"done": True, "response": {"videos": [{
+                    "bytesBase64Encoded": __import__("base64").b64encode(
+                        b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2").decode(),
+                }]}}).encode()
+
+            request = self._request()
+            request.operation_evidence_path = evidence
+            with patch.dict("os.environ", {
+                "VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1",
+            }, clear=False):
+                MODULE.VertexVeoImageToVideoProvider().generate(request, credential="token", transport=transport)
+            self.assertEqual(calls, [(calls[0][0], False), (calls[1][0], True)])
+            self.assertEqual(json.loads(evidence.read_text())["operation_name"], operation)
+
+    def test_operation_persistence_failure_preserves_accepted_lro_diagnostics(self):
+        from pathlib import Path
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+
+        def transport(url, _body, _headers, _timeout, _maximum):
+            if url.endswith(":predictLongRunning"):
+                return json.dumps({"name": operation}).encode()
+            self.fail("polling must not begin when operation evidence persistence fails")
+
+        request = self._request()
+        request.operation_evidence_path = Path("/proc/1/m11-operation.json")
+        with patch.dict("os.environ", {
+            "VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1",
+        }, clear=False):
+            with self.assertRaises(MODULE.VertexVeoProviderFailure) as raised:
+                MODULE.VertexVeoImageToVideoProvider().generate(request, credential="token", transport=transport)
+        self.assertEqual(raised.exception.diagnostic.as_dict(), {
+            "http_response_received": True, "classification": "operation_persistence_failed",
+            "http_status": None, "error_code": None, "message": None,
+            "stage": "submission", "operation_name": operation,
+            "poll_count": 0, "submission_accepted": True,
         })
 
 

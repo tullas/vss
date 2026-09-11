@@ -52,6 +52,7 @@ def execute(context, input_data, dry_run):
             provider_request_sha256=admission.request_sha256,
             duration_seconds=IMAGE_TO_VIDEO_DURATION_SECONDS, resolution="720p", generate_audio=False,
             image_mime_type=IMAGE_MIME_TYPE,
+            operation_evidence_path=destination / "operation.json",
         ))
     except Exception:
         ledger.terminal("failed")

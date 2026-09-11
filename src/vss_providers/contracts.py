@@ -90,6 +90,7 @@ class ImageToVideoRequest:
     resolution: str
     generate_audio: bool
     image_mime_type: str = "image/png"
+    operation_evidence_path: Any = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -40,10 +40,10 @@ class FakeVideoProvider:
 
 
 class MovingShotTests(unittest.TestCase):
-    def test_attempt_four_controller_namespace_does_not_reuse_attempt_three(self):
+    def test_attempt_five_controller_namespace_does_not_reuse_attempts_one_to_four(self):
         source = (Path(__file__).resolve().parents[2] / "src/vss_runtime/controller.py").read_text(encoding="utf-8")
-        self.assertIn('"attempt-4" / "output"', source)
-        self.assertNotIn('"attempt-3" / "output"', source)
+        self.assertIn('"attempt-5" / "output"', source)
+        self.assertNotIn('"attempt-4" / "output"', source)
 
     def test_output_collision_after_reservation_consumes_without_provider_call(self):
         with tempfile.TemporaryDirectory() as directory:

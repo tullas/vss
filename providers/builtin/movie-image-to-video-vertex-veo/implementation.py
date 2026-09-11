@@ -8,6 +8,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from vss_movie_moving_shot import IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECONDS, LOCATION, MODEL_SNAPSHOT, MAXIMUM_COST_USD
@@ -81,6 +82,36 @@ class VertexVeoProviderFailure(ProviderExecutionFailure):
     def __init__(self, message: str, diagnostic: VertexVeoProviderDiagnostic) -> None:
         super().__init__(message)
         self.diagnostic = diagnostic
+
+
+def _persist_operation(request: ImageToVideoRequest, operation: str, endpoint: str) -> None:
+    path = getattr(request, "operation_evidence_path", None)
+    if path is None:
+        return
+    if not isinstance(path, Path):
+        raise VertexVeoProviderFailure(
+            "image-to-video operation evidence destination is invalid",
+            VertexVeoProviderDiagnostic(
+                True, "operation_persistence_failed", stage="submission",
+                operation_name=operation, submission_accepted=True,
+            ),
+        )
+    try:
+        path.write_text(json.dumps({
+            "operation_name": operation,
+            "endpoint": endpoint,
+            "method": "POST",
+            "request_sha256": request.request_sha256,
+            "submission_accepted": True,
+        }, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    except (OSError, TypeError, ValueError) as exc:
+        raise VertexVeoProviderFailure(
+            "image-to-video operation evidence persistence failed",
+            VertexVeoProviderDiagnostic(
+                True, "operation_persistence_failed", stage="submission",
+                operation_name=operation, submission_accepted=True,
+            ),
+        ) from exc
 
 
 def _safe_message(value: object) -> str | None:
@@ -172,6 +203,7 @@ class VertexVeoImageToVideoProvider:
         expected_prefix = f"projects/{project}/locations/{LOCATION}/publishers/google/models/{MODEL_SNAPSHOT}/operations/"
         if not isinstance(operation, str) or not operation.startswith(expected_prefix) or len(operation) > 512:
             raise VertexVeoProviderFailure("image-to-video provider returned an invalid operation", VertexVeoProviderDiagnostic(True, "operation_invalid", stage="submission"))
+        _persist_operation(request, operation, endpoint)
         poll_endpoint = endpoint.rsplit(":", 1)[0] + ":fetchPredictOperation"
         terminal_raw = None
         terminal = None
