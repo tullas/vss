@@ -1,0 +1,13 @@
+{
+  "name": "projects/vss-film-poc/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/aa6b2f4a-f242-40ca-ae85-1ec420b653f8",
+  "done": true,
+  "response": {
+    "raiMediaFilteredCount": 0,
+    "videos": [
+      {
+        "bytesBase64Encoded": "AAAAGGZ0eXBtcDQyAAAAAG1wNDJpc29tAAAAEG1kYXQxMjM0NTY3OA==",
+        "mimeType": "video/mp4"
+      }
+    ]
+  }
+}
