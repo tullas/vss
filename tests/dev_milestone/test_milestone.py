@@ -11,7 +11,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from vss_dev import ImprovementBacklog, ImprovementBacklogFailure, MilestoneController, MilestoneFailure
-from vss_dev.milestone import BOOTSTRAP_REPAIR_PATHS, POST_MERGE_RECONCILIATION_AUTHORIZATION, RECONCILIATION_AUTHORIZATION
+from vss_dev.milestone import BOOTSTRAP_REPAIR_PATHS, POST_MERGE_RECONCILIATION_AUTHORIZATION, POST_REPAIR_RECONCILIATION_AUTHORIZATION, RECONCILIATION_AUTHORIZATION
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,6 +103,12 @@ class MilestoneControllerTests(unittest.TestCase):
         result = self.reconcile(evidence, historical)
         self.assertEqual(result["status"], "CI_PENDING")
         self.assertEqual(result["generation"], 4)
+        self.assertTrue(all(value is False for value in result["authority"].values()))
+
+    def test_post_repair_authorization_is_registered_without_authority_escalation(self) -> None:
+        _, evidence, historical = self.moving_shot_reconciliation_fixture()
+        result = self.reconcile(evidence, historical, POST_REPAIR_RECONCILIATION_AUTHORIZATION)
+        self.assertEqual(result["status"], "CI_PENDING")
         self.assertTrue(all(value is False for value in result["authority"].values()))
 
     def test_post_merge_reconciliation_rejects_unrelated_or_rebased_head(self) -> None:
