@@ -1,0 +1,130 @@
+{
+  "package_identity": "film-1-shot-3-production-readiness",
+  "package_version": "1",
+  "status": "offline_production_readiness_trial",
+  "shot": {
+    "film_id": "film-1",
+    "project_id": "vikramaditya-local",
+    "scene_id": "scene-91f5c8634519d8264e2dd5f8",
+    "shot_id": "shot-83400ba2b213ce5c9ff3c8b1",
+    "shot_order": 4,
+    "narrative_beat": "The Vetala lifts one hand to halt Vikramaditya and begins the reply; Vikramaditya holds his measured step and listens.",
+    "relationship_to_prior": "adjacent_consecutive",
+    "source_code_changes_required": false
+  },
+  "continuity_contract": {
+    "anchors": [
+      "Shot 1 accepted Attempt 5 end-state: Vikramaditya beneath the banyan-road dawn interruption",
+      "Shot 2 accepted artifact: Vikramaditya turns and takes one measured step toward the already-present Vetala",
+      "same scene, dawn, banyan-road, character presence, camera axis, left-right relationship, 16:9 framing, and restrained live-action grounding"
+    ],
+    "progression": "Vetala raises one hand and begins answering while Vikramaditya stops advancing and listens; the riddle remains unresolved.",
+    "exclusions": [
+      "no new character, location, prop, time jump, camera-axis reset, magic, crowd, modern object, or control-plane text"
+    ],
+    "deliberate_unknowns": [
+      "exact facial identity, costume details, lens, blocking distance, color treatment, sound, and dialogue wording"
+    ]
+  },
+  "continuity_evidence": {
+    "shot_1": {
+      "acceptance": "docs/reviews/m11-0-attempt-5-creative-acceptance.json",
+      "artifact": ".local/recovery/attempt-5/attempt-5-recovered.mp4",
+      "artifact_sha256": "1008b512047b98451cf6b3760eb7b18d1909ed319474a24c103b4db2e6e0bda3"
+    },
+    "shot_2": {
+      "acceptance": "docs/reviews/m11-2-film1-shot2-creative-acceptance.json",
+      "artifact": ".local/movie/m11-0-moving-shot/shot-024b0d6352149eabb74df544/output/095e28b8fade7033c9dc9d927815a5f2dbeb21789dbb13058e848d013bce0b9d/shot.mp4",
+      "artifact_sha256": "2f90f65337a06c4b586021e2892cd876d5d5f02721007bbeaa9faaea49aed902",
+      "request_sha256": "095e28b8fade7033c9dc9d927815a5f2dbeb21789dbb13058e848d013bce0b9d"
+    },
+    "input_frame": {
+      "reference": ".local/movie/storyboard-images/da9e10e3c11838131019a5969bd1403ad384881a868ea3956bf5869b4b3788a8/frame-55a9d7015fdf1f72571b74c5/4ff4ddc7ef42122d935ce5c1cfbe5bed68fd4e157789862a1597943eebcb02bb.png",
+      "sha256": "4ff4ddc7ef42122d935ce5c1cfbe5bed68fd4e157789862a1597943eebcb02bb"
+    }
+  },
+  "approved_shot_package": {
+    "provider_identity": "movie.image-to-video.vertex-veo",
+    "model_snapshot": "veo-3.1-generate-001",
+    "location": "us-central1",
+    "resolution": "720p",
+    "duration_seconds": 8,
+    "generate_audio": false,
+    "maximum_outputs": 1,
+    "maximum_provider_attempts": 1,
+    "expected_cost_usd": "1.600000",
+    "hard_ceiling_usd": "5.000000",
+    "prompt": "Continue immediately from the accepted Film #1 Shot 2 on the same dawn banyan-road axis. Vetala lifts one hand to halt Vikramaditya and begins to answer the interrupted riddle; Vikramaditya holds his measured step and listens. Preserve both characters, their established left-right relationship, screen direction, and restrained physical action. Cinematic live-action historical Indian setting, natural dawn light, grounded human proportions, mature banyan anchor, restrained royal-era detail, Vetala ancient, lean, uncanny and intelligent without generic horror. No camera-axis reset, no time jump, no new characters, no new location, no new props, no magic or glowing effects, no crowd, no captions, no logos, no watermarks, no control-plane text, no modern objects, no fantasy spectacle, no malformed anatomy or duplicated people.",
+    "authority": {
+      "provider_execution": false,
+      "production": false,
+      "publication": false,
+      "retry": false,
+      "fallback": false,
+      "workflow_activation": false
+    }
+  },
+  "deterministic_binding": {
+    "request_digest_algorithm": "sha256(canonical_json(admitted_moving_shot_request_with_zeroed_request_sha256))",
+    "request_sha256": "41ca98650067e8c233123eea043b0a5874b99a5c2dfce8aa9e2223eb217cf577",
+    "execution_namespace": "vikramaditya-local/shot-83400ba2b213ce5c9ff3c8b1",
+    "namespace_rule": "production_id/shot_id",
+    "planning_runtime_match": true,
+    "shot_1_shot_2_hard_coded_assumptions_required": false
+  },
+  "offline_trial": {
+    "provider_calls": 0,
+    "paid_attempts": 0,
+    "credentials_read": false,
+    "network_transport": false,
+    "controller_modified": false,
+    "attempt_6_created": false,
+    "states": [
+      "planned", "rehearsed", "authorized", "execution_reserved",
+      "provider_submission_attempted", "provider_accepted", "provider_processing",
+      "provider_terminal", "artifact_recovered", "technically_admitted", "creatively_reviewed"
+    ],
+    "simulated_submission": {
+      "submissions": 1,
+      "resubmissions": 0,
+      "accepted_once": true,
+      "operation_name": "offline/vikramaditya-local/shot-83400ba2b213ce5c9ff3c8b1/operations/41ca98650067e8c2",
+      "persisted_operation": true,
+      "interruption": "simulated after provider acceptance during processing"
+    },
+    "recovery": {
+      "result": "recovered_same_operation",
+      "operation_reused": true,
+      "submission_authority": false,
+      "recovery_submission_count": 0,
+      "duplicate_submission_possible": false,
+      "media_reached_normal_admission": true,
+      "technical_admission": "PASSED",
+      "reviewable_candidate": "available_offline",
+      "creative_disposition": "USE (simulated review evidence only)"
+    },
+    "failure_invariants": {
+      "pre_acceptance_failures_retry_permitted": true,
+      "accepted_submission_retry_permitted": false,
+      "frozen_controller_conflicts_block_film_1": false
+    }
+  },
+  "readiness": {
+    "preflight_result": "PASSED_OFFLINE_ZERO_CALL",
+    "credential_readiness_boundary": "simulated; no credential access",
+    "provider_readiness": "not asserted; live quote, credentials, rights, and human paid authorization remain required",
+    "ready_for_paid_execution": false
+  },
+  "kpi": {
+    "source_code_changes_per_shot": 0,
+    "human_interventions_per_shot": 0,
+    "codex_manual_handoffs_per_shot": 0,
+    "prs_needed_to_unblock": 0,
+    "pre_provider_failures": 1,
+    "accepted_provider_submissions": 1,
+    "recovery_events": 1,
+    "simulated_provider_cost_usd": "0.000000",
+    "approved_shot_to_reviewable_video_wall_clock_seconds": 0
+  },
+  "package_sha256": "44a77c857731f8a773cb6513ffe38a8eea909cc03b6085429c5f2dbd3342cf55"
+}
