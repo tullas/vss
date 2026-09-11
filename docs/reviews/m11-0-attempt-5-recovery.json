@@ -1,0 +1,41 @@
+{
+  "schema_version": "1",
+  "record_kind": "m11-attempt-recovery-evidence",
+  "attempt": 5,
+  "historical_status": "consumed",
+  "corrected_outcome": "provider_success_admission_failure_recovered_artifact",
+  "provider_execution": {
+    "new_provider_call": false,
+    "new_paid_attempt": false,
+    "operation_name": "projects/vss-film-poc/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/aa6b2f4a-f242-40ca-ae85-1ec420b653f8",
+    "done": true,
+    "rai_media_filtered_count": 0,
+    "video_count": 1
+  },
+  "recovered_media": {
+    "repository_binary_committed": false,
+    "local_reference": ".local/recovery/attempt-5/attempt-5-recovered.mp4",
+    "mime_type": "video/mp4",
+    "sha256": "1008b512047b98451cf6b3760eb7b18d1909ed319474a24c103b4db2e6e0bda3",
+    "size_bytes": 6330737,
+    "container": "ISO Media, MP4 Base Media v1",
+    "video_codec": "h264",
+    "width": 1280,
+    "height": 720,
+    "frame_rate": "24/1",
+    "duration_seconds": "8.000000",
+    "audio_stream_present": false
+  },
+  "verification": {
+    "file_identified_as_mp4": true,
+    "sha256_independently_rechecked": true,
+    "ffprobe_verified": true
+  },
+  "root_cause": {
+    "provider_generation_failed": false,
+    "classification": "media_container_admission",
+    "summary": "The provider completed the long-running operation and returned one valid inline Base64 MP4. VSS rejected the valid result during local media admission/parsing. The completed operation was later fetched and the artifact recovered without another generation request."
+  },
+  "history_policy": "append_only_correction",
+  "notes": "This record corrects interpretation of Attempt 5 without rewriting or deleting the original consumed-attempt evidence. No Attempt 6 was created or authorized."
+}
