@@ -14,6 +14,7 @@ from vss_movie_moving_shot import IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECON
 from vss_providers import GeneratedMedia, ImageToVideoRequest, ImageToVideoResult, ProviderExecutionFailure
 
 POLL_INTERVAL_SECONDS = 5.0
+_BEARER_PREFIX = re.compile(r"(?i)^Bearer(?:\s|$)")
 
 
 def _https_json(url: str, body: bytes, headers: dict[str, str], timeout: float) -> bytes:
@@ -24,6 +25,20 @@ def _https_json(url: str, body: bytes, headers: dict[str, str], timeout: float) 
 
 def _default_transport(url: str, body: bytes, headers: dict[str, str], timeout: float, maximum: int) -> bytes:
     return _https_json(url, body, headers, timeout)
+
+
+def _authorization_header(raw_token: str) -> str:
+    """Build one bearer header from an unwrapped environment token.
+
+    The environment value is deliberately not stripped, decoded, encoded, or
+    otherwise rewritten.  Rejecting shell/HTTP wrapper material prevents a
+    malformed value from being sent while preserving valid token bytes.
+    """
+    if (not isinstance(raw_token, str) or not raw_token
+            or any(char.isspace() or char in {'"', "'"} for char in raw_token)
+            or _BEARER_PREFIX.match(raw_token)):
+        raise ValueError("Vertex access token must be a raw, unwrapped token")
+    return "Bearer " + raw_token
 
 
 class VertexVeoProviderDiagnostic:
@@ -141,7 +156,11 @@ class VertexVeoImageToVideoProvider:
             raise ValueError("Vertex request exceeds its bound")
         started = time.monotonic()
         sender = transport or _default_transport
-        headers = {"Authorization": "Bearer " + credential, "Content-Type": "application/json"}
+        try:
+            authorization = _authorization_header(credential)
+        except ValueError as exc:
+            raise ValueError("Vertex project or credential is unavailable") from exc
+        headers = {"Authorization": authorization, "Content-Type": "application/json"}
         try:
             raw = sender(endpoint, body, headers, 900.0, 128 * 1024 * 1024)
         except urllib.error.HTTPError as exc:

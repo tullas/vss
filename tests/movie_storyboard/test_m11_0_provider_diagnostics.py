@@ -3,13 +3,14 @@
 import importlib.util
 import io
 import json
+import os
 import sys
 import unittest
 import urllib.error
 from unittest.mock import patch
 from pathlib import Path
 
-from vss_providers import ProviderAccess
+from vss_providers import ProviderAccess, ProviderExecutionFailure
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,6 +23,61 @@ SPEC.loader.exec_module(MODULE)
 
 
 class VertexDiagnosticTests(unittest.TestCase):
+    @staticmethod
+    def _request():
+        return type("Request", (), {
+            "prompt": "prompt", "image": b"png", "request_sha256": "a" * 64,
+            "provider_request_sha256": "a" * 64, "duration_seconds": 8,
+            "resolution": "720p", "generate_audio": False, "image_mime_type": "image/png",
+        })()
+
+    def test_environment_token_is_sent_as_one_exact_bearer_header_without_persistence(self):
+        token = "ya29.raw.token-with_opaque/chars"
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
+        seen_headers = []
+
+        def transport(_url, _body, headers, _timeout, _maximum):
+            seen_headers.append(dict(headers))
+            if len(seen_headers) == 1:
+                return json.dumps({"name": operation}).encode()
+            return json.dumps({"done": True, "response": {"videos": [{
+                "bytesBase64Encoded": __import__("base64").b64encode(mp4).decode(),
+            }]}}).encode()
+
+        provider = MODULE.VertexVeoImageToVideoProvider()
+        access = ProviderAccess(
+            video=provider, video_secret_reader=os.environ.get,
+            video_transport=transport,
+        )
+        with patch.dict("os.environ", {
+            "VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1",
+            "VSS_VERTEX_AI_ACCESS_TOKEN": token,
+        }, clear=False):
+            result = access.get_image_to_video_generator().generate(self._request())
+        self.assertEqual(result.provider_request_id, operation)
+        self.assertEqual([headers["Authorization"] for headers in seen_headers], [
+            "Bearer " + token, "Bearer " + token,
+        ])
+        self.assertNotIn(token, repr(result))
+
+    def test_wrapped_or_whitespace_token_is_rejected_before_transport(self):
+        for token in ('"raw-token"', "'raw-token'", " raw-token", "raw-token ", "raw\ntoken", "Bearer raw-token"):
+            transport_calls = []
+            provider = MODULE.VertexVeoImageToVideoProvider()
+
+            def transport(*_args):
+                transport_calls.append(True)
+                self.fail("fake transport must not receive a malformed token")
+
+            with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}, clear=False):
+                with self.assertRaises(ProviderExecutionFailure):
+                    ProviderAccess(
+                        video=provider, video_secret_reader=lambda name, value=token: value,
+                        video_transport=transport,
+                    ).get_image_to_video_generator().generate(self._request())
+            self.assertEqual(transport_calls, [])
+
     def test_submission_is_once_then_fetches_same_operation_without_resubmission(self):
         mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
         operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
@@ -36,11 +92,7 @@ class VertexDiagnosticTests(unittest.TestCase):
             }]} }).encode()
 
         provider = MODULE.VertexVeoImageToVideoProvider()
-        request = type("Request", (), {
-            "prompt": "prompt", "image": b"png", "request_sha256": "a" * 64,
-            "provider_request_sha256": "a" * 64, "duration_seconds": 8,
-            "resolution": "720p", "generate_audio": False, "image_mime_type": "image/png",
-        })()
+        request = self._request()
         with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}, clear=False):
             result = provider.generate(request, credential="token", transport=transport)
         self.assertEqual(result.provider_request_id, operation)
