@@ -193,7 +193,119 @@ class VertexDiagnosticTests(unittest.TestCase):
             "http_status": None, "error_code": None, "message": None,
             "stage": "result_retrieval", "operation_name": operation,
             "poll_count": 1, "submission_accepted": True,
+            "validation_check": "base64_decode",
+            "underlying_exception": {"type": "Error", "message": "Only base64 data is allowed"},
         })
+
+    def test_mp4_accepts_variable_ftyp_size_and_leading_box(self):
+        self.assertEqual(MODULE._mp4_check(b"\x00\x00\x00\x08free" + b"\x00\x00\x00\x10ftypisom\x00\x00\x00\x00"),
+                         (True, "valid_iso_bmff_ftyp"))
+
+    def test_mp4_accepts_compatible_brands(self):
+        self.assertEqual(MODULE._mp4_check(b"\x00\x00\x00\x18ftypxxxx\x00\x00\x00\x00av01iso6"),
+                         (True, "valid_iso_bmff_ftyp"))
+
+    def test_result_metadata_is_bounded_and_records_successful_inline_media(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        media = b"\x00\x00\x00\x10ftypisom\x00\x00\x00\x00"
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "operation.json"
+            def transport(url, *_args):
+                if url.endswith(":predictLongRunning"):
+                    return (200, json.dumps({"name": operation, "ignored": "bounded"}).encode())
+                return (200, json.dumps({"done": True, "response": {"videos": [{
+                    "bytesBase64Encoded": __import__("base64").b64encode(media).decode(), "mimeType": "video/mp4",
+                }]}}).encode())
+            request = self._request(); request.operation_evidence_path = evidence
+            with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}):
+                result = MODULE.VertexVeoImageToVideoProvider().generate(request, credential="token", transport=transport)
+            saved = json.loads(evidence.read_text())
+            self.assertEqual(result.media.content, media)
+            self.assertEqual(saved["submission_http_status"], 200)
+            self.assertEqual([poll["http_status"] for poll in saved["polls"]], [200])
+            representation = saved["terminal_response"]["video_representation"]
+            self.assertEqual(representation["field_path"], "response.videos[0].bytesBase64Encoded")
+            self.assertEqual(representation["kind"], "inline_base64")
+            self.assertEqual(representation["decoded_length"], len(media))
+            self.assertEqual(representation["magic_hex"], media.hex())
+
+    def test_empty_payload_is_rejected_and_recorded(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "operation.json"
+            def transport(url, *_args):
+                if url.endswith(":predictLongRunning"):
+                    return (200, json.dumps({"name": operation}).encode())
+                return (200, json.dumps({"done": True, "response": {"videos": [{"bytesBase64Encoded": ""}]}}).encode())
+            request = self._request(); request.operation_evidence_path = evidence
+            with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}):
+                with self.assertRaises(MODULE.VertexVeoProviderFailure) as raised:
+                    MODULE.VertexVeoImageToVideoProvider().generate(request, credential="token", transport=transport)
+            self.assertEqual(raised.exception.diagnostic.validation_check, "empty_payload")
+            self.assertEqual(json.loads(evidence.read_text())["result_admission"]["validation_check"], "empty_payload")
+
+    def test_oversized_payload_is_rejected_before_decode(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        class OversizedText(str):
+            def __len__(self):
+                return ((256 * 1024 * 1024 + 2) // 3) * 4 + 1
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "operation.json"
+            def transport(url, *_args):
+                if url.endswith(":predictLongRunning"):
+                    return (200, json.dumps({"name": operation}).encode())
+                return (200, b"{}")
+            request = self._request(); request.operation_evidence_path = evidence
+            with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}):
+                terminal = {"done": True, "response": {"videos": [{"bytesBase64Encoded": OversizedText("x")} ]}}
+                with patch.object(MODULE, "_parse_json", side_effect=[{"name": operation}, terminal]):
+                    with self.assertRaises(MODULE.VertexVeoProviderFailure) as raised:
+                        MODULE.VertexVeoImageToVideoProvider().generate(request, credential="token", transport=transport)
+            self.assertEqual(raised.exception.diagnostic.validation_check, "encoded_payload_size")
+
+    def test_unexpected_terminal_shape_is_recorded_before_admission_failure(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "operation.json"
+            def transport(url, *_args):
+                if url.endswith(":predictLongRunning"):
+                    return (200, json.dumps({"name": operation}).encode())
+                return (200, json.dumps({"done": True, "response": {"unexpected": []}}).encode())
+            request = self._request(); request.operation_evidence_path = evidence
+            with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}):
+                with self.assertRaises(MODULE.VertexVeoProviderFailure):
+                    MODULE.VertexVeoImageToVideoProvider().generate(request, credential="token", transport=transport)
+            saved = json.loads(evidence.read_text())
+            self.assertEqual(saved["terminal_response"]["video_representation"]["kind"], "other")
+            self.assertEqual(saved["result_admission"]["validation_check"], "inline_base64_field_missing")
+
+    def test_uri_representation_is_diagnosed_without_retrieval(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "operation.json"
+            def transport(url, *_args):
+                if url.endswith(":predictLongRunning"):
+                    return (201, json.dumps({"name": operation}).encode())
+                return (200, json.dumps({"done": True, "response": {"videos": [{"gcsUri": "gs://bucket/path/video.mp4", "mimeType": "video/mp4"}]}}).encode())
+            request = self._request(); request.operation_evidence_path = evidence
+            with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}):
+                with self.assertRaises(MODULE.VertexVeoProviderFailure):
+                    MODULE.VertexVeoImageToVideoProvider().generate(request, credential="token", transport=transport)
+            saved = json.loads(evidence.read_text())
+            self.assertEqual(saved["terminal_response"]["video_representation"]["kind"], "uri")
+            self.assertEqual(saved["result_admission"]["validation_check"], "uri_representation_not_admitted")
+
+    def test_persistence_failure_is_fail_closed(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        request = self._request(); request.operation_evidence_path = Path("/proc/1/operation.json")
+        def transport(url, *_args):
+            if url.endswith(":predictLongRunning"):
+                return (200, json.dumps({"name": operation}).encode())
+            self.fail("polling must not begin after persistence failure")
+        with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}):
+            with self.assertRaises(MODULE.VertexVeoProviderFailure) as raised:
+                MODULE.VertexVeoImageToVideoProvider().generate(request, credential="token", transport=transport)
+        self.assertEqual(raised.exception.diagnostic.classification, "operation_persistence_failed")
 
     def test_terminal_provider_error_preserves_accepted_lro_diagnostics(self):
         operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
