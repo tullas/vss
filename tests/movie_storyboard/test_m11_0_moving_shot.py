@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError, LOCATION, MODEL_SNAPSHOT, QUOTA_METRIC, admit_moving_shot, classify_legacy_record, record_existing_authorization, validate_fixed_quota_evidence, validate_moving_shot_admission, validate_vertex_readiness_evidence
-from vss_providers import GeneratedMedia, ImageToVideoResult, ProviderAccess
+from vss_providers import GeneratedMedia, ImageToVideoResult, ProviderAccess, ProviderExecutionFailure
 from vss_runtime import RuntimeController
 from vss_runtime.external_preflight import ExternalExecutionPreflight
 
@@ -39,6 +39,16 @@ class FakeVideoProvider:
         )
 
 
+class FailingVideoProvider:
+    def __init__(self, failure):
+        self.failure = failure
+        self.calls = 0
+
+    def generate(self, request, *, credential, transport=None):
+        self.calls += 1
+        raise self.failure
+
+
 class MovingShotTests(unittest.TestCase):
     def test_attempt_five_controller_namespace_does_not_reuse_attempts_one_to_four(self):
         source = (Path(__file__).resolve().parents[2] / "src/vss_runtime/controller.py").read_text(encoding="utf-8")
@@ -46,7 +56,7 @@ class MovingShotTests(unittest.TestCase):
         self.assertNotIn('"attempt-5" / "output"', source)
         self.assertNotIn('"attempt-4" / "output"', source)
 
-    def test_output_collision_after_reservation_consumes_without_provider_call(self):
+    def test_output_collision_releases_without_provider_call(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "attempt-3"
             basis = Path(directory) / "basis.png"
@@ -76,9 +86,98 @@ class MovingShotTests(unittest.TestCase):
                 )
 
             ledger = json.loads((root / f"{admission.request_sha256}.attempt.json").read_text())
-            self.assertEqual(ledger["status"], "failed")
-            self.assertEqual(ledger["attempts"], 1)
+            self.assertEqual(ledger["status"], "authorized")
+            self.assertEqual(ledger["attempts"], 0)
             self.assertEqual(provider.calls, 0)
+
+    def test_pre_acceptance_http_failure_does_not_consume_authorized_submission(self):
+        failure = ProviderExecutionFailure("HTTP 401")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "shot"
+            basis = Path(directory) / "basis.png"
+            basis.write_bytes(b"authoritative-basis")
+            admission = admit_moving_shot(
+                shot_id="shot-024b0d6352149eabb74df544",
+                scene_id="scene-91f5c8634519d8264e2dd5f8",
+                visual_basis_path=basis,
+                visual_basis_sha256=hashlib.sha256(basis.read_bytes()).hexdigest(),
+                prompt="A bounded camera move preserves the source action.",
+                source_lineage={"shot_plan": "a" * 64},
+            )
+            output = root / "output" / admission.request_sha256
+            record_existing_authorization(root / "authorization.json", admission.request_sha256)
+            provider = FailingVideoProvider(failure)
+            context = type("Context", (), {
+                "environment": "development", "admitted_request": admission,
+                "safe_configuration": {"artifact_root": str(output)},
+                "providers": ProviderAccess(video=provider, video_secret_reader=lambda _: "token"),
+            })()
+            with self.assertRaises(ProviderExecutionFailure):
+                HANDLER_MODULE.execute(context, {"admission_id": admission.request_sha256, "mode": "generate"}, False)
+            ledger = json.loads((root / f"{admission.request_sha256}.attempt.json").read_text())
+            self.assertEqual(ledger, {"attempts": 0, "maximum_cost_usd": "5.000000", "request_sha256": admission.request_sha256, "status": "authorized"})
+
+    def test_provider_acceptance_consumes_immediately_on_later_failure(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        diagnostic = type("Diagnostic", (), {"submission_accepted": True, "operation_name": operation})()
+        failure = ProviderExecutionFailure("polling failed")
+        failure.diagnostic = diagnostic
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "shot"
+            basis = Path(directory) / "basis.png"
+            basis.write_bytes(b"authoritative-basis")
+            admission = admit_moving_shot(
+                shot_id="shot-024b0d6352149eabb74df544", scene_id="scene-91f5c8634519d8264e2dd5f8",
+                visual_basis_path=basis, visual_basis_sha256=hashlib.sha256(basis.read_bytes()).hexdigest(),
+                prompt="A bounded camera move preserves the source action.", source_lineage={"shot_plan": "a" * 64},
+            )
+            output = root / "output" / admission.request_sha256
+            record_existing_authorization(root / "authorization.json", admission.request_sha256)
+            context = type("Context", (), {
+                "environment": "development", "admitted_request": admission,
+                "safe_configuration": {"artifact_root": str(output)},
+                "providers": ProviderAccess(video=FailingVideoProvider(failure), video_secret_reader=lambda _: "token"),
+            })()
+            with self.assertRaises(ProviderExecutionFailure):
+                HANDLER_MODULE.execute(context, {"admission_id": admission.request_sha256, "mode": "generate"}, False)
+            ledger = AttemptLedger(root / f"{admission.request_sha256}.attempt.json", admission.request_sha256)
+            self.assertEqual(json.loads(ledger.path.read_text())["status"], "failed")
+            self.assertEqual(json.loads(ledger.path.read_text())["attempts"], 1)
+            with self.assertRaises(AttemptLedgerError):
+                ledger.reserve_execution()
+
+    def test_post_acceptance_local_failure_cannot_reopen_submission(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-2"
+
+        class AcceptedThenInvalidProvider:
+            def generate(self, request, *, credential, transport=None):
+                request.operation_evidence_path.write_text(json.dumps({
+                    "operation_name": operation, "submission_accepted": True,
+                }), encoding="utf-8")
+                raise ProviderExecutionFailure("media admission failed")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "shot"
+            basis = Path(directory) / "basis.png"
+            basis.write_bytes(b"authoritative-basis")
+            admission = admit_moving_shot(
+                shot_id="shot-024b0d6352149eabb74df544", scene_id="scene-91f5c8634519d8264e2dd5f8",
+                visual_basis_path=basis, visual_basis_sha256=hashlib.sha256(basis.read_bytes()).hexdigest(),
+                prompt="A bounded camera move preserves the source action.", source_lineage={"shot_plan": "a" * 64},
+            )
+            output = root / "output" / admission.request_sha256
+            record_existing_authorization(root / "authorization.json", admission.request_sha256)
+            context = type("Context", (), {
+                "environment": "development", "admitted_request": admission,
+                "safe_configuration": {"artifact_root": str(output)},
+                "providers": ProviderAccess(video=AcceptedThenInvalidProvider(), video_secret_reader=lambda _: "token"),
+            })()
+            with self.assertRaises(ProviderExecutionFailure):
+                HANDLER_MODULE.execute(context, {"admission_id": admission.request_sha256, "mode": "generate"}, False)
+            ledger = AttemptLedger(root / f"{admission.request_sha256}.attempt.json", admission.request_sha256)
+            self.assertEqual(json.loads(ledger.path.read_text())["status"], "failed")
+            with self.assertRaises(AttemptLedgerError):
+                ledger.reserve_execution()
 
     def test_handler_uses_authorization_sibling_of_output_namespace(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -128,13 +227,20 @@ class MovingShotTests(unittest.TestCase):
             with self.assertRaises(AttemptLedgerError):
                 ledger.reserve_execution()
 
-    def test_failed_submission_consumes_attempt(self):
+    def test_accepted_submission_failure_consumes_attempt(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = AttemptLedger(Path(directory) / "attempt.json", "c" * 64)
             ledger.authorize(); ledger.reserve_execution(); ledger.mark_submitted(); ledger.terminal("failed")
             self.assertEqual(json.loads(ledger.path.read_text())["status"], "failed")
             with self.assertRaises(AttemptLedgerError):
                 ledger.mark_submitted()
+
+    def test_unaccepted_reserved_execution_can_be_released(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = AttemptLedger(Path(directory) / "attempt.json", "c" * 64)
+            ledger.authorize(); ledger.reserve_execution(); ledger.release_execution()
+            self.assertEqual(json.loads(ledger.path.read_text())["status"], "authorized")
+            self.assertEqual(json.loads(ledger.path.read_text())["attempts"], 0)
 
     def test_polling_does_not_count_as_resubmission(self):
         with tempfile.TemporaryDirectory() as directory:

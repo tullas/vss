@@ -130,15 +130,21 @@ class AttemptLedger:
         value["status"] = "submitted"
         self._write(value)
 
+    def release_execution(self) -> None:
+        """Release a reservation when provider acceptance was not evidenced."""
+        self._require_authorization()
+        value = self._read()
+        if value["status"] != "reserved":
+            raise AttemptLedgerError("execution reservation is not releasable")
+        self._write({"request_sha256": self.request_sha256, "attempts": 0,
+                     "maximum_cost_usd": self.maximum_cost_usd, "status": "authorized"})
+
     def terminal(self, status: str) -> None:
-        """Close a reserved or submitted attempt without creating another."""
+        """Close an accepted provider attempt without creating another."""
         if status not in {"completed", "failed"}:
             raise AttemptLedgerError("terminal status is invalid")
         value = self._read()
-        if value["status"] not in {"reserved", "submitted"}:
-            raise AttemptLedgerError("reserved attempt is not open")
-        # Reservation commits the one authorized execution even when a local
-        # failure occurs before provider submission.
-        value["attempts"] = 1
+        if value["status"] != "submitted":
+            raise AttemptLedgerError("submitted attempt is not open")
         value["status"] = status
         self._write(value)
