@@ -37,11 +37,11 @@ are permitted only after separate authorization; there is no retry, fallback,
 or fan-out. The rate still requires confirmation against the live quote before
 execution.
 
-The deterministic provider request digest remains
-`c697e9c9455bc89cbb4a0ebb63075e3f7cefb496b6209aec9d107b26dffc1651`; pricing
+The deterministic Runtime admission request digest is
+`095e28b8fade7033c9dc9d927815a5f2dbeb21789dbb13058e848d013bce0b9d`; pricing
 is not a provider-request field. The package digest, which includes the
 approved pricing evidence, is
-`d41a309bd0c35bc5cba5d23568926181bc01361f2ae8ce49e41c11d8923eea9c`.
+`86408e88aafa264aadfc6a0c1ab634434c227517584cbc7b3082e3a0187d849d`.
 
 ## Rehearsal
 

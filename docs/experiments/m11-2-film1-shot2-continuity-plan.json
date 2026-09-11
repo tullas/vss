@@ -114,10 +114,10 @@
     "creative reviewer records USE, REGENERATE, or REJECT; acceptance remains development review only"
   ],
   "deterministic_binding": {
-    "digest_algorithm": "sha256(canonical_json(provider_request_with_request_sha256_zeroed))",
-    "provider_request_sha256": "c697e9c9455bc89cbb4a0ebb63075e3f7cefb496b6209aec9d107b26dffc1651",
+    "digest_algorithm": "sha256(canonical_json(runtime_admission_request_with_request_sha256_zeroed))",
+    "provider_request_sha256": "095e28b8fade7033c9dc9d927815a5f2dbeb21789dbb13058e848d013bce0b9d",
     "package_digest_algorithm": "sha256(canonical_json(package_with_package_sha256_zeroed))",
-    "package_sha256": "d41a309bd0c35bc5cba5d23568926181bc01361f2ae8ce49e41c11d8923eea9c",
+    "package_sha256": "69a565bbd118292c29283eceae7dfcdd3aeddcec8161d03d56642f8385f76bee",
     "input_set": [
       "shot-1 accepted artifact digest",
       "storyboard frame digest",

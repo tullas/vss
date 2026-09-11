@@ -4,6 +4,12 @@ import hashlib
 import json
 from pathlib import Path
 import unittest
+import tempfile
+import time
+
+from vss_movie_moving_shot import admit_moving_shot, build_moving_shot_request, record_existing_authorization, validate_moving_shot_admission
+from vss_runtime import RuntimeController
+from vss_runtime.audit import AuditLogger
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,14 +39,66 @@ class Film1Shot2PlanTests(unittest.TestCase):
         plan = json.loads(PACKAGE.read_text(encoding="utf-8"))
         image = ROOT / plan["source_visual_reference"]["primary_image_reference"]
         self.assertEqual(hashlib.sha256(image.read_bytes()).hexdigest(), plan["source_visual_reference"]["primary_image_sha256"])
-        request = dict(plan["provider_request"])
-        request["source_visual_reference_sha256"] = plan["source_visual_reference"]["primary_image_sha256"]
-        request["shot_1_accepted_artifact_sha256"] = plan["shot_1_anchor"]["accepted_artifact_sha256"]
-        request["scene_id"] = plan["shot_2"]["scene_id"]
-        request["shot_id"] = plan["shot_2"]["shot_id"]
-        request["request_sha256"] = "0" * 64
-        digest = hashlib.sha256(canonical(request)).hexdigest()
-        self.assertEqual(digest, plan["deterministic_binding"]["provider_request_sha256"])
+        admission = self._admission(plan)
+        validate_moving_shot_admission(admission)
+        self.assertEqual(admission.request_sha256, plan["deterministic_binding"]["provider_request_sha256"])
+
+    def _admission(self, plan):
+        image = ROOT / plan["source_visual_reference"]["primary_image_reference"]
+        return admit_moving_shot(
+            shot_id=plan["shot_2"]["shot_id"], scene_id=plan["shot_2"]["scene_id"],
+            visual_basis_path=image,
+            visual_basis_sha256=plan["source_visual_reference"]["primary_image_sha256"],
+            prompt=plan["provider_request"]["prompt"],
+            source_lineage={key: value for key, value in plan["shot_2"]["source_context"].items()
+                            if key.endswith("_sha256")},
+            production_id=plan["shot_2"]["project_id"],
+        )
+
+    def test_plan_authorization_and_runtime_share_one_binding(self):
+        plan = json.loads(PACKAGE.read_text(encoding="utf-8"))
+        admission = self._admission(plan)
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            authorization = Path(directory) / "authorization.json"
+            record_existing_authorization(authorization, admission.request_sha256)
+            recorded = json.loads(authorization.read_text(encoding="utf-8"))
+            self.assertEqual(recorded["request_sha256"], plan["deterministic_binding"]["provider_request_sha256"])
+            rebuilt = build_moving_shot_request(
+                shot_id=admission.request["scope"]["shot_id"],
+                scene_id=admission.request["scope"]["scene_id"],
+                visual_basis_sha256=admission.request["production_input"]["content_sha256"],
+                visual_basis_byte_count=admission.request["production_input"]["byte_count"],
+                prompt=admission.request["prompt"],
+                source_lineage=admission.request["source_lineage"],
+                production_id=admission.request["scope"]["production_id"],
+            )
+            rebuilt["request_sha256"] = hashlib.sha256(canonical(rebuilt)).hexdigest()
+            self.assertEqual(rebuilt["request_sha256"], admission.request_sha256)
+
+    def test_runtime_preflight_admits_the_authorized_plan_binding_without_effects(self):
+        plan = json.loads(PACKAGE.read_text(encoding="utf-8"))
+        admission = self._admission(plan)
+
+        class OfflinePreflight:
+            def run(self, spec):
+                self.spec = spec
+                return object()
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            controller = RuntimeController(
+                root=ROOT,
+                audit_logger=AuditLogger(Path(directory) / "audit", trusted_root=ROOT),
+                external_execution_preflight=OfflinePreflight(),
+            )
+            response, code = controller.run(
+                "movie.moving-shot-generate", "development", {},
+                {"admission_id": admission.request_sha256, "mode": "preflight"},
+                "film-1-shot-2-offline-rehearsal", "2026-09-11T00:00:00.000Z", time.monotonic(),
+                dry_run=True, admitted_request=admission,
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(response["output"]["request_sha256"], plan["deterministic_binding"]["provider_request_sha256"])
+        self.assertEqual(response["output"]["provider_call_count"], 0)
 
     def test_package_seal_includes_approved_pricing(self):
         plan = json.loads(PACKAGE.read_text(encoding="utf-8"))
