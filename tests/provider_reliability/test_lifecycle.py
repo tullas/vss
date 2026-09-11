@@ -1,5 +1,6 @@
 import unittest
 import hashlib
+import json
 from pathlib import Path
 
 from vss_provider_reliability import (
@@ -12,6 +13,7 @@ from vss_provider_reliability import (
     kpis,
 )
 from vss_movie_moving_shot import admit_moving_shot
+from vss_provider_reliability import durable_moving_shot_package, reconstruct_durable_moving_shot_request
 
 
 class OfflineProductionLifecycleTests(unittest.TestCase):
@@ -46,6 +48,27 @@ class OfflineProductionLifecycleTests(unittest.TestCase):
         self.assertEqual(package.execution_namespace, "film1/shot-0123456789abcdef01234567")
         self.assertEqual(result.request_digest, admission.request_sha256)
         self.assertEqual(result.state, LifecycleState.CREATIVELY_REVIEWED)
+
+    def test_golden_path_reloads_durable_moving_shot_package_before_lifecycle(self):
+        request = self._moving_shot_request_for_test()
+        package = durable_moving_shot_package(request, {"source": "a" * 64})
+        reloaded = json.loads(json.dumps(package))
+        rebuilt, digest, namespace = reconstruct_durable_moving_shot_request(reloaded)
+        lifecycle_package = ApprovedShotPackage.from_moving_shot_request(rebuilt)
+        result = self.lifecycle.run(lifecycle_package, supplied_request_digest=digest, supplied_namespace=namespace)
+        self.assertEqual(result.state, LifecycleState.CREATIVELY_REVIEWED)
+
+    def _moving_shot_request_for_test(self):
+        image = b"durable-package-image"
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "basis.png"
+            path.write_bytes(image)
+            return admit_moving_shot(
+                shot_id="shot-0123456789abcdef01234567", scene_id="scene-0123456789abcdef01234567",
+                visual_basis_path=path, visual_basis_sha256=hashlib.sha256(image).hexdigest(),
+                prompt="A durable adjacent shot", source_lineage={"source_sha256": "a" * 64}, production_id="film1",
+            ).request
 
     def test_identity_and_namespace_fail_before_provider_call(self):
         stale = self.lifecycle.run(self.package, supplied_request_digest="0" * 64)

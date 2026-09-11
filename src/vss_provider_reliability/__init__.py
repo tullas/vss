@@ -22,6 +22,17 @@ from .lifecycle import (
     kpis,
 )
 from .semantics import provider_acceptance_evidenced, retry_permitted, same_operation_recovery_required
+from .certification import (
+    CertificationStatus,
+    ExpertiseDisposition,
+    assess_certification_readiness,
+    assert_request_matches_certification,
+    assert_production_eligible,
+    classify_expertise,
+    durable_moving_shot_package,
+    reconstruct_durable_moving_shot_request,
+    validate_provider_certification,
+)
 
 __all__ = (
     "DigitalTwinScenario",
@@ -41,4 +52,13 @@ __all__ = (
     "provider_acceptance_evidenced",
     "retry_permitted",
     "same_operation_recovery_required",
+    "CertificationStatus",
+    "ExpertiseDisposition",
+    "classify_expertise",
+    "durable_moving_shot_package",
+    "reconstruct_durable_moving_shot_request",
+    "validate_provider_certification",
+    "assess_certification_readiness",
+    "assert_request_matches_certification",
+    "assert_production_eligible",
 )

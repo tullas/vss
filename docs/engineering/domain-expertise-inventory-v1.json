@@ -1,0 +1,23 @@
+{
+  "schema_version": "1",
+  "protocol": "vss.domain-expertise-inventory",
+  "contract_identity": "vss.domain-expertise-gate",
+  "lifecycle": ["requirement", "domain_classification", "expert_selection", "authoritative_source_research", "domain_provider_contract", "conformance_fixtures", "digital_twin", "implementation", "independent_specialist_review", "bounded_live_certification", "production_eligibility"],
+  "domains": [
+    {"domain":"generative_video","classification":"specialist_owned_contract_or_certification_required","reason":"provider-specific request, asynchronous operation, media, and cost semantics"},
+    {"domain":"generative_image","classification":"specialist_owned_contract_or_certification_required","reason":"provider-specific image inputs, safety, output, and model lifecycle"},
+    {"domain":"cloud_iam_authentication","classification":"specialist_owned_contract_or_certification_required","reason":"credential, IAM, scope, and service-agent behavior are provider facts"},
+    {"domain":"media_containers_codecs_transcoding","classification":"specialist_owned_contract_or_certification_required","reason":"byte-level media validity cannot be inferred from generic JSON"},
+    {"domain":"storage_artifact_persistence","classification":"specialist_owned_contract_or_certification_required","reason":"durability, atomicity, recovery, and immutable lineage affect authority"},
+    {"domain":"speech_voice","classification":"specialist_owned_contract_or_certification_required","reason":"voice identity, consent, synthesis, and audio delivery require domain review"},
+    {"domain":"music_audio","classification":"specialist_owned_contract_or_certification_required","reason":"music generation, synchronization, rights, and mix semantics require domain review"},
+    {"domain":"cinematography_generative_prompting","classification":"specialist_owned_contract_or_certification_required","reason":"action legibility and bounded interpretation are creative domain concerns"},
+    {"domain":"character_visual_continuity","classification":"specialist_owned_contract_or_certification_required","reason":"identity, screen direction, and adjacent-shot continuity require specialist review"},
+    {"domain":"rights_licensing_provenance","classification":"specialist_owned_contract_or_certification_required","reason":"possession and equal bytes do not establish use or training rights"},
+    {"domain":"cost_quota_billing","classification":"specialist_owned_contract_or_certification_required","reason":"price, quota, currency, and reservation semantics change by provider"},
+    {"domain":"distribution_publication","classification":"specialist_owned_contract_or_certification_required","reason":"format, territory, platform, and release authority are specialized boundaries"},
+    {"domain":"bounded_schema_validation","classification":"generic_engineering_sufficient","reason":"after domain facts are supplied by the specialist contract"},
+    {"domain":"deterministic_hashing_and_local_test_harness","classification":"generic_engineering_sufficient","reason":"provider-free mechanics are testable locally"}
+  ],
+  "authority": {"provider_execution": false, "production": false, "publication": false, "workflow_activation": false, "retry": false, "fallback": false}
+}

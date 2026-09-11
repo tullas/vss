@@ -1,0 +1,37 @@
+{
+  "schema_version": "1",
+  "contract_identity": "vss.provider-certification",
+  "contract_version": "1",
+  "provider": "Google Cloud Vertex AI",
+  "product_service": "Veo video generation",
+  "model_version": "veo-3.1-generate-001",
+  "supported_regions": ["us-central1"],
+  "generation_modes": ["text-to-video", "image-to-video", "first-and-last-frame-to-video"],
+  "request_schema_mapping": {
+    "transport": "POST predictLongRunning; POST fetchPredictOperation",
+    "mapping": {"prompt": "instances[0].prompt", "image": "instances[0].image", "duration_seconds": "parameters.durationSeconds", "resolution": "parameters.resolution", "sample_count": "parameters.sampleCount"},
+    "unknowns": ["exact current request field for disabling generated audio"]
+  },
+  "authentication": {"requirements": ["Google Cloud OAuth access token", "Vertex AI API enabled", "project and location authorization"], "unknowns": ["runtime-specific IAM principal beyond recorded service-agent evidence"]},
+  "submission_semantics": {"method": "predictLongRunning", "accepted_response": "operation name", "provider_calls": 1},
+  "async_operation_semantics": {"fetch_method": "fetchPredictOperation", "operation_name_required": true, "polling": "provider-specific fetch until done"},
+  "polling_fetch_semantics": {"method": "POST fetchPredictOperation", "same_operation_recovery": true, "unknowns": ["bounded retry/backoff policy and maximum provider processing time"]},
+  "terminal_response_forms": [{"kind": "inline_base64", "field": "response.videos[].bytesBase64Encoded", "mime": "video/mp4"}, {"kind": "cloud_storage_uri", "field": "response.videos[].gcsUri", "mime": "video/mp4"}],
+  "artifact_delivery_forms": ["inline video/mp4", "Cloud Storage URI"],
+  "recovery_semantics": {"rule": "persist accepted operation before polling and recover by fetching the same operation", "duplicate_submission": false},
+  "media_contract": {"duration_seconds": [4, 6, 8], "image_to_video_duration_seconds": [8], "resolution": ["720p", "1080p"], "fps": [24], "audio": "UNKNOWN", "maximum_outputs": 4, "image_max_bytes": 20971520},
+  "quota_evidence": {"mode": "fixed quota", "recorded_local_evidence": "docs/reviews/m11-0-veo-quota-evidence.json", "metric": "aiplatform.googleapis.com/long_running_online_prediction_requests_per_base_model", "project": "vss-film-poc", "effective_limit": 50, "freshness": "UNKNOWN"},
+  "pricing_evidence": {"expected_shot_cost_usd": "1.600000", "hard_ceiling_usd": "5.000000", "rate_basis": "UNKNOWN", "authoritative_quote": "UNKNOWN"},
+  "unsupported_probes": ["GET publisher model metadata is not a supported readiness assumption; observed HTTP 404 is non-diagnostic for Veo availability", "generation submission as a readiness probe"],
+  "deprecations": ["veo-3.1-generate-preview is a distinct model identifier; do not substitute it for veo-3.1-generate-001", "current lifecycle/deprecation date for veo-3.1-generate-001 is UNKNOWN"],
+  "authoritative_sources": [
+    {"title": "Veo 3.1 model documentation", "url": "https://cloud.google.com/vertex-ai/generative-ai/docs/models/veo/3-1-generate", "claims": ["model ID", "image-to-video support", "720p/1080p", "24 FPS", "4/6/8 second durations", "50 requests per minute limit", "image-to-video 8 second limit"]},
+    {"title": "Generate videos with Veo on Vertex AI from text prompts", "url": "https://cloud.google.com/vertex-ai/generative-ai/docs/video/generate-videos-from-text", "claims": ["predictLongRunning endpoint", "operation response", "supported model identifiers", "720p/1080p", "sample count"]},
+    {"title": "Veo video generation API reference", "url": "https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/veo-video-generation", "claims": ["image request shape", "durationSeconds", "fetchPredictOperation", "operationName"]},
+    {"title": "VSS Shot 1/2 provider evidence", "url": "https://github.com/tullas/vss/tree/main/docs/reviews", "claims": ["successful historical execution and same provider contract"]}
+  ],
+  "conformance": {"status": "passed", "fixtures": ["tests/provider_reliability/test_certification.py", "tests/movie_storyboard/test_m11_2_film1_shot2_plan.py"], "provider_calls": 0},
+  "live_certification": {"status": "UNKNOWN", "certified_at": null, "evidence": ["No live generation call permitted; credential and billing certification remain unknown"]},
+  "production_eligibility": {"eligible": false, "reason": "Specialist review, current quota/pricing evidence, and bounded live certification are incomplete"},
+  "authority": {"provider_execution": false, "production": false, "publication": false, "workflow_activation": false, "retry": false, "fallback": false}
+}
