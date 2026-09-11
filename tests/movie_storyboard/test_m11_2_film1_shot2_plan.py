@@ -7,7 +7,7 @@ import unittest
 import tempfile
 import time
 
-from vss_movie_moving_shot import admit_moving_shot, build_moving_shot_request, record_existing_authorization, validate_moving_shot_admission
+from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError, admit_moving_shot, build_moving_shot_request, record_existing_authorization, validate_moving_shot_admission
 from vss_runtime import RuntimeController
 from vss_runtime.audit import AuditLogger
 
@@ -21,6 +21,43 @@ def canonical(value):
 
 
 class Film1Shot2PlanTests(unittest.TestCase):
+    def test_shot_one_attempt_five_state_remains_historical(self):
+        namespace = ROOT / ".local/movie/m11-0-moving-shot/attempt-5"
+        self.assertEqual(
+            (namespace / "9a7fb8229afabd087db5128efc4a1cb788a0a1fe4d8e34aec09185854320e76b.attempt.json").read_text(),
+            '{"attempts":1,"maximum_cost_usd":"5.000000","request_sha256":"9a7fb8229afabd087db5128efc4a1cb788a0a1fe4d8e34aec09185854320e76b","status":"failed"}',
+        )
+        self.assertEqual(
+            (namespace / "authorization.json").read_text(),
+            '{"attempts":0,"maximum_provider_attempts":1,"request_sha256":"9a7fb8229afabd087db5128efc4a1cb788a0a1fe4d8e34aec09185854320e76b","source":"preexisting_human_authorization","status":"authorized"}',
+        )
+
+    def test_shot_scoped_execution_identity_is_independent_and_not_attempt_six(self):
+        plan = json.loads(PACKAGE.read_text(encoding="utf-8"))
+        shot_1_namespace = "m11-0-moving-shot/attempt-5"
+        shot_2_namespace = f"m11-0-moving-shot/{plan['shot_2']['shot_id']}"
+        self.assertNotEqual(shot_1_namespace, shot_2_namespace)
+        self.assertNotIn("attempt-6", shot_2_namespace)
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            shot_1 = root / shot_1_namespace
+            shot_2 = root / shot_2_namespace
+            shot_1.mkdir(parents=True)
+            historical = {"attempts": 1, "maximum_cost_usd": "5.000000",
+                          "request_sha256": "a" * 64, "status": "completed"}
+            historical_path = shot_1 / "historical.attempt.json"
+            historical_path.write_text(json.dumps(historical, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            historical_bytes = historical_path.read_bytes()
+            record_existing_authorization(shot_2 / "authorization.json", "b" * 64)
+            ledger = AttemptLedger(shot_2 / "b.attempt.json", "b" * 64)
+            ledger.reserve_execution()
+            self.assertEqual(historical_path.read_bytes(), historical_bytes)
+            self.assertEqual(json.loads((shot_2 / "authorization.json").read_text())["request_sha256"], "b" * 64)
+            self.assertEqual(json.loads(ledger.path.read_text())["status"], "reserved")
+            ledger.terminal("failed")
+            with self.assertRaises(AttemptLedgerError):
+                ledger.reserve_execution()
+
     def test_plan_is_one_inert_adjacent_shot_with_fixed_bound(self):
         plan = json.loads(PACKAGE.read_text(encoding="utf-8"))
         self.assertEqual(plan["status"], "offline_provider_execution_plan")
