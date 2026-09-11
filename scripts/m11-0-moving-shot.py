@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixed M11.0 host handoff for one Vertex Veo image-to-video attempt."""
+"""Fixed M11.0 host handoff for one Vertex Veo image-to-video Attempt 4."""
 from __future__ import annotations
 
 import argparse
