@@ -50,6 +50,36 @@ class FailingVideoProvider:
 
 
 class MovingShotTests(unittest.TestCase):
+    def test_end_to_end_accepted_operation_recovery_admits_one_candidate(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/recovery"
+        class RecoverableProvider:
+            def __init__(self): self.submissions = 0; self.recoveries = 0
+            def generate(self, request, *, credential, transport=None):
+                self.submissions += 1
+                request.operation_evidence_path.write_text(json.dumps({"operation_name": operation,
+                    "request_sha256": request.request_sha256, "submission_accepted": True}), encoding="utf-8")
+                failure = ProviderExecutionFailure("simulated interruption")
+                failure.diagnostic = type("Diagnostic", (), {"submission_accepted": True, "operation_name": operation})()
+                raise failure
+            def recover(self, request, operation_name, *, credential, transport=None):
+                self.recoveries += 1
+                self.assert_identity = operation_name
+                return ImageToVideoResult(GeneratedMedia("video/mp4", MP4, 1280, 720, hashlib.sha256(MP4).hexdigest()), 1, "a" * 64, operation_name, "0.000000")
+        with tempfile.TemporaryDirectory() as directory:
+            basis = Path(directory) / "basis.png"; basis.write_bytes(b"basis")
+            admission = admit_moving_shot(shot_id="shot-024b0d6352149eabb74df544", scene_id="scene-91f5c8634519d8264e2dd5f8", visual_basis_path=basis, visual_basis_sha256=hashlib.sha256(basis.read_bytes()).hexdigest(), prompt="A bounded adjacent shot.", source_lineage={"shot_plan": "a" * 64}, production_id="film1")
+            root = Path(directory) / "shot"; output = root / "output" / admission.request_sha256
+            record_existing_authorization(root / "authorization.json", admission.request_sha256)
+            provider = RecoverableProvider()
+            context = type("Context", (), {"environment": "development", "admitted_request": admission, "safe_configuration": {"artifact_root": str(output)}, "providers": ProviderAccess(video=provider, video_secret_reader=lambda _: "token")})()
+            with self.assertRaises(ProviderExecutionFailure):
+                HANDLER_MODULE.execute(context, {"admission_id": admission.request_sha256, "mode": "generate"}, False)
+            context.providers = ProviderAccess(video=provider, video_secret_reader=lambda _: "token")
+            recovered = HANDLER_MODULE.execute(context, {"admission_id": admission.request_sha256, "mode": "recover"}, False)
+            self.assertEqual(provider.submissions, 1); self.assertEqual(provider.recoveries, 1)
+            self.assertEqual(provider.assert_identity, operation)
+            self.assertEqual(recovered.output["status"], "recovered_quarantined")
+            self.assertEqual(json.loads((root / f"{admission.request_sha256}.attempt.json").read_text())["attempts"], 1)
     def test_attempt_five_controller_namespace_does_not_reuse_attempts_one_to_four(self):
         source = (Path(__file__).resolve().parents[2] / "src/vss_runtime/controller.py").read_text(encoding="utf-8")
         self.assertIn('admitted_request.request["scope"]["shot_id"]', source)

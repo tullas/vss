@@ -104,6 +104,30 @@ class VertexDiagnosticTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["instances"][0]["image"]["mimeType"], "image/png")
         self.assertEqual(calls[0][1]["parameters"]["durationSeconds"], 8)
 
+    def test_recovery_fetches_persisted_operation_without_submission(self):
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-recover"
+        mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
+        calls = []
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_path = Path(directory) / "operation.json"
+            evidence_path.write_text(json.dumps({"operation_name": operation, "request_sha256": "a" * 64,
+                                                  "submission_accepted": True}), encoding="utf-8")
+
+            def transport(url, body, _headers, _timeout, _maximum):
+                calls.append((url, json.loads(body)))
+                return json.dumps({"done": True, "response": {"videos": [{
+                    "bytesBase64Encoded": __import__("base64").b64encode(mp4).decode(),
+                }]}}).encode()
+
+            request = self._request()
+            request.operation_evidence_path = evidence_path
+            provider = MODULE.VertexVeoImageToVideoProvider()
+            with patch.dict("os.environ", {"VSS_VERTEX_AI_PROJECT_ID": "p", "VSS_VERTEX_AI_LOCATION": "us-central1"}, clear=False):
+                result = provider.recover(request, operation, credential="token", transport=transport)
+            self.assertEqual(result.provider_request_id, operation)
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(calls[0][0].endswith(":fetchPredictOperation"))
+            self.assertEqual(calls[0][1], {"operationName": operation})
     def test_http_error_preserves_bounded_google_status_code_and_message(self):
         response = io.BytesIO(json.dumps({
             "error": {

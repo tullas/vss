@@ -21,6 +21,7 @@ from .lifecycle import (
     OfflineProductionLifecycle,
     kpis,
 )
+from .semantics import provider_acceptance_evidenced, retry_permitted, same_operation_recovery_required
 
 __all__ = (
     "DigitalTwinScenario",
@@ -37,4 +38,7 @@ __all__ = (
     "LifecycleState",
     "OfflineProductionLifecycle",
     "kpis",
+    "provider_acceptance_evidenced",
+    "retry_permitted",
+    "same_operation_recovery_required",
 )

@@ -502,6 +502,67 @@ class VertexVeoImageToVideoProvider:
         digest = hashlib.sha256(content).hexdigest()
         return ImageToVideoResult(GeneratedMedia("video/mp4", content, 1280, 720, digest), max(0, int((time.monotonic() - started) * 1000)), hashlib.sha256(terminal_raw).hexdigest(), operation, "0.000000")
 
+    def recover(self, request: ImageToVideoRequest, operation_name: str, *, credential: str, transport=None) -> ImageToVideoResult:
+        """Recover an accepted LRO by polling its identity; never submits a request."""
+        project = os.environ.get("VSS_VERTEX_AI_PROJECT_ID", "")
+        location = os.environ.get("VSS_VERTEX_AI_LOCATION", LOCATION)
+        prefix = f"projects/{project}/locations/{LOCATION}/publishers/google/models/{MODEL_SNAPSHOT}/operations/"
+        if not project or location != LOCATION or not isinstance(operation_name, str) or not operation_name.startswith(prefix) or len(operation_name) > 512:
+            raise VertexVeoProviderFailure("accepted operation identity is invalid", VertexVeoProviderDiagnostic(True, "operation_invalid", stage="recovery", operation_name=operation_name if isinstance(operation_name, str) else None, submission_accepted=True))
+        if not isinstance(credential, str) or not credential:
+            raise ValueError("Vertex project or credential is unavailable")
+        sender = transport or _default_transport
+        headers = {"Authorization": _authorization_header(credential), "Content-Type": "application/json"}
+        endpoint = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{MODEL_SNAPSHOT}:fetchPredictOperation"
+        started = time.monotonic()
+        evidence_path = getattr(request, "operation_evidence_path", None)
+        evidence = None
+        if isinstance(evidence_path, Path):
+            try:
+                evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise VertexVeoProviderFailure("accepted operation evidence is unavailable", VertexVeoProviderDiagnostic(True, "operation_evidence_invalid", stage="recovery", operation_name=operation_name, submission_accepted=True)) from exc
+            if (not isinstance(evidence, dict) or evidence.get("operation_name") != operation_name
+                    or evidence.get("request_sha256") != request.request_sha256
+                    or evidence.get("submission_accepted") is not True):
+                raise VertexVeoProviderFailure("accepted operation evidence does not match recovery", VertexVeoProviderDiagnostic(True, "operation_evidence_mismatch", stage="recovery", operation_name=operation_name, submission_accepted=True))
+        terminal_raw = None
+        for ordinal in range(1, 361):
+            try:
+                response = _transport_response(sender(endpoint, json.dumps({"operationName": operation_name}, separators=(",", ":")).encode(), headers, 30.0, 128 * 1024 * 1024))
+                terminal_raw = response.body
+                terminal = _parse_json(terminal_raw, "operation", operation_name=operation_name, poll_count=ordinal, submission_accepted=True)
+            except urllib.error.HTTPError as exc:
+                raise _http_failure(exc, stage="polling", operation_name=operation_name, poll_count=ordinal, submission_accepted=True) from exc
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                raise _transport_failure(exc, stage="polling", operation_name=operation_name, poll_count=ordinal, submission_accepted=True) from exc
+            if terminal.get("done") is True:
+                break
+            time.sleep(POLL_INTERVAL_SECONDS)
+        else:
+            raise VertexVeoProviderFailure("image-to-video provider operation timed out", VertexVeoProviderDiagnostic(True, "operation_timeout", stage="polling", operation_name=operation_name, poll_count=360, submission_accepted=True))
+        if evidence is not None:
+            evidence["recovery_polls"] = ordinal
+            evidence["terminal_response"] = _response_metadata(terminal)
+            _persist_evidence(evidence_path, evidence)
+        if isinstance(terminal.get("error"), dict):
+            raise VertexVeoProviderFailure("image-to-video provider operation failed", VertexVeoProviderDiagnostic(True, "operation_failed", stage="polling", operation_name=operation_name, poll_count=ordinal, submission_accepted=True))
+        response = terminal.get("response") if isinstance(terminal.get("response"), dict) else terminal
+        videos = response.get("videos") if isinstance(response, dict) else None
+        prediction = videos[0] if isinstance(videos, list) and len(videos) == 1 and isinstance(videos[0], dict) else {}
+        encoded = prediction.get("bytesBase64Encoded")
+        if not isinstance(encoded, str):
+            raise VertexVeoProviderFailure("image-to-video provider returned no inline video", _result_diagnostic("output_missing", operation_name, ordinal, "inline_base64_field_missing"))
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise VertexVeoProviderFailure("image-to-video provider returned invalid inline video", _result_diagnostic("output_invalid", operation_name, ordinal, "base64_decode", exc)) from exc
+        valid, check = _mp4_check(content)
+        if not content or not valid:
+            raise VertexVeoProviderFailure("image-to-video provider returned invalid inline video", _result_diagnostic("output_invalid", operation_name, ordinal, check))
+        digest = hashlib.sha256(content).hexdigest()
+        return ImageToVideoResult(GeneratedMedia("video/mp4", content, 1280, 720, digest), max(0, int((time.monotonic() - started) * 1000)), hashlib.sha256(terminal_raw).hexdigest(), operation_name, "0.000000")
+
 
 def _parse_json(raw: bytes, stage: str, *, operation_name: str | None = None,
                 poll_count: int = 0, submission_accepted: bool = False) -> dict[str, Any]:
