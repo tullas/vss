@@ -798,7 +798,7 @@ class MilestoneController:
         root = self.root / ".local" / "movie" / "m11-0-moving-shot"
         files = []
         for path in sorted(root.rglob("*")) if root.is_dir() else []:
-            if path.is_file() and (path.suffix == ".json" or path.name.endswith(".attempt.json")):
+            if path.is_file() and (path.name == "attempt.json" or path.name.endswith(".attempt.json")):
                 relative = path.relative_to(self.root).as_posix()
                 files.append({"path": relative, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
         if not 1 <= len(files) <= 32:
