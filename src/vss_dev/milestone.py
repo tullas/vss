@@ -847,7 +847,7 @@ class MilestoneController:
             data = {"prior_bound_head": stored["repository"]["head_sha"], "new_head": repository["head_sha"],
                     "ancestry_proof": "prior_bound_head_is_ancestor_of_new_head", "validation_level": "L3",
                     "validation_evidence_sha256": _digest(evidence), "historical_evidence_sha256": snapshot["sha256"],
-                    "historical_evidence_files": snapshot["files"], "human_authorization": authorization,
+                    "human_authorization": authorization,
                     "reason": reason, "expected_generation": expected_generation,
                     "change_identity": repository["change_identity"]}
             event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event", "milestone_id": milestone_id,
