@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 
-from .contracts import ClockProvider, ControlledFrameProvider, ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
+from .contracts import ClockProvider, ControlledFrameProvider, ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, ImageToVideoProvider, ImageToVideoRequest, ImageToVideoResult, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
 from .errors import ControlledFrameProviderFailure, ProviderAccessDenied, ProviderExecutionFailure
 from .png import validate_pictorial_png
 
@@ -50,7 +50,7 @@ class SafeClockHandle:
 class ProviderAccess:
     """A non-enumerable set of provider handles authorized for one execution."""
 
-    __slots__ = ("__clock", "__storyboard", "__pictorial", "__controlled")
+    __slots__ = ("__clock", "__storyboard", "__pictorial", "__controlled", "__video")
 
     def __init__(
         self,
@@ -60,12 +60,17 @@ class ProviderAccess:
         controlled: ControlledFrameProvider | None = None,
         controlled_secret_reader=None,
         controlled_transport=None,
+        video: ImageToVideoProvider | None = None,
+        video_secret_reader=None,
+        video_transport=None,
     ) -> None:
         object.__setattr__(self, "_ProviderAccess__clock", SafeClockHandle(clock) if clock is not None else None)
         object.__setattr__(self, "_ProviderAccess__storyboard", SafeStoryboardRenderHandle(storyboard) if storyboard is not None else None)
         object.__setattr__(self, "_ProviderAccess__pictorial", SafePictorialFrameHandle(pictorial) if pictorial is not None else None)
         object.__setattr__(self, "_ProviderAccess__controlled", SafeControlledFrameHandle(
             controlled, controlled_secret_reader, controlled_transport) if controlled is not None else None)
+        object.__setattr__(self, "_ProviderAccess__video", SafeImageToVideoHandle(
+            video, video_secret_reader, video_transport) if video is not None else None)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("provider access is immutable")
@@ -89,6 +94,57 @@ class ProviderAccess:
         if self.__controlled is None:
             raise ProviderAccessDenied("controlled frame provider access was not declared and authorized")
         return self.__controlled
+
+    def get_image_to_video_generator(self) -> "SafeImageToVideoHandle":
+        if self.__video is None:
+            raise ProviderAccessDenied("image-to-video provider access was not declared and authorized")
+        return self.__video
+
+
+class SafeImageToVideoHandle:
+    __slots__ = ("__provider", "__secret_reader", "__transport", "__calls")
+
+    def __init__(self, provider: ImageToVideoProvider, secret_reader, transport) -> None:
+        object.__setattr__(self, "_SafeImageToVideoHandle__provider", provider)
+        object.__setattr__(self, "_SafeImageToVideoHandle__secret_reader", secret_reader)
+        object.__setattr__(self, "_SafeImageToVideoHandle__transport", transport)
+        object.__setattr__(self, "_SafeImageToVideoHandle__calls", 0)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("image-to-video provider handle is immutable")
+
+    def generate(self, request: ImageToVideoRequest) -> ImageToVideoResult:
+        if self.__calls:
+            raise ProviderAccessDenied("image-to-video provider call ceiling exceeded")
+        object.__setattr__(self, "_SafeImageToVideoHandle__calls", 1)
+        from vss_movie_moving_shot import SECRET_NAME
+        try:
+            secret = self.__secret_reader(SECRET_NAME)
+        except Exception as exc:
+            raise ProviderExecutionFailure("image-to-video provider credential is unavailable") from exc
+        if not isinstance(secret, str) or not secret or len(secret) > 4096:
+            raise ProviderExecutionFailure("image-to-video provider credential is unavailable")
+        try:
+            result = self.__provider.generate(request, credential=secret, transport=self.__transport)
+        except (ProviderAccessDenied, ProviderExecutionFailure):
+            raise
+        except Exception as exc:
+            raise ProviderExecutionFailure("image-to-video provider execution failed") from exc
+        if (not isinstance(result, ImageToVideoResult) or not isinstance(result.media, GeneratedMedia)
+                or result.media.media_type != "video/mp4" or result.media.width != 1280
+                or result.media.height != 720 or not result.media.content
+                or result.media.content_sha256 != hashlib.sha256(result.media.content).hexdigest()
+                or result.media.content[:8] != b"\x00\x00\x00\x18ftyp"):
+            raise ProviderExecutionFailure("image-to-video provider returned invalid video")
+        if (not isinstance(result.provider_request_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", result.provider_request_id)
+                or not re.fullmatch(r"[0-9a-f]{64}", result.response_sha256)
+                or not re.fullmatch(r"[0-9]+\.[0-9]{6}", result.estimated_cost_usd)
+                or not isinstance(result.latency_ms, int) or not 0 <= result.latency_ms <= 1_800_000):
+            raise ProviderExecutionFailure("image-to-video provider returned invalid evidence")
+        if Decimal(result.estimated_cost_usd) > Decimal("5.000000"):
+            raise ProviderExecutionFailure("image-to-video provider exceeded its cost ceiling")
+        return result
 
 
 class SafeStoryboardRenderHandle:

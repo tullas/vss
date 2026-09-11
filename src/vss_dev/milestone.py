@@ -26,6 +26,9 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MILESTONE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
+RECONCILIATION_AUTHORIZATION = ("I authorize reconciliation of the m11-0-veo-shot controller source identity "
+    "from a9c6ea... to descendant HEAD cf9106298ad485a55475099249d533b3908cf69b, provided "
+    "canonical/governed validation passes, Attempts 1–5 remain unchanged, and no execution authority is granted.")
 BOOTSTRAP_MILESTONE = "dev-wf-2-engineering-observability"
 IDENTITY_REPAIR_PATHS = tuple(sorted((
     "src/vss_commands/cli.py",
@@ -582,6 +585,11 @@ class MilestoneController:
                     status, action, human = "LOCAL_VALIDATION_REQUIRED", "run_affected_validation", False
                 else:
                     status, action, human = "CI_PENDING", "ingest_ci", False
+            elif event["event_type"] == "identity_reconciled":
+                validation = {"evidence_sha256": data["validation_evidence_sha256"], "level": "L3"}
+                ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
+                ci_subject_head = None; ci_change_identity = None
+                status, action, human = "CI_PENDING", "ingest_ci", False
             elif event["event_type"] == "controller_bootstrap":
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 ci_subject_head = None; ci_change_identity = None
@@ -781,6 +789,76 @@ class MilestoneController:
             historical_repository = dict(stored["repository"]); historical_repository["branch"] = to_branch
             state = self._project(events + [event], historical_repository)
             self._atomic_json(state_path, state); self._write_pointer(state)
+        return self.load(milestone_id)
+
+    def historical_evidence_snapshot(self, milestone_id: str) -> dict[str, Any]:
+        """Return bounded digests of persisted execution evidence, never its payloads."""
+        if milestone_id != "m11-0-veo-shot":
+            raise MilestoneFailure("historical evidence snapshot is not registered")
+        root = self.root / ".local" / "movie" / "m11-0-moving-shot"
+        files = []
+        for path in sorted(root.rglob("*")) if root.is_dir() else []:
+            if path.is_file() and (path.name == "attempt.json" or path.name.endswith(".attempt.json")):
+                relative = path.relative_to(self.root).as_posix()
+                files.append({"path": relative, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+        if not 1 <= len(files) <= 32:
+            raise MilestoneFailure("historical evidence snapshot is invalid")
+        return {"files": files, "sha256": _digest(files)}
+
+    def reconcile_source_identity(self, milestone_id: str, summary: str, reason: str,
+                                  authorization: str, validation_evidence: Path,
+                                  historical_evidence_sha256: str,
+                                  expected_generation: int) -> dict[str, Any]:
+        """Append an explicit, evidence-backed recovery event for a stale source identity."""
+        if (milestone_id != "m11-0-veo-shot" or not summary or len(summary) > 512
+                or not reason or len(reason) > 512 or authorization != RECONCILIATION_AUTHORIZATION
+                or not isinstance(validation_evidence, Path) or not SHA256.fullmatch(historical_evidence_sha256)
+                or type(expected_generation) is not int):
+            raise MilestoneFailure("source identity reconciliation is unauthorized")
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id); stored = _read_json(state_path); self._validate(stored)
+            if any(event["event_type"] == "identity_reconciled" for event in events):
+                return self.load(milestone_id)
+            if expected_generation != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            if stored["status"] != "READY_FOR_IMPLEMENTATION":
+                raise MilestoneFailure("source identity reconciliation requires original ready state")
+            repository = self._repository(stored["repository"]["base_sha"])
+            if (repository["branch"] != stored["repository"]["branch"]
+                    or repository["base_sha"] != stored["repository"]["base_sha"]
+                    or repository["head_sha"] == stored["repository"]["head_sha"]):
+                raise MilestoneFailure("source identity reconciliation is unauthorized")
+            if any(entry for entry in self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 1_048_576).split(b"\0")
+                   if entry and (len(entry) < 4 or entry[2:3] != b" " or entry[3:].decode("utf-8") != PROTECTED_RESIDUE)):
+                raise MilestoneFailure("source identity reconciliation requires a clean worktree")
+            if subprocess.run(["git", "merge-base", "--is-ancestor", stored["repository"]["head_sha"], repository["head_sha"]],
+                              cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0:
+                raise MilestoneFailure("source identity reconciliation requires descendant HEAD")
+            evidence = _read_json(validation_evidence, 65_536)
+            if (evidence.get("protocol") != "vss.agent-validation-evidence" or evidence.get("passed") is not True
+                    or evidence.get("repository") != {"name_with_owner": repository["name_with_owner"], "branch": repository["branch"],
+                                                       "base_sha": repository["base_sha"], "head_sha": repository["head_sha"]}
+                    or evidence.get("plan", {}).get("executed_level") != "L3"):
+                raise MilestoneFailure("source identity reconciliation requires fresh canonical validation")
+            snapshot = self.historical_evidence_snapshot(milestone_id)
+            if snapshot["sha256"] != historical_evidence_sha256:
+                raise MilestoneFailure("historical execution evidence changed")
+            data = {"prior_bound_head": stored["repository"]["head_sha"], "new_head": repository["head_sha"],
+                    "ancestry_proof": "prior_bound_head_is_ancestor_of_new_head", "validation_level": "L3",
+                    "validation_evidence_sha256": _digest(evidence), "historical_evidence_sha256": snapshot["sha256"],
+                    "human_authorization": authorization,
+                    "reason": reason, "expected_generation": expected_generation,
+                    "change_identity": repository["change_identity"]}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event", "milestone_id": milestone_id,
+                     "sequence": len(events) + 1, "event_type": "identity_reconciled", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"], "summary": summary, "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event); self._validate(event)
+            if len(events) >= self.policy["limits"]["max_events"] or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]:
+                raise MilestoneFailure("milestone event exceeded its bound")
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            state = self._project(events + [event], repository); self._atomic_json(state_path, state); self._write_pointer(state)
         return self.load(milestone_id)
 
     def recover_state_identity(self, milestone_id: str, summary: str,
