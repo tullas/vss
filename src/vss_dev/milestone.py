@@ -54,6 +54,14 @@ BOOTSTRAP_REPAIR_PATHS = tuple(sorted((
 LEVELS = {"none": -1, "L0": 0, "L1": 1, "L2": 2, "L3": 3}
 MAX_PACKET_BYTES = 16_384
 MAX_PACKET_PATHS = 64
+CHECKPOINT_PROTOCOL = "vss.agent-checkpoint"
+CHECKPOINT_MANIFEST_PROTOCOL = "vss.dev-milestone-checkpoint-artifact-manifest"
+CHECKPOINT_MANIFEST_SCHEMA = "schemas/dev-milestone-checkpoint-artifact-manifest-v1.schema.json"
+CHECKPOINT_MAX_ARTIFACTS = 4
+CHECKPOINT_MAX_ENVELOPE_BYTES = 16 * 1024
+CHECKPOINT_MAX_MANIFEST_BYTES = 16 * 1024
+CHECKPOINT_MAX_BUNDLE_BYTES = 80 * 1024
+CHECKPOINT_MANIFEST_MODE = "100644"
 MISSION_REVIEWS = {
     "strategic_concern": {"strategic"},
     "creative_production_authority": {"strategic", "constitutional", "unknown_unknown"},
@@ -211,6 +219,371 @@ class MilestoneController:
             snapshot.append({"path": path, "kind": kind, "mode": f"{int(mode, 8) & 0o777:04o}",
                              "sha256": hashlib.sha256(content).hexdigest()})
         return _digest({"base": base, "paths": paths, "snapshot": snapshot})
+
+    def _tree_entries(self, commit: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
+        """Return exact Git path bytes mapped to mode, type, and object ID."""
+        raw = self._run(["git", "ls-tree", "-rz", "--full-tree", commit], 16 * 1024 * 1024)
+        entries: dict[bytes, tuple[bytes, bytes, bytes]] = {}
+        for record in raw.split(b"\0"):
+            if not record:
+                continue
+            try:
+                metadata, path = record.split(b"\t", 1)
+                mode, object_type, oid = metadata.split(b" ")
+            except ValueError as exc:
+                raise MilestoneFailure("checkpoint artifact Git tree is malformed") from exc
+            if not path or path in entries:
+                raise MilestoneFailure("checkpoint artifact Git paths are ambiguous")
+            entries[path] = (mode, object_type, oid)
+        return entries
+
+    def _checkpoint_manifest_path(self, milestone_id: str) -> str:
+        return f"docs/reviews/{milestone_id}-checkpoint-artifact-manifest.json"
+
+    def _checkpoint_artifact_path(self, milestone_id: str, raw_sha256: str) -> str:
+        return f"docs/reviews/{milestone_id}-checkpoint-artifacts/{raw_sha256}.json"
+
+    def _checkpoint_receipts(self, events: list[dict[str, Any]], state: dict[str, Any],
+                             head: str) -> list[dict[str, Any]]:
+        assessment_sha = state.get("mission_gate", {}).get("assessment_sha256")
+        required = state.get("mission_gate", {}).get("required_reviews", [])
+        if (state.get("mission_gate", {}).get("outcome") != "PROCEED"
+                or not required or not SHA256.fullmatch(assessment_sha or "")):
+            raise MilestoneFailure("checkpoint recovery requires complete current review receipts")
+        assessment_event = next((event for event in reversed(events)
+                                 if event["event_type"] in {"initialized", "mission_assessed"}
+                                 and event["event_sha256"] == assessment_sha), None)
+        if (assessment_event is None or assessment_event["subject_head_sha"] != head
+                or assessment_event["data"].get("change_identity") != state["repository"]["change_identity"]):
+            raise MilestoneFailure("checkpoint recovery assessment subject is stale")
+        tree = self._tree_entries(head)
+        latest: dict[str, dict[str, Any]] = {}
+        for event in events:
+            if (event["event_type"] == "mission_reviewed"
+                    and event["data"].get("assessment_sha256") == assessment_sha):
+                latest[event["data"]["review"]["mechanism"]] = event
+        receipts: list[dict[str, Any]] = []
+        for mechanism in sorted(required):
+            event = latest.get(mechanism)
+            accepted = {"CONTINUE", "CONTINUE_WITH_GUARDRAIL"} if mechanism == "strategic" else {"ACCEPT"}
+            if (event is None or event["subject_head_sha"] != head
+                    or event["data"].get("change_identity") != state["repository"]["change_identity"]
+                    or event["data"]["review"]["disposition"] not in accepted):
+                raise MilestoneFailure("checkpoint recovery review receipt is stale or non-accepting")
+            evidence: list[dict[str, str]] = []
+            evidence_path = self._packet_reference(event["data"]["review"]["evidence"])
+            path_bytes = evidence_path.encode("utf-8", errors="strict")
+            entry = tree.get(path_bytes)
+            if entry is None or entry[0] != b"100644" or entry[1] != b"blob":
+                raise MilestoneFailure("checkpoint recovery receipt evidence is not an A-tree blob")
+            content = self._run(["git", "cat-file", "blob", entry[2].decode("ascii")], 16 * 1024 * 1024)
+            evidence.append({"path": evidence_path, "blob_oid": entry[2].decode("ascii"),
+                             "sha256": hashlib.sha256(content).hexdigest()})
+            receipts.append({"event_sha256": event["event_sha256"],
+                             "assessment_sha256": event["data"]["assessment_sha256"],
+                             "mechanism": mechanism,
+                             "disposition": event["data"]["review"]["disposition"],
+                             "change_identity": event["data"]["change_identity"],
+                             "evidence": evidence})
+        if len(receipts) > 3:
+            raise MilestoneFailure("checkpoint recovery receipt inventory exceeded its bound")
+        return receipts
+
+    def _validate_checkpoint_envelope(self, envelope: Any, repository: dict[str, str],
+                                      issue: int) -> tuple[bytes, str]:
+        schema = _read_json(self.root / "schemas/agent-checkpoint-v1.schema.json", 65_536)
+        if type(envelope) is not dict or list(Draft202012Validator(schema).iter_errors(envelope)):
+            raise MilestoneFailure("checkpoint artifact does not match the closed agent-checkpoint contract")
+        if (envelope["protocol"] != CHECKPOINT_PROTOCOL or envelope["schema_version"] != "1"
+                or envelope["checkpoint_type"] not in {"design", "review"}
+                or envelope["subject"] != {"kind": "issue", "number": issue}
+                or envelope["approval"] is not None
+                or envelope["delta"]["omitted_path_count"] != 0
+                or envelope["repository"] != {
+                    "name_with_owner": repository["name_with_owner"],
+                    "branch": repository["branch"], "base_sha": repository["base_sha"],
+                    "head_sha": repository["head_sha"], "code_dirty": False,
+                }):
+            raise MilestoneFailure("checkpoint artifact source identity or type is inadmissible")
+        raw = _canonical(envelope)
+        if len(raw) > CHECKPOINT_MAX_ENVELOPE_BYTES:
+            raise MilestoneFailure("checkpoint artifact exceeded its byte bound")
+        return raw, hashlib.sha256(raw).hexdigest()
+
+    def register_checkpoint_artifacts(self, milestone_id: str, bundle_path: Path,
+                                      summary: str, expected_generation: int,
+                                      human_disposition: str, reviewer: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Register exact checkpoint envelopes against a clean REVIEW_READY HEAD."""
+        if (MILESTONE.fullmatch(milestone_id) is None or not summary or len(summary) > 512
+                or type(expected_generation) is not int or not isinstance(bundle_path, Path)
+                or not isinstance(human_disposition, str) or not human_disposition.strip()
+                or len(human_disposition) > 240 or any(ord(char) < 32 or ord(char) == 127 for char in human_disposition)
+                or not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 80
+                or any(ord(char) < 32 or ord(char) == 127 for char in reviewer)):
+            raise MilestoneFailure("checkpoint artifact registration is invalid")
+        try:
+            bundle_real = bundle_path.resolve(strict=True)
+            bundle_real.relative_to(self.root)
+        except (OSError, ValueError):
+            bundle_real = None
+        if bundle_real is not None:
+            raise MilestoneFailure("checkpoint artifact bundle must be outside the repository")
+        try:
+            bundle_raw = bundle_path.read_bytes()
+            if len(bundle_raw) > CHECKPOINT_MAX_BUNDLE_BYTES:
+                raise MilestoneFailure("checkpoint artifact bundle exceeded its byte bound")
+            candidate_values = json.loads(bundle_raw)
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise MilestoneFailure("checkpoint artifact bundle is malformed") from exc
+        if (type(candidate_values) is not list or not 1 <= len(candidate_values) <= CHECKPOINT_MAX_ARTIFACTS):
+            raise MilestoneFailure("checkpoint artifact bundle cardinality is invalid")
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id)
+            stored = _read_json(state_path)
+            repository = self._repository(stored["repository"]["base_sha"])
+            if expected_generation != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            if _digest(stored) != _digest(self._materialized(milestone_id, events, stored["repository"])):
+                raise MilestoneFailure("milestone state identity recovery conflict")
+            if (stored["status"] != "REVIEW_READY"
+                    or stored["scope"]["issue"] != 160
+                    or stored["next"] != {"action": "request_merge", "human_boundary": True}
+                    or stored["repository"]["head_sha"] != repository["head_sha"]
+                    or stored["repository"]["branch"] != repository["branch"]
+                    or stored["repository"]["base_sha"] != repository["base_sha"]
+                    or stored["repository"]["change_identity"] != repository["change_identity"]):
+                raise MilestoneFailure("checkpoint artifact registration requires REVIEW_READY at unchanged A")
+            self._require_clean_worktree("checkpoint artifact registration")
+            if events[-1]["event_type"] == "checkpoint_artifacts_registered":
+                raise MilestoneFailure("checkpoint artifact registration is already pending")
+            envelopes = [self._validate_checkpoint_envelope(value, repository, stored["scope"]["issue"])
+                         for value in candidate_values]
+            if len({digest for _, digest in envelopes}) != len(envelopes):
+                raise MilestoneFailure("checkpoint artifact bundle contains duplicate content")
+            manifest_path = self._checkpoint_manifest_path(milestone_id)
+            if manifest_path.encode("utf-8") in self._tree_entries(repository["head_sha"]):
+                raise MilestoneFailure("checkpoint artifact manifest path already exists at A")
+            receipts = self._checkpoint_receipts(events, stored, repository["head_sha"])
+            receipt_snapshot_sha = _digest(receipts)
+            artifacts = []
+            for value, (raw, digest) in zip(candidate_values, envelopes):
+                path = self._checkpoint_artifact_path(milestone_id, digest)
+                if len(path.encode("utf-8")) > 240 or path.encode("utf-8") in self._tree_entries(repository["head_sha"]):
+                    raise MilestoneFailure("checkpoint artifact path is invalid or already exists at A")
+                artifacts.append({"path": path, "checkpoint_type": value["checkpoint_type"],
+                                  "mode": CHECKPOINT_MANIFEST_MODE, "sha256": digest})
+            manifest = {"schema_version": "1", "protocol": CHECKPOINT_MANIFEST_PROTOCOL,
+                        "milestone_id": milestone_id, "issue": stored["scope"]["issue"],
+                        "repository": repository, "artifacts": artifacts,
+                        "receipt_snapshot_sha256": receipt_snapshot_sha, "receipts": receipts}
+            manifest_schema = _read_json(self.root / CHECKPOINT_MANIFEST_SCHEMA, 65_536)
+            if list(Draft202012Validator(manifest_schema).iter_errors(manifest)):
+                raise MilestoneFailure("checkpoint artifact manifest is malformed")
+            manifest_raw = _canonical(manifest)
+            if len(manifest_raw) > CHECKPOINT_MAX_MANIFEST_BYTES:
+                raise MilestoneFailure("checkpoint artifact manifest exceeded its byte bound")
+            manifest_sha = hashlib.sha256(manifest_raw).hexdigest()
+            data = {"manifest_path": manifest_path, "manifest_sha256": manifest_sha,
+                    "source_change_identity": stored["repository"]["change_identity"],
+                    "assessment_sha256": stored["mission_gate"]["assessment_sha256"],
+                    "receipt_snapshot_sha256": receipt_snapshot_sha,
+                    "human_disposition": human_disposition, "reviewer": reviewer,
+                    "expected_generation": expected_generation,
+                    "prior_history_tail_sha256": events[-1]["event_sha256"],
+                    "base_sha": repository["base_sha"], "branch": repository["branch"],
+                    "issue": stored["scope"]["issue"], "name_with_owner": repository["name_with_owner"],
+                    "change_identity": repository["change_identity"]}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": milestone_id, "sequence": len(events) + 1,
+                     "event_type": "checkpoint_artifacts_registered",
+                     "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"], "summary": summary,
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event)
+            self._validate(event)
+            if len(events) > self.policy["limits"]["max_events"] - 2 or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]:
+                raise MilestoneFailure("checkpoint artifact registration exceeds history bounds")
+            current_events = self._read_events(milestone_id)
+            current_repository = self._repository(stored["repository"]["base_sha"])
+            current_state = _read_json(state_path)
+            self._require_clean_worktree("checkpoint artifact registration")
+            if (len(current_events) != len(events)
+                    or current_events[-1]["event_sha256"] != events[-1]["event_sha256"]
+                    or _digest(current_state) != _digest(stored)
+                    or current_repository != repository):
+                raise MilestoneFailure("checkpoint artifact registration identity changed during verification")
+            state = self._project(events + [event], repository)
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            self._atomic_json(state_path, state); self._write_pointer(state)
+            return state, manifest
+
+    def _require_clean_worktree(self, operation: str) -> None:
+        status = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 1_048_576)
+        entries = [entry for entry in status.split(b"\0") if entry]
+        if any(len(entry) < 4 or entry[2:3] != b" " or entry[3:].decode("utf-8") != PROTECTED_RESIDUE
+               for entry in entries):
+            raise MilestoneFailure(f"{operation} requires a clean worktree")
+
+    def _checkpoint_delta(self, old_head: str, new_head: str,
+                          expected_paths: set[bytes]) -> None:
+        raw = self._run(["git", "diff-tree", "--raw", "-r", "-z", "--no-abbrev", "--no-renames",
+                         old_head, new_head, "--"], 1_048_576)
+        parts = raw.split(b"\0")
+        changed: dict[bytes, tuple[bytes, bytes, bytes, bytes, bytes]] = {}
+        i = 0
+        while i < len(parts) and parts[i]:
+            header = parts[i]; i += 1
+            if not header.startswith(b":") or i >= len(parts) or not parts[i]:
+                raise MilestoneFailure("checkpoint artifact tree delta is malformed")
+            try:
+                old_mode, new_mode, old_oid, new_oid, status = header[1:].split(b" ")
+            except ValueError as exc:
+                raise MilestoneFailure("checkpoint artifact tree delta is malformed") from exc
+            path = parts[i]; i += 1
+            if path in changed:
+                raise MilestoneFailure("checkpoint artifact tree delta has ambiguous paths")
+            changed[path] = (old_mode, new_mode, old_oid, new_oid, status)
+        if set(changed) != expected_paths:
+            raise MilestoneFailure("checkpoint artifact tree delta contains unregistered or missing paths")
+        for path, (old_mode, new_mode, old_oid, _new_oid, status) in changed.items():
+            if status != b"A" or old_mode != b"000000" or old_oid != b"0" * 40 or new_mode != b"100644":
+                raise MilestoneFailure("checkpoint artifact tree delta contains a modification or unsupported mode")
+
+    def _verify_checkpoint_recovery(self, events: list[dict[str, Any]], index: int,
+                                    bound_head: str, bound_identity: str,
+                                    data: dict[str, Any]) -> None:
+        event = events[index]
+        if index == 0 or events[index - 1]["event_type"] != "checkpoint_artifacts_registered":
+            raise MilestoneFailure("checkpoint recovery registration is missing or stale")
+        registration = events[index - 1]
+        reg = registration["data"]
+        if (data.get("registration_event_sha256") != registration["event_sha256"]
+                or registration["subject_head_sha"] != bound_head
+                or reg["source_change_identity"] != bound_identity
+                or data["rebound_from_head"] != bound_head
+                or data["old_change_identity"] != bound_identity
+                or data["new_head"] != event["subject_head_sha"]
+                or data["manifest_path"] != reg["manifest_path"]
+                or data["manifest_sha256"] != reg["manifest_sha256"]
+                or data["receipt_snapshot_sha256"] != reg["receipt_snapshot_sha256"]
+                or data["expected_generation"] != event["sequence"] - 2
+                or data["prior_history_tail_sha256"] != event["prior_event_sha256"]
+                or data["base_sha"] != reg["base_sha"]
+                or data["branch"] != reg["branch"]
+                or reg["manifest_path"] != self._checkpoint_manifest_path(event["milestone_id"])
+                or reg["expected_generation"] != registration["sequence"] - 2
+                or reg["prior_history_tail_sha256"] != registration["prior_event_sha256"]
+                or reg["issue"] != events[0]["data"]["issue"]
+                or reg["issue"] != 160
+                or data["resulting_state"] != {"status": "CI_PENDING", "next_action": "ingest_ci",
+                                                "ci_status": "not_observed", "ci_head_sha": None}):
+            raise MilestoneFailure("checkpoint recovery provenance is inconsistent")
+        if not data["human_disposition"].strip() or not data["reviewer"].strip():
+            raise MilestoneFailure("checkpoint recovery human disposition is inconsistent")
+        old_head = bound_head
+        new_head = event["subject_head_sha"]
+        parents = self._line(["git", "rev-list", "--parents", "-n", "1", new_head]).split()
+        if parents != [new_head, old_head]:
+            raise MilestoneFailure("checkpoint recovery requires a direct child descendant HEAD")
+        try:
+            manifest_entry = self._tree_entries(new_head).get(data["manifest_path"].encode("utf-8"))
+        except (UnicodeError, KeyError) as exc:
+            raise MilestoneFailure("checkpoint recovery manifest path is invalid") from exc
+        if manifest_entry is None or manifest_entry[:2] != (b"100644", b"blob"):
+            raise MilestoneFailure("checkpoint recovery manifest blob is missing")
+        manifest_raw = self._run(["git", "cat-file", "blob", manifest_entry[2].decode("ascii")], CHECKPOINT_MAX_MANIFEST_BYTES)
+        if hashlib.sha256(manifest_raw).hexdigest() != data["manifest_sha256"]:
+            raise MilestoneFailure("checkpoint recovery manifest digest does not match registration")
+        try:
+            manifest = json.loads(manifest_raw)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise MilestoneFailure("checkpoint recovery manifest is malformed") from exc
+        manifest_schema = _read_json(self.root / CHECKPOINT_MANIFEST_SCHEMA, 65_536)
+        if (manifest_raw != _canonical(manifest)
+                or list(Draft202012Validator(manifest_schema).iter_errors(manifest))
+                or manifest["milestone_id"] != event["milestone_id"]
+                or manifest["issue"] != reg["issue"]
+                or manifest["repository"] != {"name_with_owner": reg["name_with_owner"],
+                                                "branch": reg["branch"], "base_sha": reg["base_sha"],
+                                                "head_sha": old_head, "change_identity": bound_identity}
+                or manifest["repository"]["change_identity"] != reg["source_change_identity"]
+                or manifest["receipt_snapshot_sha256"] != reg["receipt_snapshot_sha256"]
+                or _digest(manifest["receipts"]) != reg["receipt_snapshot_sha256"]):
+            raise MilestoneFailure("checkpoint recovery manifest contract or source binding is invalid")
+        prior_events = events[:index - 1]
+        prior_repository = {"name_with_owner": reg["name_with_owner"], "branch": reg["branch"],
+                            "base_sha": reg["base_sha"], "head_sha": old_head,
+                            "change_identity": bound_identity}
+        prior_state = self._project(prior_events, prior_repository)
+        if (prior_state["status"] != "REVIEW_READY"
+                or prior_state["mission_gate"]["assessment_sha256"] != reg["assessment_sha256"]
+                or self._checkpoint_receipts(prior_events, prior_state, old_head) != manifest["receipts"]):
+            raise MilestoneFailure("checkpoint recovery receipt inventory is incomplete or changed")
+        artifact_paths: set[bytes] = set()
+        artifact_files: dict[bytes, dict[str, Any]] = {}
+        checkpoint_schema = _read_json(self.root / "schemas/agent-checkpoint-v1.schema.json", 65_536)
+        new_tree = self._tree_entries(new_head)
+        old_tree = self._tree_entries(old_head)
+        for artifact in manifest["artifacts"]:
+            path_bytes = artifact["path"].encode("utf-8")
+            expected_path = self._checkpoint_artifact_path(event["milestone_id"], artifact["sha256"])
+            if (artifact["path"] != expected_path or path_bytes in old_tree or path_bytes in artifact_paths
+                    or artifact["mode"] != CHECKPOINT_MANIFEST_MODE):
+                raise MilestoneFailure("checkpoint recovery artifact path is substituted")
+            entry = new_tree.get(path_bytes)
+            if entry is None or entry[:2] != (b"100644", b"blob"):
+                raise MilestoneFailure("checkpoint recovery artifact blob is missing or unsupported")
+            raw = self._run(["git", "cat-file", "blob", entry[2].decode("ascii")], CHECKPOINT_MAX_ENVELOPE_BYTES)
+            if hashlib.sha256(raw).hexdigest() != artifact["sha256"]:
+                raise MilestoneFailure("checkpoint recovery artifact digest is substituted")
+            try:
+                envelope = json.loads(raw)
+            except (UnicodeError, json.JSONDecodeError) as exc:
+                raise MilestoneFailure("checkpoint recovery artifact is malformed") from exc
+            if (raw != _canonical(envelope) or list(Draft202012Validator(checkpoint_schema).iter_errors(envelope))
+                    or envelope["checkpoint_type"] != artifact["checkpoint_type"]
+                    or envelope["subject"] != {"kind": "issue", "number": reg["issue"]}
+                    or envelope["repository"] != {"name_with_owner": manifest["repository"]["name_with_owner"],
+                                                   "branch": reg["branch"], "base_sha": reg["base_sha"],
+                                                   "head_sha": old_head, "code_dirty": False}
+                    or envelope["approval"] is not None or envelope["delta"]["omitted_path_count"] != 0):
+                raise MilestoneFailure("checkpoint recovery artifact contract or source binding is invalid")
+            artifact_paths.add(path_bytes); artifact_files[path_bytes] = artifact
+        manifest_path_bytes = data["manifest_path"].encode("utf-8")
+        if manifest_path_bytes in old_tree:
+            raise MilestoneFailure("checkpoint recovery manifest was not absent at A")
+        self._checkpoint_delta(old_head, new_head, artifact_paths | {manifest_path_bytes})
+        for receipt in manifest["receipts"]:
+            found = next((item for item in events[:index - 1]
+                          if item["event_sha256"] == receipt["event_sha256"]), None)
+            if (found is None or found["event_type"] != "mission_reviewed"
+                    or found["subject_head_sha"] != old_head
+                    or found["data"].get("assessment_sha256") != receipt["assessment_sha256"]
+                    or found["data"].get("change_identity") != receipt["change_identity"]
+                    or found["data"]["review"]["mechanism"] != receipt["mechanism"]
+                    or found["data"]["review"]["disposition"] != receipt["disposition"]
+                    or receipt["change_identity"] != bound_identity
+                    or len(receipt["evidence"]) != 1
+                    or found["data"]["review"]["evidence"] != receipt["evidence"][0]["path"]):
+                raise MilestoneFailure("checkpoint recovery retained receipt is misbound")
+            for evidence in receipt["evidence"]:
+                path_bytes = evidence["path"].encode("utf-8")
+                old_blob = old_tree.get(path_bytes); new_blob = new_tree.get(path_bytes)
+                if (old_blob is None or new_blob is None or old_blob[:2] != (b"100644", b"blob")
+                        or new_blob != old_blob or old_blob[2].decode("ascii") != evidence["blob_oid"]):
+                    raise MilestoneFailure("checkpoint recovery retained receipt evidence changed")
+                content = self._run(["git", "cat-file", "blob", old_blob[2].decode("ascii")], 16 * 1024 * 1024)
+                if hashlib.sha256(content).hexdigest() != evidence["sha256"]:
+                    raise MilestoneFailure("checkpoint recovery retained receipt evidence digest changed")
+        excluded = tuple([data["manifest_path"], *(artifact["path"] for artifact in manifest["artifacts"])])
+        if self._committed_change_identity(reg["base_sha"], old_head) != bound_identity:
+            raise MilestoneFailure("checkpoint recovery old source identity is inconsistent")
+        if self._committed_change_identity(reg["base_sha"], new_head, excluded) != bound_identity:
+            raise MilestoneFailure("checkpoint recovery includes unrelated source changes")
+        if self._committed_change_identity(reg["base_sha"], new_head) != data["change_identity"]:
+            raise MilestoneFailure("checkpoint recovery new source identity is inconsistent")
 
     def _controller_identity(self, head: str, paths: tuple[str, ...], diff_sha256: str) -> str:
         return _digest({"head_sha": head, "paths": list(paths), "diff_sha256": diff_sha256})
@@ -691,6 +1064,9 @@ class MilestoneController:
                 if (data.get("rebound_from_head") != bound_head
                         or event["subject_head_sha"] == bound_head):
                     raise MilestoneFailure("milestone state identity recovery conflict")
+                if data.get("recovery_kind") == "review_ready_checkpoint_artifacts":
+                    self._verify_checkpoint_recovery(events, index, bound_head,
+                                                    bound_change_identity, data)
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
             elif event["event_type"] == "controller_bootstrap":
@@ -933,7 +1309,10 @@ class MilestoneController:
 
     def rebind_committed_head(self, milestone_id: str, summary: str,
                               expected_generation: int, reviewed_head: str | None = None,
-                              validation_evidence: Path | None = None) -> dict[str, Any]:
+                              validation_evidence: Path | None = None,
+                              checkpoint_manifest_sha256: str | None = None,
+                              human_disposition: str | None = None,
+                              reviewer: str | None = None) -> dict[str, Any]:
         """Explicitly bind a committed modern milestone head without rewriting history."""
         if (MILESTONE.fullmatch(milestone_id) is None or not summary or len(summary) > 512
                 or type(expected_generation) is not int):
@@ -951,11 +1330,74 @@ class MilestoneController:
             historical = dict(stored["repository"])
             if _digest(stored) != _digest(self._project(events, historical)):
                 raise MilestoneFailure("milestone state identity recovery conflict")
-            status = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 1_048_576)
-            entries = [entry for entry in status.split(b"\0") if entry]
-            if any(len(entry) < 4 or entry[2:3] != b" " or entry[3:].decode("utf-8") != PROTECTED_RESIDUE
-                   for entry in entries):
-                raise MilestoneFailure("milestone head rebind requires a clean worktree")
+            recovery_args = (checkpoint_manifest_sha256, human_disposition, reviewer)
+            if any(value is not None for value in recovery_args) and not all(value is not None for value in recovery_args):
+                raise MilestoneFailure("checkpoint recovery requires manifest digest and human disposition")
+            self._require_clean_worktree("milestone head rebind")
+            if all(value is not None for value in recovery_args):
+                if (not isinstance(checkpoint_manifest_sha256, str)
+                        or SHA256.fullmatch(checkpoint_manifest_sha256) is None
+                        or not isinstance(human_disposition, str) or not human_disposition.strip()
+                        or len(human_disposition) > 240
+                        or any(ord(char) < 32 or ord(char) == 127 for char in human_disposition)
+                        or not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 80
+                        or any(ord(char) < 32 or ord(char) == 127 for char in reviewer)):
+                    raise MilestoneFailure("checkpoint recovery invocation is invalid")
+                if (stored["status"] != "REVIEW_READY"
+                        or stored["next"] != {"action": "request_merge", "human_boundary": True}
+                        or repository["branch"] != stored["repository"]["branch"]
+                        or repository["base_sha"] != stored["repository"]["base_sha"]
+                        or repository["head_sha"] == stored["repository"]["head_sha"]
+                        or not events or events[-1]["event_type"] != "checkpoint_artifacts_registered"
+                        or events[-1]["data"]["manifest_sha256"] != checkpoint_manifest_sha256):
+                    raise MilestoneFailure("checkpoint recovery is unauthorized or registration is stale")
+                registration = events[-1]
+                old_head = stored["repository"]["head_sha"]
+                data = {"recovery_kind": "review_ready_checkpoint_artifacts",
+                        "registration_event_sha256": registration["event_sha256"],
+                        "rebound_from_head": old_head, "new_head": repository["head_sha"],
+                        "old_change_identity": stored["repository"]["change_identity"],
+                        "change_identity": repository["change_identity"],
+                        "manifest_path": registration["data"]["manifest_path"],
+                        "manifest_sha256": checkpoint_manifest_sha256,
+                        "receipt_snapshot_sha256": registration["data"]["receipt_snapshot_sha256"],
+                        "human_disposition": human_disposition, "reviewer": reviewer,
+                        "expected_generation": expected_generation,
+                        "prior_history_tail_sha256": events[-1]["event_sha256"],
+                        "ancestry_proof": "prior_bound_head_is_ancestor_of_new_head",
+                        "base_sha": stored["repository"]["base_sha"],
+                        "branch": stored["repository"]["branch"],
+                        "resulting_state": {"status": "CI_PENDING", "next_action": "ingest_ci",
+                                            "ci_status": "not_observed", "ci_head_sha": None}}
+                event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                         "milestone_id": milestone_id, "sequence": len(events) + 1,
+                         "event_type": "identity_rebound", "prior_event_sha256": events[-1]["event_sha256"],
+                         "subject_head_sha": repository["head_sha"], "summary": summary,
+                         "data": data, "authority": dict(AUTHORITY)}
+                event["event_sha256"] = _digest(event); self._validate(event)
+                self._verify_checkpoint_recovery(events + [event], len(events), old_head,
+                                                 stored["repository"]["change_identity"], data)
+                if (len(events) >= self.policy["limits"]["max_events"]
+                        or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]):
+                    raise MilestoneFailure("checkpoint recovery event exceeded its bound")
+                # This final identity/worktree/history check is the linearization point.
+                current_events = self._read_events(milestone_id)
+                current_repository = self._repository(stored["repository"]["base_sha"])
+                current_state = _read_json(state_path)
+                self._require_clean_worktree("checkpoint recovery")
+                if (len(current_events) != len(events)
+                        or current_events[-1]["event_sha256"] != events[-1]["event_sha256"]
+                        or _digest(current_state) != _digest(stored)
+                        or current_repository["branch"] != repository["branch"]
+                        or current_repository["base_sha"] != repository["base_sha"]
+                        or current_repository["head_sha"] != repository["head_sha"]
+                        or current_repository["change_identity"] != repository["change_identity"]):
+                    raise MilestoneFailure("checkpoint recovery repository identity changed during verification")
+                with history.open("ab") as stream:
+                    stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+                state = self._project(events + [event], current_repository)
+                self._atomic_json(state_path, state); self._write_pointer(state)
+                return self.load(milestone_id)
             if (stored["status"] != "CI_PENDING"
                     or stored["next"]["action"] != "ingest_ci"
                     or repository["branch"] != stored["repository"]["branch"]

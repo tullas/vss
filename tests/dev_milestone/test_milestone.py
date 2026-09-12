@@ -35,6 +35,8 @@ class MilestoneControllerTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for path in ("config/dev-milestone-policy-v1.json", "schemas/dev-milestone-policy-v1.schema.json",
                      "schemas/dev-milestone-record-v1.schema.json", "config/agent-harness-v2.json",
+                     "schemas/dev-milestone-checkpoint-artifact-manifest-v1.schema.json",
+                     "schemas/agent-checkpoint-v1.schema.json",
                      "schemas/dev-milestone-execution-packet-v1.schema.json",
                      "schemas/agent-harness-v2.schema.json", "schemas/agent-validation-evidence-v1.schema.json",
                      "schemas/dev-improvement-candidate-v1.schema.json", "docs/engineering/improvement-backlog-v1.json"):
@@ -59,6 +61,7 @@ class MilestoneControllerTests(unittest.TestCase):
         (self.root / ".gitignore").write_text(".vss/\n", encoding="utf-8")
         self.git("add", "."); self.git("commit", "-qm", "fixture")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.fixture_initial_head = self.base
         residue = self.root / ".local/secrets/development.auto.tfvars.example"; residue.parent.mkdir(parents=True); residue.write_text("protected\n", encoding="utf-8")
         self.controller = MilestoneController(self.root)
 
@@ -168,6 +171,121 @@ class MilestoneControllerTests(unittest.TestCase):
         history_before = (self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes()
         self.git("add", "README.md"); self.git("commit", "-qm", "accepted implementation")
         return pending, self.git("rev-parse", "HEAD").stdout.strip(), history_before
+
+    def issue160_review_ready(self) -> dict:
+        self.git("reset", "--hard", self.fixture_initial_head)
+        shutil.rmtree(self.root / ".vss/milestones/review-ready-source-identity-recovery", ignore_errors=True)
+        self.base = self.fixture_initial_head
+        evidence = {
+            "docs/reviews/constitutional-evidence.md": "Constitutional review evidence at A.\n",
+            "docs/reviews/unknown-unknown-evidence.md": "Adversarial review evidence at A.\n",
+        }
+        for path, content in evidence.items():
+            candidate = self.root / path; candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(content, encoding="utf-8")
+        self.git("add", "docs/reviews")
+        self.git("commit", "-qm", "commit review evidence before HEAD A")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        mission = mission_evidence(); mission["triggers"] = ["architecture_boundary"]
+        state = self.controller.initialize(
+            "review-ready-source-identity-recovery", self.base, 160,
+            ["agent-coordination", "dev-milestone"],
+            ["docs/agent-coordination.md", "schemas/dev-milestone-record-v1.schema.json",
+             "schemas/dev-milestone-checkpoint-artifact-manifest-v1.schema.json",
+             "src/vss_commands/cli.py", "src/vss_dev/milestone.py", "tests/dev_milestone/test_milestone.py"],
+            "Issue 160 checkpoint recovery fixture.", mission)
+        for mechanism, path in (
+            ("constitutional", "docs/reviews/constitutional-evidence.md"),
+            ("unknown_unknown", "docs/reviews/unknown-unknown-evidence.md"),
+        ):
+            state = self.controller.checkpoint(
+                "review-ready-source-identity-recovery", "mission_reviewed", "Accepted review receipt.",
+                {"assessment_sha256": state["mission_gate"]["assessment_sha256"],
+                 "review": {"mechanism": mechanism, "disposition": "ACCEPT",
+                            "owner": "test-reviewer", "evidence": path}}, state["generation"])
+        self.assertEqual(state["mission_gate"]["outcome"], "PROCEED")
+        ci = self.controller.ingest_ci({"head_sha": self.base, "checks": []},
+                                       "review-ready-source-identity-recovery")
+        self.assertEqual(ci["status"], "passed")
+        state = self.controller.load("review-ready-source-identity-recovery")
+        state = self.controller.checkpoint(
+            "review-ready-source-identity-recovery", "validation_completed", "Canonical validation passed.",
+            {"validation_level": "L3", "evidence_sha256": "c" * 64},
+            self.controller.load("review-ready-source-identity-recovery")["generation"])
+        state = self.controller.load("review-ready-source-identity-recovery")
+        self.assertEqual(state["status"], "REVIEW_READY")
+        return state
+
+    def issue160_envelope(self, state: dict, checkpoint_type: str = "review") -> dict:
+        return {
+            "schema_version": "1", "protocol": "vss.agent-checkpoint",
+            "checkpoint_type": checkpoint_type,
+            "subject": {"kind": "issue", "number": 160},
+            "repository": {"name_with_owner": state["repository"]["name_with_owner"],
+                           "branch": state["repository"]["branch"],
+                           "base_sha": state["repository"]["base_sha"],
+                           "head_sha": state["repository"]["head_sha"], "code_dirty": False},
+            "delta": {"changed_file_count": 0, "changed_files": [], "insertions": 0,
+                      "deletions": 0, "omitted_path_count": 0},
+            "checks": [], "summary": "Governed checkpoint artifact for issue 160.",
+            "authority": {"runtime_execution": False, "provider_execution": False,
+                          "production": False, "publication": False,
+                          "workflow_activation": False},
+            "approval": None,
+        }
+
+    def register_issue160_bundle(self, state: dict, envelopes: list[dict] | None = None) -> tuple[dict, dict]:
+        values = envelopes or [self.issue160_envelope(state)]
+        bundle_path = self.root.parent / (self.root.name + "-issue160-bundle.json")
+        bundle_path.write_text(json.dumps(values, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        try:
+            return self.controller.register_checkpoint_artifacts(
+                "review-ready-source-identity-recovery", bundle_path,
+                "Register issue 160 checkpoint artifacts.", state["generation"],
+                "I reviewed these exact checkpoint artifacts.", "test-reviewer")
+        finally:
+            bundle_path.unlink(missing_ok=True)
+
+    def commit_issue160_manifest(self, manifest: dict, envelopes: list[dict] | None = None,
+                                 extra_files: dict[str, str] | None = None,
+                                 overrides: dict[str, bytes] | None = None,
+                                 omit_artifacts: bool = False,
+                                 rename_artifacts: bool = False,
+                                 symlink_artifacts: bool = False) -> str:
+        values = envelopes or [self.issue160_envelope_for_manifest(manifest, item["checkpoint_type"])
+                               for item in manifest["artifacts"]]
+        by_digest = {hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                              ensure_ascii=False).encode()).hexdigest(): value for value in values}
+        paths = []
+        for item in manifest["artifacts"]:
+            if omit_artifacts:
+                continue
+            raw = (overrides or {}).get(item["path"], json.dumps(
+                by_digest[item["sha256"]], sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False).encode())
+            relative_path = item["path"]
+            if rename_artifacts:
+                relative_path = relative_path.replace(f"/{item['sha256']}.json", f"/renamed-{item['sha256']}.json")
+            path = self.root / relative_path; path.parent.mkdir(parents=True, exist_ok=True)
+            if symlink_artifacts:
+                path.symlink_to("../../../../README.md")
+            else:
+                path.write_bytes(raw)
+            paths.append(relative_path)
+        manifest_path = self.root / f"docs/reviews/{manifest['milestone_id']}-checkpoint-artifact-manifest.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_bytes(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                             ensure_ascii=False).encode())
+        paths.append(manifest_path.relative_to(self.root).as_posix())
+        for path, content in (extra_files or {}).items():
+            candidate = self.root / path; candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(content, encoding="utf-8"); paths.append(path)
+        self.git("add", *paths); self.git("commit", "-qm", "add registered checkpoint artifacts")
+        return self.git("rev-parse", "HEAD").stdout.strip()
+
+    def issue160_envelope_for_manifest(self, manifest: dict, checkpoint_type: str = "review") -> dict:
+        state = {"repository": manifest["repository"]}
+        return self.issue160_envelope(state, checkpoint_type)
 
     def committed_controller_upgrade(self) -> tuple[dict, str, str, str, bytes]:
         initialized = self.controller.initialize(
@@ -621,6 +739,301 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(event["event_type"], "identity_rebound")
         self.assertEqual(event["data"]["rebound_from_head"], pending["repository"]["head_sha"])
         self.assertTrue(all(value is False for value in event["authority"].values()))
+
+    def test_issue160_review_ready_checkpoint_recovery_binds_descendant_and_requires_fresh_ci(self) -> None:
+        ready = self.issue160_review_ready()
+        history_path = self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson"
+        history_before = history_path.read_bytes()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.assertEqual(registered["status"], "REVIEW_READY")
+        self.assertEqual(registered["repository"]["head_sha"], ready["repository"]["head_sha"])
+        self.assertEqual(registered["ci"], ready["ci"])
+        registration = json.loads(history_path.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual(registration["event_type"], "checkpoint_artifacts_registered")
+        self.assertEqual(registration["data"]["manifest_sha256"], hashlib.sha256(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+        old_head = ready["repository"]["head_sha"]
+        new_head = self.commit_issue160_manifest(manifest)
+        stale_writer = MilestoneController(self.root)
+        rebound = self.controller.rebind_committed_head(
+            "review-ready-source-identity-recovery", "Recover registered review checkpoint artifacts.",
+            registered["generation"], checkpoint_manifest_sha256=registration["data"]["manifest_sha256"],
+            human_disposition="I authorize this registered recovery to CI_PENDING.", reviewer="test-reviewer")
+        self.assertEqual(rebound["repository"]["head_sha"], new_head)
+        self.assertEqual(rebound["status"], "CI_PENDING")
+        self.assertEqual(rebound["next"], {"action": "ingest_ci", "human_boundary": False})
+        self.assertEqual(rebound["ci"], {"head_sha": None, "status": "not_observed", "classification": "none"})
+        self.assertEqual(rebound["validation"], ready["validation"])
+        self.assertTrue(history_path.read_bytes().startswith(history_before))
+        events = [json.loads(line) for line in history_path.read_text(encoding="utf-8").splitlines()]
+        event = events[-1]
+        self.assertEqual(event["event_type"], "identity_rebound")
+        self.assertEqual(event["data"]["recovery_kind"], "review_ready_checkpoint_artifacts")
+        self.assertEqual(event["data"]["rebound_from_head"], old_head)
+        self.assertEqual(event["data"]["new_head"], new_head)
+        self.assertEqual(event["data"]["old_change_identity"], ready["repository"]["change_identity"])
+        self.assertEqual(event["data"]["resulting_state"]["status"], "CI_PENDING")
+        self.assertTrue(all(value is False for value in event["authority"].values()))
+        self.assertEqual(sum(item["event_type"] == "mission_reviewed" for item in events), 2)
+        self.assertEqual(self.controller.load("review-ready-source-identity-recovery"), rebound)
+        with self.assertRaisesRegex(MilestoneFailure, "writer conflict"):
+            stale_writer.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject stale concurrent recovery.",
+                registered["generation"], checkpoint_manifest_sha256=registration["data"]["manifest_sha256"],
+                human_disposition="I authorize this registered recovery.", reviewer="second-writer")
+        stale = self.controller.ingest_ci({"head_sha": old_head, "checks": []},
+                                          "review-ready-source-identity-recovery")
+        self.assertEqual(stale["status"], "stale")
+        self.assertNotEqual(self.controller.load("review-ready-source-identity-recovery")["status"], "REVIEW_READY")
+        fresh = self.controller.ingest_ci({"head_sha": new_head, "checks": []},
+                                          "review-ready-source-identity-recovery")
+        self.assertEqual(fresh["status"], "passed")
+        after_ci = self.controller.load("review-ready-source-identity-recovery")
+        self.assertEqual(after_ci["ci"]["head_sha"], new_head)
+        self.assertEqual(after_ci["status"], "CANONICAL_VALIDATION_REQUIRED")
+        self.assertTrue(all(value is False for value in after_ci["authority"].values()))
+
+    def test_issue160_recovery_rejects_unregistered_mixed_and_dirty_content(self) -> None:
+        ready = self.issue160_review_ready()
+        with self.assertRaisesRegex(MilestoneFailure, "contract"):
+            self.register_issue160_bundle(ready, [{"protocol": "invented", "checkpoint_type": "review"}])
+        unsupported = self.issue160_envelope(ready, "implementation")
+        with self.assertRaisesRegex(MilestoneFailure, "inadmissible"):
+            self.register_issue160_bundle(ready, [unsupported])
+        wrong_subject = self.issue160_envelope(ready)
+        wrong_subject["subject"] = {"kind": "pull_request", "number": 160}
+        with self.assertRaisesRegex(MilestoneFailure, "inadmissible"):
+            self.register_issue160_bundle(ready, [wrong_subject])
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(manifest, extra_files={"docs/unrelated.md": "unrelated\n"})
+        history = (self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson").read_bytes()
+        with self.assertRaisesRegex(MilestoneFailure, "delta"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject mixed commit.", registered["generation"],
+                checkpoint_manifest_sha256=hashlib.sha256(json.dumps(manifest, sort_keys=True,
+                    separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+        self.assertEqual((self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson").read_bytes(), history)
+
+    def test_issue160_registration_rejects_missing_receipt_artifact_provenance(self) -> None:
+        ready = self.issue160_review_ready()
+        state = self.controller.checkpoint(
+            "review-ready-source-identity-recovery", "mission_reviewed", "Misbound evidence path.",
+            {"assessment_sha256": ready["mission_gate"]["assessment_sha256"],
+             "review": {"mechanism": "constitutional", "disposition": "ACCEPT",
+                        "owner": "test-reviewer", "evidence": "docs/reviews/not-present-at-A.md"}},
+            ready["generation"])
+        envelope = self.issue160_envelope(state)
+        with self.assertRaisesRegex(MilestoneFailure, "evidence is not an A-tree blob"):
+            self.register_issue160_bundle(state, [envelope])
+
+    def test_issue160_identity_rebound_schema_forbids_restoring_review_ready(self) -> None:
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(manifest)
+        history = self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson"
+        events = [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
+        digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                         ensure_ascii=False).encode()).hexdigest()
+        self.controller.rebind_committed_head(
+            "review-ready-source-identity-recovery", "Valid recovery before schema attack.",
+            registered["generation"], checkpoint_manifest_sha256=digest,
+            human_disposition="I authorize this exact checkpoint recovery.", reviewer="test-reviewer")
+        events = [json.loads(line) for line in history.read_text(encoding="utf-8").splitlines()]
+        event = events[-1]
+        event["data"]["resulting_state"]["status"] = "REVIEW_READY"
+        unsigned = {key: value for key, value in event.items() if key != "event_sha256"}
+        event["event_sha256"] = hashlib.sha256(json.dumps(
+            unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        events[-1] = event
+        history.write_text("\n".join(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                                  ensure_ascii=False) for value in events) + "\n",
+                           encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "record is malformed"):
+            self.controller.load("review-ready-source-identity-recovery")
+
+    def test_issue160_registration_and_recovery_cli_are_explicit_and_manifest_bound(self) -> None:
+        ready = self.issue160_review_ready()
+        envelope = self.issue160_envelope(ready)
+        bundle = self.root.parent / (self.root.name + "-cli-checkpoint-bundle.json")
+        bundle.write_text(json.dumps([envelope], sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        try:
+            registered_result = subprocess.run([
+                "vss", "dev", "milestone", "register-checkpoint-artifacts",
+                "--milestone-id", "review-ready-source-identity-recovery",
+                "--input", str(bundle), "--summary", "Register CLI checkpoint bundle.",
+                "--expected-generation", str(ready["generation"]),
+                "--human-disposition", "I reviewed these exact issue 160 artifacts.",
+                "--reviewer", "test-reviewer",
+            ], cwd=self.root, text=True, capture_output=True, check=False)
+        finally:
+            bundle.unlink(missing_ok=True)
+        self.assertEqual(registered_result.returncode, 0, registered_result.stdout + registered_result.stderr)
+        output = json.loads(registered_result.stdout)
+        self.assertEqual(output["state"]["status"], "REVIEW_READY")
+        manifest = output["manifest"]
+        self.assertEqual(output["manifest_sha256"], hashlib.sha256(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+        self.commit_issue160_manifest(manifest, envelopes=[envelope])
+        result = subprocess.run([
+            "vss", "dev", "milestone", "rebind-committed-head",
+            "--milestone-id", "review-ready-source-identity-recovery",
+            "--summary", "Recover CLI checkpoint bundle.",
+            "--expected-generation", str(output["state"]["generation"]),
+            "--checkpoint-manifest-sha256", output["manifest_sha256"],
+            "--human-disposition", "I authorize this exact manifest recovery.",
+            "--reviewer", "test-reviewer",
+        ], cwd=self.root, text=True, capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "CI_PENDING")
+
+    def test_issue160_recovery_rejects_substituted_artifact_and_changed_receipt_evidence(self) -> None:
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        artifact = self.issue160_envelope_for_manifest(manifest)
+        artifact["summary"] = "validly resealed substitution"
+        substituted = json.dumps(artifact, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        self.commit_issue160_manifest(manifest, overrides={manifest["artifacts"][0]["path"]: substituted})
+        with self.assertRaisesRegex(MilestoneFailure, "direct child|manifest digest|artifact digest|delta"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject substituted artifact.", registered["generation"],
+                checkpoint_manifest_sha256=hashlib.sha256(json.dumps(manifest, sort_keys=True,
+                    separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+    def test_issue160_recovery_rejects_modified_retained_receipt_evidence(self) -> None:
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(
+            manifest, extra_files={"docs/reviews/constitutional-evidence.md": "changed after accepted receipt\n"})
+        with self.assertRaisesRegex(MilestoneFailure, "delta|retained receipt evidence"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject changed evidence.", registered["generation"],
+                checkpoint_manifest_sha256=hashlib.sha256(json.dumps(manifest, sort_keys=True,
+                    separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+    def test_issue160_recovery_rejects_dirty_wrong_branch_stale_generation_and_replay(self) -> None:
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(manifest)
+        manifest_sha = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False).encode()).hexdigest()
+        with self.assertRaisesRegex(MilestoneFailure, "writer conflict"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject stale generation.", registered["generation"] - 1,
+                checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+        dirty = self.root / "untracked.txt"; dirty.write_text("dirty\n", encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "clean worktree"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject dirty tree.", registered["generation"],
+                checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+        dirty.unlink()
+        self.git("switch", "-c", "other-branch")
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject branch mismatch.", registered["generation"],
+                checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+    def test_issue160_recovery_rejects_source_diff_and_missing_or_renamed_artifact(self) -> None:
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(manifest, extra_files={"src/vss_dev/unrelated.py": "unsafe = True\n"})
+        manifest_sha = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False).encode()).hexdigest()
+        with self.assertRaisesRegex(MilestoneFailure, "delta"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject source-code diff.", registered["generation"],
+                checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(manifest, omit_artifacts=True)
+        manifest_sha = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False).encode()).hexdigest()
+        with self.assertRaisesRegex(MilestoneFailure, "artifact blob|delta"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject missing artifact.", registered["generation"],
+                checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(manifest, rename_artifacts=True)
+        manifest_sha = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False).encode()).hexdigest()
+        with self.assertRaisesRegex(MilestoneFailure, "artifact blob|delta"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject renamed artifact.", registered["generation"],
+                checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(manifest, symlink_artifacts=True)
+        manifest_sha = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False).encode()).hexdigest()
+        with self.assertRaisesRegex(MilestoneFailure, "artifact blob|unsupported mode|delta"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject symlink artifact.", registered["generation"],
+                checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+    def test_issue160_recovery_rejects_missing_registration_base_substitution_and_multicommit(self) -> None:
+        ready = self.issue160_review_ready()
+        self.commit_issue160_manifest({"milestone_id": "review-ready-source-identity-recovery",
+                                       "artifacts": []}, omit_artifacts=True)
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject recovery without registration.",
+                ready["generation"], checkpoint_manifest_sha256="a" * 64,
+                human_disposition="I authorize this recovery.", reviewer="test-reviewer")
+
+        ready = self.issue160_review_ready()
+        original_envelope = self.issue160_envelope(ready)
+        registered, manifest = self.register_issue160_bundle(ready, [original_envelope])
+        manifest["repository"]["base_sha"] = "f" * 40
+        self.commit_issue160_manifest(manifest, envelopes=[original_envelope])
+        manifest_sha = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False).encode()).hexdigest()
+        with self.assertRaisesRegex(MilestoneFailure, "manifest digest"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject substituted base identity.", registered["generation"],
+                checkpoint_manifest_sha256=hashlib.sha256(json.dumps(
+                    {**manifest, "repository": {**manifest["repository"], "base_sha": ready["repository"]["base_sha"]}},
+                    sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        self.commit_issue160_manifest(manifest)
+        self.git("commit", "--allow-empty", "-qm", "second descendant commit")
+        manifest_sha = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False).encode()).hexdigest()
+        with self.assertRaisesRegex(MilestoneFailure, "direct child"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject multiple checkpoint commits.", registered["generation"],
+                checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
+
+    def test_issue160_recovery_rejects_rewritten_non_descendant_head(self) -> None:
+        ready = self.issue160_review_ready()
+        registered, manifest = self.register_issue160_bundle(ready)
+        manifest_sha = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False).encode()).hexdigest()
+        self.git("switch", "-c", "temporary")
+        self.git("branch", "-D", "main")
+        self.git("switch", "--orphan", "main")
+        self.commit_issue160_manifest(manifest)
+        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
+            self.controller.rebind_committed_head(
+                "review-ready-source-identity-recovery", "Reject rewritten non-descendant HEAD.",
+                registered["generation"], checkpoint_manifest_sha256=manifest_sha,
+                human_disposition="I authorize only the registered bundle.", reviewer="test-reviewer")
 
     def test_modern_post_commit_rebind_rejects_changed_identity_and_dirty_worktree(self) -> None:
         pending, _, history_before = self.committed_pending_milestone()

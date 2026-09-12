@@ -164,6 +164,37 @@ history, clears any prior CI observation, and keeps `ingest_ci` as the next rout
 authority and does not rewrite history. Change identity includes committed diff paths so a commit
 does not itself appear as a semantic change to the reviewed implementation.
 
+A `REVIEW_READY` source-identity conflict has one narrower path for issue #160. Before creating
+the descendant commit, while still at clean `REVIEW_READY` HEAD A, provide a JSON array of one to
+four canonical `vss.agent-checkpoint` v1 `design`/`review` envelopes from outside the repository:
+
+```text
+vss dev milestone register-checkpoint-artifacts --milestone-id <id> --input <external-bundle.json> \
+  --summary "Register the reviewed checkpoint artifacts." --expected-generation <N> \
+  --human-disposition "I reviewed this exact checkpoint bundle for issue #160." --reviewer <accountability-id>
+```
+
+The controller prints the exact manifest with paths derived from each envelope's raw blob digest.
+Commit only that manifest at `docs/reviews/<id>-checkpoint-artifact-manifest.json` and those
+envelopes under `docs/reviews/<id>-checkpoint-artifacts/`. Any extra, modified, deleted, renamed,
+or differently-moded path makes recovery fail. After the commit, explicitly bind the printed
+manifest digest using the ordinary rebound command:
+
+```text
+vss dev milestone rebind-committed-head --milestone-id <id> \
+  --summary "Recover the registered REVIEW_READY checkpoint artifacts." \
+  --expected-generation <N> --checkpoint-manifest-sha256 <registered-manifest-sha256> \
+  --human-disposition "I authorize this exact checkpoint recovery to CI_PENDING." \
+  --reviewer <accountability-id>
+```
+
+This variant requires a direct child of A, unchanged branch and pinned base SHA, a clean worktree,
+complete Git-tree-delta accounting, and unchanged A-tree evidence blobs for retained review
+receipts. It appends a typed `identity_rebound` event, preserves prior receipts as history, clears
+CI(A), and routes to fresh exact-HEAD CI(B). It cannot restore `REVIEW_READY` or grant push, merge,
+production, provider, Runtime, publication, or workflow authority. A later Git ref movement is a
+new identity conflict: the local lock cannot make Git ref movement atomic with event append.
+
 The one-time `vss dev milestone bootstrap-controller-upgrade` transition is narrower: it is
 available only for `dev-wf-2-engineering-observability`, requires explicit base, old, reviewed,
 and target heads plus the expected generation, and accepts only the registered controller-repair
