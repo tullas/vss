@@ -63,6 +63,32 @@ class CertificationTests(unittest.TestCase):
         self.assertEqual(readiness["provider_call_count"], 0)
         self.assertFalse(readiness["checks"]["metadata_lookup_required"])
 
+    def test_exact_film1_profile_records_model_specific_support_and_live_blockers(self):
+        value = json.loads(CERTIFICATION.read_text())
+        review = (ROOT / "docs/provider-certifications/google-vertex-ai-veo-3.1-review.md").read_text()
+        self.assertEqual(value["model_version"], "veo-3.1-generate-001")
+        self.assertEqual(value["supported_regions"], ["us-central1"])
+        self.assertEqual(value["generation_modes"], ["image-to-video"])
+        self.assertEqual(value["media_contract"]["image_to_video_duration_seconds"], [8])
+        self.assertEqual(value["media_contract"]["resolution"], ["720p (16:9 = 1280x720)"])
+        self.assertEqual(value["media_contract"]["fps"], [24])
+        self.assertEqual(value["media_contract"]["maximum_outputs"], 1)
+        self.assertIn("generateAudio=false", value["submission_semantics"]["method"])
+        self.assertEqual(value["live_certification"]["status"], "UNKNOWN")
+        self.assertFalse(value["production_eligibility"]["eligible"])
+        self.assertEqual(value["pricing_evidence"]["expected_shot_cost_usd"], "UNKNOWN")
+        self.assertIn("referenceImages", " ".join(value["unsupported_probes"]))
+        self.assertIn("HTTP 401", review)
+        self.assertIn("UNSUPPORTED", review)
+        self.assertIn("expected 8-second cost", review)
+        self.assertIn("generation endpoint was called", review)
+
+    def test_current_pricing_unit_is_not_extrapolated_to_eight_seconds(self):
+        value = json.loads(CERTIFICATION.read_text())
+        self.assertIn("$0.20 per 1 count", value["pricing_evidence"]["rate_basis"])
+        self.assertEqual(value["pricing_evidence"]["expected_shot_cost_usd"], "UNKNOWN")
+        self.assertEqual(value["conformance"]["provider_calls"], 0)
+
     def test_provider_contract_mismatch_and_uncertified_provider_fail_closed(self):
         value = json.loads(CERTIFICATION.read_text())
         request = self._request()
