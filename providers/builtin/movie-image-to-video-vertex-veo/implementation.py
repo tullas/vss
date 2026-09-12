@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -121,7 +122,25 @@ def _write_evidence(path: Path, value: dict[str, Any]) -> None:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     if len(encoded) > MAX_EVIDENCE_BYTES:
         raise ValueError("operation evidence exceeds its bound")
-    path.write_bytes(encoded)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".vss-operation-", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except Exception:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _persist_operation(request: ImageToVideoRequest, operation: str, endpoint: str,
@@ -147,6 +166,9 @@ def _persist_operation(request: ImageToVideoRequest, operation: str, endpoint: s
             "submission_http_status": submission_status,
             "polls": [],
         }
+        execution_namespace = getattr(request, "execution_namespace", None)
+        if execution_namespace is not None:
+            evidence["execution_namespace"] = execution_namespace
         _write_evidence(path, evidence)
         return evidence
     except (OSError, TypeError, ValueError) as exc:
@@ -373,6 +395,9 @@ class VertexVeoImageToVideoProvider:
         location = os.environ.get("VSS_VERTEX_AI_LOCATION", LOCATION)
         if location != LOCATION or request.duration_seconds != IMAGE_TO_VIDEO_DURATION_SECONDS or request.image_mime_type != IMAGE_MIME_TYPE:
             raise ValueError("Vertex Veo image-to-video request contract is invalid")
+        on_accepted = getattr(request, "on_accepted", None)
+        if on_accepted is not None and not getattr(request, "execution_namespace", None):
+            raise ValueError("accepted-operation identity is unavailable")
         if not project or not credential:
             raise ValueError("Vertex project or credential is unavailable")
         endpoint = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{MODEL_SNAPSHOT}:predictLongRunning"
@@ -400,6 +425,19 @@ class VertexVeoImageToVideoProvider:
         if not isinstance(operation, str) or not operation.startswith(expected_prefix) or len(operation) > 512:
             raise VertexVeoProviderFailure("image-to-video provider returned an invalid operation", VertexVeoProviderDiagnostic(True, "operation_invalid", stage="submission"))
         evidence = _persist_operation(request, operation, endpoint, submission.status)
+        # The operation identity is now durable. Seal the Runtime attempt at
+        # this boundary before any polling or additional evidence processing.
+        if on_accepted is not None:
+            try:
+                on_accepted(operation)
+            except Exception as exc:
+                raise VertexVeoProviderFailure(
+                    "accepted operation could not be committed to the attempt ledger",
+                    VertexVeoProviderDiagnostic(
+                        True, "acceptance_commit_failed", stage="submission",
+                        operation_name=operation, submission_accepted=True,
+                    ),
+                ) from exc
         if evidence is not None:
             evidence["submission_response"] = {
                 "top_level_keys": sorted(_safe_key(key) for key in value.keys())[:64],
