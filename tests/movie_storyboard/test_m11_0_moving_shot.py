@@ -27,8 +27,11 @@ HANDLER_SPEC.loader.exec_module(HANDLER_MODULE)
 
 
 class FakeVideoProvider:
-    def __init__(self):
+    def __init__(self, content=MP4, media_type="video/mp4"):
         self.calls = 0
+        self.content = content
+        self.media_type = media_type
+        self.recoveries = 0
 
     def generate(self, request, *, credential, transport=None):
         self.calls += 1
@@ -41,8 +44,15 @@ class FakeVideoProvider:
             }), encoding="utf-8")
             request.on_accepted(operation)
         return ImageToVideoResult(
-            GeneratedMedia("video/mp4", MP4, 1280, 720, hashlib.sha256(MP4).hexdigest()),
+            GeneratedMedia(self.media_type, self.content, 1280, 720, hashlib.sha256(self.content).hexdigest()),
             12, hashlib.sha256(raw).hexdigest(), operation, "1.250000",
+        )
+
+    def recover(self, request, operation_name, *, credential, transport=None):
+        self.recoveries += 1
+        return ImageToVideoResult(
+            GeneratedMedia(self.media_type, self.content, 1280, 720, hashlib.sha256(self.content).hexdigest()),
+            12, "a" * 64, operation_name, "0.000000",
         )
 
 
@@ -463,6 +473,57 @@ class MovingShotTests(unittest.TestCase):
         self.assertEqual(provider.calls, 1)
         with self.assertRaises(Exception):
             access.get_image_to_video_generator().generate(request)
+
+    def test_runtime_handle_accepts_24_and_32_byte_ftyp_on_generate_and_recovery(self):
+        mp4_24 = b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomiso2"
+        mp4_32 = b"\x00\x00\x00\x20ftypisom\x00\x00\x00\x00isomiso2avc1mp41"
+        admission = self.admission()
+        request = type("Request", (), {
+            "prompt": admission.request["prompt"], "image": admission.image,
+            "request_sha256": admission.request_sha256,
+            "provider_request_sha256": admission.request_sha256,
+            "duration_seconds": 8, "resolution": "720p", "generate_audio": False,
+            "image_mime_type": "image/png",
+        })()
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        for content in (mp4_24, mp4_32):
+            with self.subTest(ftyp_size=int.from_bytes(content[:4], "big")):
+                generated = FakeVideoProvider(content)
+                result = ProviderAccess(video=generated, video_secret_reader=lambda _: "token").get_image_to_video_generator().generate(request)
+                self.assertEqual(result.media.content, content)
+                recovered = FakeVideoProvider(content)
+                result = ProviderAccess(video=recovered, video_secret_reader=lambda _: "token").get_image_to_video_generator().recover(request, operation)
+                self.assertEqual(result.media.content, content)
+                self.assertEqual(recovered.recoveries, 1)
+
+    def test_runtime_handle_rejects_malformed_mp4_and_wrong_media_type(self):
+        mp4_24 = b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomiso2"
+        invalid = (
+            b"\x00\x00\x00\x18ftypisom",  # truncated declared box
+            b"\xff\xff\xff\xffftypisom\x00\x00\x00\x00isomiso2",  # impossible size
+            b"\x00\x00\x00\x18moovisom\x00\x00\x00\x00isomiso2",  # wrong top-level type
+            b"not an MP4 payload",
+        )
+        admission = self.admission()
+        request = type("Request", (), {
+            "prompt": admission.request["prompt"], "image": admission.image,
+            "request_sha256": admission.request_sha256,
+            "provider_request_sha256": admission.request_sha256,
+            "duration_seconds": 8, "resolution": "720p", "generate_audio": False,
+            "image_mime_type": "image/png",
+        })()
+        operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
+        for content in (*invalid, mp4_24):
+            media_type = "application/octet-stream" if content == mp4_24 else "video/mp4"
+            for mode in ("generate", "recover"):
+                with self.subTest(content=content[:8], media_type=media_type, mode=mode):
+                    access = ProviderAccess(video=FakeVideoProvider(content, media_type), video_secret_reader=lambda _: "token")
+                    handle = access.get_image_to_video_generator()
+                    with self.assertRaises(ProviderExecutionFailure):
+                        if mode == "generate":
+                            handle.generate(request)
+                        else:
+                            handle.recover(request, operation)
 
     def test_provider_projection_is_image_to_video_without_audio(self):
         provider = FakeVideoProvider()

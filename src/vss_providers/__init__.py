@@ -1,6 +1,7 @@
 from .access import ProviderAccess, SafeClockHandle, SafeControlledFrameHandle, SafeImageToVideoHandle, SafePictorialFrameHandle, SafeStoryboardRenderHandle
 from .constants import CONTROLLED_FRAME_PROVIDER_IDENTITY, CONTROLLED_VIDEO_PROVIDER_IDENTITY, LOCAL_CLOCK_IDENTITY, LOCAL_PICTORIAL_FRAME_IDENTITY, LOCAL_STORYBOARD_RENDER_IDENTITY, PROVIDER_API_VERSION
 from .contracts import ClockProvider, ControlledFrameProvider, ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, ImageToVideoProvider, ImageToVideoRequest, ImageToVideoResult, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
+from .media import check_mp4_payload
 from .errors import (
     ControlledFrameProviderFailure,
     ProviderAccessDenied,
@@ -45,6 +46,7 @@ __all__ = (
     "ProviderNotFound",
     "ProviderRegistry",
     "ProviderSelector",
+    "check_mp4_payload",
     "ProviderUnavailable",
     "RegisteredProvider",
     "SafeClockHandle",
