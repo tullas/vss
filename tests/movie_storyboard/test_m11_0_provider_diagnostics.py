@@ -225,6 +225,30 @@ class VertexDiagnosticTests(unittest.TestCase):
         self.assertEqual(MODULE._mp4_check(b"\x00\x00\x00\x08free" + b"\x00\x00\x00\x10ftypisom\x00\x00\x00\x00"),
                          (True, "valid_iso_bmff_ftyp"))
 
+    def test_mp4_accepts_historical_24_byte_ftyp(self):
+        self.assertEqual(MODULE._mp4_check(b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomiso2"),
+                         (True, "valid_iso_bmff_ftyp"))
+
+    def test_mp4_accepts_observed_32_byte_ftyp(self):
+        self.assertEqual(MODULE._mp4_check(b"\x00\x00\x00\x20ftypisom\x00\x00\x00\x00isomiso2avc1mp41"),
+                         (True, "valid_iso_bmff_ftyp"))
+
+    def test_mp4_rejects_truncated_box(self):
+        self.assertEqual(MODULE._mp4_check(b"\x00\x00\x00\x18ftypisom"),
+                         (False, "invalid_box_size"))
+
+    def test_mp4_rejects_impossible_box_size(self):
+        self.assertEqual(MODULE._mp4_check(b"\xff\xff\xff\xffftypisom\x00\x00\x00\x00isomiso2"),
+                         (False, "invalid_box_size"))
+
+    def test_mp4_rejects_wrong_box_type(self):
+        self.assertEqual(MODULE._mp4_check(b"\x00\x00\x00\x18moovisom\x00\x00\x00\x00isomiso2"),
+                         (False, "ftyp_not_found"))
+
+    def test_mp4_rejects_invalid_media(self):
+        self.assertEqual(MODULE._mp4_check(b"not an MP4 payload"),
+                         (False, "invalid_box_size"))
+
     def test_mp4_accepts_compatible_brands(self):
         self.assertEqual(MODULE._mp4_check(b"\x00\x00\x00\x18ftypxxxx\x00\x00\x00\x00av01iso6"),
                          (True, "valid_iso_bmff_ftyp"))

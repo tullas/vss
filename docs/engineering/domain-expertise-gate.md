@@ -21,3 +21,8 @@ distribution as requiring a specialist-owned contract or certification.
 Generic engineering remains sufficient for bounded orchestration, schema
 validation, deterministic hashing, local persistence mechanics, and test
 harness plumbing after the domain contract exists.
+
+Observed provider output characteristics must not become hard platform
+validation constraints unless supported by a media standard, provider contract,
+or explicitly certified capability. Parse structural media fields such as
+container box lengths instead of freezing a sample byte prefix.

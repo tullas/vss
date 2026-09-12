@@ -9,6 +9,7 @@ from collections.abc import Mapping
 
 from .contracts import ClockProvider, ControlledFrameProvider, ControlledFrameRequest, ControlledFrameResult, GeneratedMedia, ImageToVideoProvider, ImageToVideoRequest, ImageToVideoResult, MonotonicReading, PictorialFrameProvider, PictorialFrameRequest, StoryboardRenderProvider, StoryboardRenderRequest, UtcTimestamp
 from .errors import ControlledFrameProviderFailure, ProviderAccessDenied, ProviderExecutionFailure
+from .media import check_mp4_payload
 from .png import validate_pictorial_png
 
 UTC_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
@@ -134,7 +135,7 @@ class SafeImageToVideoHandle:
                 or result.media.media_type != "video/mp4" or result.media.width != 1280
                 or result.media.height != 720 or not result.media.content
                 or result.media.content_sha256 != hashlib.sha256(result.media.content).hexdigest()
-                or result.media.content[:8] != b"\x00\x00\x00\x18ftyp"):
+                or not check_mp4_payload(result.media.content)[0]):
             raise ProviderExecutionFailure("image-to-video provider returned invalid video")
         if (not isinstance(result.provider_request_id, str)
                 or not re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", result.provider_request_id)
@@ -170,7 +171,7 @@ class SafeImageToVideoHandle:
                 or result.media.media_type != "video/mp4" or result.media.width != 1280
                 or result.media.height != 720 or not result.media.content
                 or result.media.content_sha256 != hashlib.sha256(result.media.content).hexdigest()
-                or result.media.content[:8] != b"\x00\x00\x00\x18ftyp"):
+                or not check_mp4_payload(result.media.content)[0]):
             raise ProviderExecutionFailure("image-to-video provider returned invalid recovered video")
         return result
 

@@ -15,12 +15,12 @@ from typing import Any
 from vss_movie_moving_shot import IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECONDS, LOCATION, MODEL_SNAPSHOT, MAXIMUM_COST_USD
 from vss_provider_reliability import FailureClass
 from vss_providers import GeneratedMedia, ImageToVideoRequest, ImageToVideoResult, ProviderExecutionFailure
+from vss_providers.media import MAX_MP4_SCAN_BYTES, check_mp4_payload
 
 POLL_INTERVAL_SECONDS = 5.0
 MAX_EVIDENCE_BYTES = 64 * 1024
 MAX_MAGIC_BYTES = 32
 MAX_URI_LENGTH = 2048
-MAX_MP4_SCAN_BYTES = 1024 * 1024
 _BEARER_PREFIX = re.compile(r"(?i)^Bearer(?:\s|$)")
 
 
@@ -311,35 +311,8 @@ def _result_diagnostic(classification: str, operation: str, poll_count: int,
 
 
 def _mp4_check(content: bytes) -> tuple[bool, str]:
-    """Bounded ISO-BMFF detection; ftyp need not be 24 bytes or byte zero."""
-    limit = min(len(content), MAX_MP4_SCAN_BYTES)
-    offset = 0
-    while offset + 8 <= limit:
-        size = int.from_bytes(content[offset:offset + 4], "big")
-        box_type = content[offset + 4:offset + 8]
-        header = 8
-        if size == 1:
-            if offset + 16 > limit:
-                return False, "truncated_extended_box"
-            size = int.from_bytes(content[offset + 8:offset + 16], "big")
-            header = 16
-        elif size == 0:
-            size = len(content) - offset
-        if size < header or offset + size > len(content):
-            return False, "invalid_box_size"
-        if box_type == b"ftyp":
-            if size < header + 8 or (size - header - 8) % 4:
-                return False, "invalid_ftyp_box"
-            major = content[offset + header:offset + header + 4]
-            brands = [content[i:i + 4] for i in range(offset + header + 8, offset + size, 4)]
-            known = {b"isom", b"iso2", b"iso3", b"iso4", b"iso5", b"iso6", b"iso7", b"iso8",
-                     b"mp41", b"mp42", b"avc1", b"av01", b"hvc1", b"hev1", b"hev2", b"dash",
-                     b"cmfc", b"cmff", b"mif1", b"msf1", b"avif", b"M4V ", b"qt  "}
-            if major in known or any(brand in known for brand in brands):
-                return True, "valid_iso_bmff_ftyp"
-            return False, "unsupported_mp4_brand"
-        offset += size
-    return False, "ftyp_not_found"
+    """Retain the provider diagnostic hook over shared structural validation."""
+    return check_mp4_payload(content)
 
 
 def _http_classification(status: int) -> str:
