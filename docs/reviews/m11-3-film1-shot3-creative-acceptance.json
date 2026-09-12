@@ -1,0 +1,62 @@
+{
+  "schema_version": "1",
+  "contract_identity": "moving_shot_creative_acceptance_review",
+  "contract_version": "1",
+  "review_id": "moving-shot-creative-review-9a957db8712d0036",
+  "film_id": "film-1",
+  "shot_id": "shot-471187bad6ae782a5ef83800",
+  "decision": "ACCEPT",
+  "disposition": "USE",
+  "reviewer_accountability_id": "human-creative-review-owner",
+  "request_sha256": "6f482e960dc12faa5f9bfc51599a423cb6364374ebc8bb58d919ca6212095d86",
+  "provider": {
+    "operation_name": "projects/vss-film-poc/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/f9615177-e991-4bf3-ab67-b89b2ad6b2d8",
+    "submission_count": 1,
+    "actual_cost_usd": "UNKNOWN",
+    "terminal_outcome": "succeeded"
+  },
+  "artifact": {
+    "reference": ".local/movie/m11-0-moving-shot/shot-471187bad6ae782a5ef83800/output/6f482e960dc12faa5f9bfc51599a423cb6364374ebc8bb58d919ca6212095d86/shot.mp4",
+    "mime_type": "video/mp4",
+    "sha256": "9a957db8712d00361d49174f15152197504055b347615b43ff128f9423eb838a",
+    "duration_seconds": 8.0,
+    "resolution": "1280x720",
+    "frame_rate": "24/1",
+    "audio": false
+  },
+  "admission": {
+    "technical": "PASSED",
+    "recovery": "same_provider_operation",
+    "evidence_reference": ".local/movie/m11-0-moving-shot/shot-471187bad6ae782a5ef83800/output/6f482e960dc12faa5f9bfc51599a423cb6364374ebc8bb58d919ca6212095d86/evidence.json",
+    "operation_evidence_reference": ".local/movie/m11-0-moving-shot/shot-471187bad6ae782a5ef83800/output/6f482e960dc12faa5f9bfc51599a423cb6364374ebc8bb58d919ca6212095d86/operation.json"
+  },
+  "continuity_authority": {
+    "film_id": "film-1",
+    "for_shot_number": 4,
+    "source_shot_id": "shot-471187bad6ae782a5ef83800",
+    "source_artifact_sha256": "9a957db8712d00361d49174f15152197504055b347615b43ff128f9423eb838a",
+    "scope": "primary_immediate_visual_continuity_only",
+    "incidental_generated_details_are_permanent_story_canon": false
+  },
+  "authority": {
+    "canon": false,
+    "production": false,
+    "publication": false,
+    "provider": false,
+    "regeneration": false,
+    "runtime": false,
+    "workflow_activation": false
+  },
+  "limitations": [
+    "accountability_evidence_only",
+    "exact_artifact_digest_only",
+    "review_acceptance_is_not_production_approval",
+    "not_runtime_or_provider_authority",
+    "not_publication_or_workflow_authority",
+    "shot_3_only",
+    "does_not_authorize_shot_4_generation",
+    "shot_4_continuity_scope_is_immediate_only",
+    "incidental_generated_details_are_not_permanent_story_canon"
+  ],
+  "review_sha256": "78de1a6045278502b56463a968fb72cfdfb711757f0f83d35945a02b1e594598"
+}

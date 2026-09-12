@@ -14,6 +14,17 @@ experiment. It is process-improvement evidence, not production authority.
 - Controller merge-SHA identity created conflicts across valid execution context.
 - Producing adjacent shots required excessive human and Codex intervention.
 
+## Shot 3 media-admission lesson
+
+Shot 3 exposed a generic media-admission check that treated one historically
+observed MP4 `ftyp` box size as a platform requirement and rejected a valid
+provider result. Observed provider-output characteristics must not become
+platform validation constraints unless supported by the relevant media
+standard, a certified provider contract or capability, or another explicit
+normative requirement. Validate structural media fields from the container
+instead of freezing sample bytes; retain the independent technical and
+provenance checks.
+
 ## Required improvement scope
 
 Before any material scale beyond this experiment, prioritize a repeatable,
