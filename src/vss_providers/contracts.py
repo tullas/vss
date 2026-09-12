@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +91,8 @@ class ImageToVideoRequest:
     generate_audio: bool
     image_mime_type: str = "image/png"
     operation_evidence_path: Any = None
+    execution_namespace: str | None = None
+    on_accepted: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)

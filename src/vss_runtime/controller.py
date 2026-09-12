@@ -222,7 +222,7 @@ class RuntimeController:
             elif command == "movie.moving-shot-generate":
                 from vss_movie_moving_shot import MovingShotAdmission
                 if (environment != "development" or type(admitted_request) is not MovingShotAdmission
-                        or input_data.get("mode") != ("preflight" if dry_run else "generate")):
+                        or input_data.get("mode") not in ({"preflight"} if dry_run else {"generate", "recover"})):
                     raise InvalidCapabilityInput("moving-shot generation requires authoritative admission")
                 self.policy.authorize_controlled_media()
             elif admitted_request is not None:
@@ -385,12 +385,16 @@ class RuntimeController:
                 except ValueError:
                     from .external_preflight import ExternalExecutionPreflightFailure
                     raise ExternalExecutionPreflightFailure("vertex_readiness_unconfirmed")
-                quota_evidence = os.environ.get(QUOTA_EVIDENCE_ENV, "")
-                try:
-                    validate_fixed_quota_evidence(Path(quota_evidence), project_id=project)
-                except ValueError:
-                    from .external_preflight import ExternalExecutionPreflightFailure
-                    raise ExternalExecutionPreflightFailure("fixed_quota_unconfirmed")
+                # Quota controls new generation submissions. Recovery only
+                # polls an already accepted operation and must remain available
+                # even if submission quota has since been exhausted.
+                if input_data.get("mode") != "recover":
+                    quota_evidence = os.environ.get(QUOTA_EVIDENCE_ENV, "")
+                    try:
+                        validate_fixed_quota_evidence(Path(quota_evidence), project_id=project)
+                    except ValueError:
+                        from .external_preflight import ExternalExecutionPreflightFailure
+                        raise ExternalExecutionPreflightFailure("fixed_quota_unconfirmed")
                 endpoint = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/veo-3.1-generate-001:predictLongRunning"
                 if not project:
                     raise RuntimeInternalFailure("Vertex project configuration is unavailable")
@@ -403,7 +407,7 @@ class RuntimeController:
                 )
                 if dry_run:
                     self.external_execution_preflight.run(preflight_spec)
-                else:
+                elif input_data.get("mode") == "generate":
                     reservation_preflight_spec = preflight_spec
             if capability.manifest.sdk_api_version is not None:
                 try:
@@ -460,6 +464,11 @@ class RuntimeController:
                     raise RuntimeInternalFailure("controlled generation preflight is unavailable")
                 self.external_execution_preflight.run(reservation_preflight_spec)
                 controlled_generation_artifact_publisher.reserve(execution_id)
+            if capability_identity == "movie.moving-shot" and not dry_run:
+                if input_data.get("mode") == "generate":
+                    if reservation_preflight_spec is None:
+                        raise RuntimeInternalFailure("moving-shot external preflight is unavailable")
+                    self.external_execution_preflight.run(reservation_preflight_spec)
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             future = executor.submit(handler, context, input_data, dry_run)
             try:

@@ -33,9 +33,16 @@ class FakeVideoProvider:
     def generate(self, request, *, credential, transport=None):
         self.calls += 1
         raw = transport(request) if transport else b"{}"
+        operation = "operations.test-1"
+        if getattr(request, "on_accepted", None) is not None:
+            request.operation_evidence_path.write_text(json.dumps({
+                "operation_name": operation, "request_sha256": request.request_sha256,
+                "execution_namespace": request.execution_namespace, "submission_accepted": True,
+            }), encoding="utf-8")
+            request.on_accepted(operation)
         return ImageToVideoResult(
             GeneratedMedia("video/mp4", MP4, 1280, 720, hashlib.sha256(MP4).hexdigest()),
-            12, hashlib.sha256(raw).hexdigest(), "operations.test-1", "1.250000",
+            12, hashlib.sha256(raw).hexdigest(), operation, "1.250000",
         )
 
 
@@ -53,11 +60,15 @@ class MovingShotTests(unittest.TestCase):
     def test_end_to_end_accepted_operation_recovery_admits_one_candidate(self):
         operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/recovery"
         class RecoverableProvider:
-            def __init__(self): self.submissions = 0; self.recoveries = 0
+            def __init__(self): self.submissions = 0; self.recoveries = 0; self.accepted_ledger = None
             def generate(self, request, *, credential, transport=None):
                 self.submissions += 1
                 request.operation_evidence_path.write_text(json.dumps({"operation_name": operation,
-                    "request_sha256": request.request_sha256, "submission_accepted": True}), encoding="utf-8")
+                    "request_sha256": request.request_sha256, "execution_namespace": request.execution_namespace,
+                    "submission_accepted": True}), encoding="utf-8")
+                request.on_accepted(operation)
+                self.accepted_ledger = json.loads(request.operation_evidence_path.parent.parent.parent.joinpath(
+                    f"{request.request_sha256}.attempt.json").read_text())
                 failure = ProviderExecutionFailure("simulated interruption")
                 failure.diagnostic = type("Diagnostic", (), {"submission_accepted": True, "operation_name": operation})()
                 raise failure
@@ -78,6 +89,9 @@ class MovingShotTests(unittest.TestCase):
             recovered = HANDLER_MODULE.execute(context, {"admission_id": admission.request_sha256, "mode": "recover"}, False)
             self.assertEqual(provider.submissions, 1); self.assertEqual(provider.recoveries, 1)
             self.assertEqual(provider.assert_identity, operation)
+            self.assertEqual(provider.accepted_ledger["status"], "submitted")
+            self.assertEqual(provider.accepted_ledger["attempts"], 1)
+            self.assertEqual(provider.accepted_ledger["operation_name"], operation)
             self.assertEqual(recovered.output["status"], "recovered_quarantined")
             self.assertEqual(json.loads((root / f"{admission.request_sha256}.attempt.json").read_text())["attempts"], 1)
     def test_attempt_five_controller_namespace_does_not_reuse_attempts_one_to_four(self):
@@ -146,6 +160,8 @@ class MovingShotTests(unittest.TestCase):
                 HANDLER_MODULE.execute(context, {"admission_id": admission.request_sha256, "mode": "generate"}, False)
             ledger = json.loads((root / f"{admission.request_sha256}.attempt.json").read_text())
             self.assertEqual(ledger, {"attempts": 0, "maximum_cost_usd": "5.000000", "request_sha256": admission.request_sha256, "status": "authorized"})
+            self.assertEqual(json.loads((root / "authorization.json").read_text())["status"], "authorized")
+            self.assertFalse((output / "operation.json").exists())
 
     def test_provider_acceptance_consumes_immediately_on_later_failure(self):
         operation = "projects/p/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/op-1"
@@ -171,8 +187,12 @@ class MovingShotTests(unittest.TestCase):
             with self.assertRaises(ProviderExecutionFailure):
                 HANDLER_MODULE.execute(context, {"admission_id": admission.request_sha256, "mode": "generate"}, False)
             ledger = AttemptLedger(root / f"{admission.request_sha256}.attempt.json", admission.request_sha256)
-            self.assertEqual(json.loads(ledger.path.read_text())["status"], "failed")
-            self.assertEqual(json.loads(ledger.path.read_text())["attempts"], 1)
+            persisted = json.loads(ledger.path.read_text())
+            self.assertEqual(persisted["status"], "failed")
+            self.assertEqual(persisted["attempts"], 1)
+            self.assertEqual(persisted["operation_name"], operation)
+            self.assertEqual(persisted["execution_namespace"], "vikramaditya-local/shot-024b0d6352149eabb74df544")
+            self.assertEqual(json.loads((root / "authorization.json").read_text())["status"], "consumed")
             with self.assertRaises(AttemptLedgerError):
                 ledger.reserve_execution()
 
@@ -182,7 +202,8 @@ class MovingShotTests(unittest.TestCase):
         class AcceptedThenInvalidProvider:
             def generate(self, request, *, credential, transport=None):
                 request.operation_evidence_path.write_text(json.dumps({
-                    "operation_name": operation, "submission_accepted": True,
+                    "operation_name": operation, "request_sha256": request.request_sha256,
+                    "execution_namespace": request.execution_namespace, "submission_accepted": True,
                 }), encoding="utf-8")
                 raise ProviderExecutionFailure("media admission failed")
 

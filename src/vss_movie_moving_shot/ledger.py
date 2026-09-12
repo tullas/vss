@@ -76,13 +76,31 @@ class AttemptLedger:
                      "source": "preexisting_human_authorization"}:
             raise AttemptLedgerError("current attempt authorization is invalid")
 
+    def _consume_authorization(self) -> None:
+        path = self._authorization_path()
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise AttemptLedgerError("current attempt authorization is unavailable or invalid") from exc
+        authorized = {"request_sha256": self.request_sha256, "attempts": 0,
+                      "maximum_provider_attempts": 1, "status": "authorized",
+                      "source": "preexisting_human_authorization"}
+        consumed = {**authorized, "attempts": 1, "status": "consumed"}
+        if value == consumed:
+            return
+        if value != authorized:
+            raise AttemptLedgerError("current attempt authorization cannot be consumed")
+        path.write_text(json.dumps(consumed, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+
     def _read(self) -> dict[str, Any]:
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise AttemptLedgerError("attempt ledger is unavailable or invalid") from exc
+        fields = {"request_sha256", "attempts", "maximum_cost_usd", "status"}
+        operation_fields = {"operation_name", "execution_namespace"}
         if (not isinstance(value, dict)
-                or set(value) != {"request_sha256", "attempts", "maximum_cost_usd", "status"}
+                or set(value) not in (fields, fields | operation_fields)
                 or value["request_sha256"] != self.request_sha256
                 or value["maximum_cost_usd"] != self.maximum_cost_usd
                 or type(value["attempts"]) is not int
@@ -93,6 +111,13 @@ class AttemptLedger:
             raise AttemptLedgerError("unsubmitted ledger has consumed attempts")
         if value["status"] in {"submitted", "completed", "failed"} and value["attempts"] != 1:
             raise AttemptLedgerError("submitted ledger has invalid attempt count")
+        if set(value) == fields | operation_fields:
+            if (value["status"] not in {"submitted", "completed", "failed"}
+                    or not isinstance(value["operation_name"], str) or not value["operation_name"]
+                    or len(value["operation_name"]) > 512
+                    or not isinstance(value["execution_namespace"], str) or not value["execution_namespace"]
+                    or len(value["execution_namespace"]) > 256):
+                raise AttemptLedgerError("accepted operation identity is invalid")
         return value
 
     def _write(self, value: dict[str, Any]) -> None:
@@ -130,6 +155,38 @@ class AttemptLedger:
         value["status"] = "submitted"
         self._write(value)
 
+    def accept_operation(self, operation_name: str, execution_namespace: str) -> None:
+        """Seal one accepted provider operation and consume its authorization."""
+        if (not isinstance(operation_name, str) or not operation_name or len(operation_name) > 512
+                or not isinstance(execution_namespace, str) or not execution_namespace
+                or len(execution_namespace) > 256):
+            raise AttemptLedgerError("accepted operation identity is invalid")
+        value = self._read()
+        identity = {"operation_name": operation_name, "execution_namespace": execution_namespace}
+        if value["status"] == "reserved" and value["attempts"] == 0:
+            value.update(identity)
+            value["attempts"] = 1
+            value["status"] = "submitted"
+            self._write(value)
+        elif (value["status"] in {"submitted", "failed", "completed"}
+              and value.get("operation_name") == operation_name
+              and value.get("execution_namespace") == execution_namespace):
+            pass
+        else:
+            raise AttemptLedgerError("accepted operation does not match the reserved attempt")
+        self._consume_authorization()
+
+    def assert_operation(self, operation_name: str, execution_namespace: str) -> dict[str, Any]:
+        """Fail closed unless recovery addresses this ledger's accepted operation."""
+        value = self._read()
+        if (value["status"] not in {"submitted", "failed", "completed"}
+                or value["attempts"] != 1
+                or value.get("operation_name") != operation_name
+                or value.get("execution_namespace") != execution_namespace):
+            raise AttemptLedgerError("accepted operation does not match the execution record")
+        self._consume_authorization()
+        return value
+
     def release_execution(self) -> None:
         """Release a reservation when provider acceptance was not evidenced."""
         self._require_authorization()
@@ -144,6 +201,8 @@ class AttemptLedger:
         if status not in {"completed", "failed"}:
             raise AttemptLedgerError("terminal status is invalid")
         value = self._read()
+        if value["status"] == status:
+            return
         if value["status"] not in {"submitted", "failed"}:
             raise AttemptLedgerError("submitted attempt is not open")
         value["status"] = status

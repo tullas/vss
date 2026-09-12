@@ -19,6 +19,28 @@ def _provider_acceptance_evidenced(exc, evidence_path) -> bool:
     return provider_acceptance_evidenced(diagnostic, evidence)
 
 
+def _admit_terminal_media(result, admission, destination, ledger):
+    """Persist one accepted result through the common candidate provenance path."""
+    import hashlib
+    video = destination / "shot.mp4"
+    video.write_bytes(result.media.content)
+    evidence_path = destination / "evidence.json"
+    evidence_path.write_text(json.dumps({
+        "request_sha256": admission.request_sha256,
+        "shot_id": admission.request["scope"]["shot_id"],
+        "visual_basis_sha256": admission.request["production_input"]["content_sha256"],
+        "provider": "Google Vertex AI", "model": "veo-3.1-generate-001",
+        "provider_request_id": result.provider_request_id,
+        "response_sha256": result.response_sha256,
+        "video_sha256": hashlib.sha256(result.media.content).hexdigest(),
+        "byte_count": len(result.media.content),
+        "estimated_cost_usd": result.estimated_cost_usd,
+        "attempts": 1, "audio": False, "authority": AUTHORITY,
+    }, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    ledger.terminal("completed")
+    return video, evidence_path
+
+
 def execute(context, input_data, dry_run):
     admission = context.admitted_request
     mode = input_data.get("mode") if isinstance(input_data, dict) else None
@@ -32,8 +54,8 @@ def execute(context, input_data, dry_run):
         return CapabilityResult.success({**common, "status": "ready_for_paid_attempt", "provider_call_count": 0, "attempt_reserved": False, "artifact_root": None, "video": None, "evidence": None})
     if context.providers is None:
         raise ValueError("moving-shot provider access is unavailable")
-    import hashlib, json
     from pathlib import Path
+    from vss_provider_reliability import provider_acceptance_evidenced, retry_permitted, same_operation_recovery_required
     root = context.safe_configuration.get("artifact_root")
     if not isinstance(root, str):
         raise ValueError("moving-shot artifact destination is unavailable")
@@ -51,16 +73,16 @@ def execute(context, input_data, dry_run):
     )
     if mode == "recover":
         try:
-            record = json.loads(ledger.path.read_text(encoding="utf-8"))
             evidence = json.loads((destination / "operation.json").read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError("accepted operation evidence is unavailable") from exc
-        if (record.get("request_sha256") != admission.request_sha256 or record.get("attempts") != 1
-                or record.get("status") not in {"submitted", "failed", "completed"}
-                or evidence.get("request_sha256") != admission.request_sha256
+        operation_name = evidence.get("operation_name") if isinstance(evidence, dict) else None
+        if not same_operation_recovery_required(accepted=provider_acceptance_evidenced(evidence=evidence)):
+            raise ValueError("accepted operation evidence is unavailable")
+        record = ledger.assert_operation(operation_name, execution_namespace)
+        if (evidence.get("request_sha256") != admission.request_sha256
                 or evidence.get("execution_namespace") != execution_namespace
-                or evidence.get("submission_accepted") is not True
-                or not isinstance(evidence.get("operation_name"), str)):
+                or record.get("request_sha256") != admission.request_sha256):
             raise ValueError("accepted operation evidence does not match recovery")
         if record["status"] == "completed" and (destination / "shot.mp4").is_file() and (destination / "evidence.json").is_file():
             return CapabilityResult.success({**common, "status": "recovered_quarantined", "provider_call_count": 0,
@@ -70,19 +92,32 @@ def execute(context, input_data, dry_run):
             prompt=admission.request["prompt"], image=admission.image,
             request_sha256=admission.request_sha256, provider_request_sha256=admission.request_sha256,
             duration_seconds=IMAGE_TO_VIDEO_DURATION_SECONDS, resolution="720p", generate_audio=False,
-            image_mime_type=IMAGE_MIME_TYPE, operation_evidence_path=destination / "operation.json"), evidence["operation_name"])
-        video = destination / "shot.mp4"
-        video.write_bytes(result.media.content)
-        evidence_path = destination / "evidence.json"
-        evidence_path.write_text(json.dumps({"request_sha256": admission.request_sha256, "shot_id": admission.request["scope"]["shot_id"], "visual_basis_sha256": admission.request["production_input"]["content_sha256"], "provider": "Google Vertex AI", "model": "veo-3.1-generate-001", "provider_request_id": result.provider_request_id, "response_sha256": result.response_sha256, "video_sha256": result.media.content_sha256, "byte_count": len(result.media.content), "estimated_cost_usd": result.estimated_cost_usd, "attempts": 1, "audio": False, "authority": AUTHORITY}, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-        ledger.terminal("completed")
-        return CapabilityResult.success({**common, "status": "recovered_quarantined", "provider_call_count": 1,
+            image_mime_type=IMAGE_MIME_TYPE, operation_evidence_path=destination / "operation.json",
+            execution_namespace=execution_namespace), operation_name)
+        video, evidence_path = _admit_terminal_media(result, admission, destination, ledger)
+        return CapabilityResult.success({**common, "status": "recovered_quarantined", "provider_call_count": 0,
                                          "attempt_reserved": True, "artifact_root": str(destination),
                                          "video": str(video), "evidence": str(evidence_path)})
     # The Runtime boundary has completed closed readiness and is now entering
     # the one execution slot. Reservation is not provider consumption.
     ledger.reserve_execution()
     accepted = False
+
+    def record_acceptance(operation_name):
+        nonlocal accepted
+        try:
+            evidence_value = json.loads((destination / "operation.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("accepted provider operation evidence is unavailable") from exc
+        if (not isinstance(evidence_value, dict)
+                or evidence_value.get("operation_name") != operation_name
+                or evidence_value.get("request_sha256") != admission.request_sha256
+                or evidence_value.get("execution_namespace") != execution_namespace
+                or not provider_acceptance_evidenced(evidence=evidence_value)):
+            raise ValueError("accepted provider operation identity does not match this execution")
+        ledger.accept_operation(operation_name, execution_namespace)
+        accepted = True
+
     try:
         # Output allocation is post-reservation: a local collision is a
         # terminal failure of this one authorized execution, never a reason
@@ -98,30 +133,42 @@ def execute(context, input_data, dry_run):
             duration_seconds=IMAGE_TO_VIDEO_DURATION_SECONDS, resolution="720p", generate_audio=False,
             image_mime_type=IMAGE_MIME_TYPE,
             operation_evidence_path=destination / "operation.json",
+            execution_namespace=execution_namespace,
+            on_accepted=record_acceptance,
         ))
-        # A returned result proves the provider accepted the operation. Consume
-        # the authorization before any local media/evidence admission work.
-        ledger.mark_submitted()
-        accepted = True
-        try:
-            operation_value = json.loads((destination / "operation.json").read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            operation_value = {"operation_name": result.provider_request_id,
-                               "request_sha256": admission.request_sha256,
-                               "submission_accepted": True}
-        operation_value["execution_namespace"] = execution_namespace
-        (destination / "operation.json").write_text(json.dumps(operation_value, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        if not accepted:
+            # Keep compatibility with provider test doubles while failing
+            # closed unless they supplied the same durable acceptance record.
+            record_acceptance(result.provider_request_id)
+        ledger.assert_operation(result.provider_request_id, execution_namespace)
     except Exception as exc:
+        try:
+            evidence_value = json.loads((destination / "operation.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            evidence_value = None
         accepted = accepted or _provider_acceptance_evidenced(exc, destination / "operation.json")
-        if accepted:
-            if json.loads(ledger.path.read_text(encoding="utf-8"))["status"] == "reserved":
-                ledger.mark_submitted()
-            try:
-                operation_value = json.loads((destination / "operation.json").read_text(encoding="utf-8"))
-                operation_value["execution_namespace"] = execution_namespace
-                (destination / "operation.json").write_text(json.dumps(operation_value, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                pass
+        if not retry_permitted(accepted=accepted):
+            diagnostic = getattr(exc, "diagnostic", None)
+            operation_name = (evidence_value.get("operation_name") if isinstance(evidence_value, dict)
+                              else getattr(diagnostic, "operation_name", None))
+            if not isinstance(evidence_value, dict):
+                evidence_value = {
+                    "operation_name": operation_name,
+                    "endpoint": None,
+                    "method": "POST",
+                    "request_sha256": admission.request_sha256,
+                    "execution_namespace": execution_namespace,
+                    "submission_accepted": True,
+                    "polls": [],
+                }
+                (destination / "operation.json").write_text(
+                    json.dumps(evidence_value, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            if (evidence_value.get("operation_name") != operation_name
+                    or evidence_value.get("request_sha256") != admission.request_sha256
+                    or evidence_value.get("execution_namespace") != execution_namespace
+                    or not provider_acceptance_evidenced(evidence=evidence_value)):
+                raise ValueError("accepted operation could not be bound to this execution") from exc
+            ledger.accept_operation(operation_name, execution_namespace)
             ledger.terminal("failed")
         else:
             ledger.release_execution()
@@ -131,10 +178,7 @@ def execute(context, input_data, dry_run):
                 pass
         raise
     try:
-        video = destination / "shot.mp4"; video.write_bytes(result.media.content)
-        evidence = destination / "evidence.json"
-        evidence.write_text(json.dumps({"request_sha256": admission.request_sha256, "shot_id": admission.request["scope"]["shot_id"], "visual_basis_sha256": admission.request["production_input"]["content_sha256"], "provider": "Google Vertex AI", "model": "veo-3.1-generate-001", "provider_request_id": result.provider_request_id, "response_sha256": result.response_sha256, "video_sha256": hashlib.sha256(result.media.content).hexdigest(), "byte_count": len(result.media.content), "estimated_cost_usd": result.estimated_cost_usd, "attempts": 1, "audio": False, "authority": AUTHORITY}, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-        ledger.terminal("completed")
+        video, evidence = _admit_terminal_media(result, admission, destination, ledger)
     except Exception:
         # Acceptance was already sealed above; local failures cannot reopen it.
         ledger.terminal("failed")
