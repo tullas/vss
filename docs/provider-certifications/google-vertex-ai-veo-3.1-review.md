@@ -1,6 +1,6 @@
 # Google Vertex AI Veo 3.1 provider-specialist certification review
 
-Review date: 2026-09-11. Scope is the exact VSS Film #1 image-to-video profile
+Review date: 2026-09-12 UTC. Scope is the exact VSS Film #1 image-to-video profile
 listed below. This is provider conformance evidence, not permission to generate.
 No generation request, paid operation, Shot 3 authorization, or Shot 3 package
 repair is part of this record.
@@ -12,35 +12,49 @@ repair is part of this record.
 | Provider/model | Google Vertex AI; Veo 3.1 `veo-3.1-generate-001` | CERTIFIED |
 | Model lifecycle | GA model; lifecycle page lists retirement November 17, 2026 or later | CERTIFIED (recheck before use) |
 | Region | `us-central1` | CERTIFIED |
-| Input mode | One image-to-video image (`image`), PNG, plus prompt | CERTIFIED |
-| Reference-image mode (`referenceImages`) | Not supported by this exact model ID | UNSUPPORTED; not required by this profile |
+| Primary image-to-video input | One primary image in `instances[0].image`, PNG, plus prompt | CERTIFIED; used by Film #1 |
+| Subject/reference-image conditioning | Up to three subject images are supported by `veo-3.1-generate-001` | CERTIFIED; not used by Film #1 |
+| REST subject-reference form | `instances[0].referenceImages[]`, each with `image` and `referenceType: "asset"`; image bytes may be Base64 or GCS URI | CERTIFIED by Google's reference-to-video REST documentation |
+| SDK subject-reference form | Google shows `reference_images` and `VideoGenerationReferenceImage` in an SDK example using the separate preview model ID | UNKNOWN for exact SDK transport with `veo-3.1-generate-001` |
 | Requested outputs | `sampleCount: 1` | CERTIFIED |
 | Duration | 8 seconds | CERTIFIED |
 | Frame | 16:9, 720p (1280x720); 24 fps | CERTIFIED |
 | Output media | `video/mp4` | CERTIFIED |
 | Audio | Provider supports `generateAudio` boolean; VSS sends `false`; successful historical output has no audio stream | CERTIFIED for VSS no-audio profile |
-| Authentication mechanism | OAuth 2.0 bearer access token; API enabled and project authorization required | CERTIFIED as contract; present token's current validity UNKNOWN |
-| Current project/auth readiness | Current configured project is `vss-film-poc`, location is `us-central1`; read-only API calls returned HTTP 401 | UNKNOWN |
-| Current effective quota | Historical evidence records fixed quota 50 requests/minute for the exact model/region; current read failed HTTP 401 and historical file has no timestamp | UNKNOWN |
+| Authentication mechanism | OAuth 2.0 bearer access token; API enabled and project authorization required | CERTIFIED as contract |
+| Current principal/project/API/IAM readiness | Tokeninfo returns `invalid_token` / `Invalid Value`; project, service, IAM policy, `testIamPermissions`, and quota reads all return HTTP 401 | UNKNOWN; token expiry versus revocation/other invalidity is not distinguished |
+| Current effective quota | Historical evidence records fixed quota 50 requests/minute for the exact model/region; refresh attempt returned HTTP 401 at 2026-09-12T00:54:01Z | UNKNOWN; failed refresh is timestamped, not a fresh quota value |
 | Current expected 8-second cost | Google pricing currently lists video-only 720p/1080p as `$0.20 / 1 count`, without defining that count in the cited row as a second or an 8-second video | UNKNOWN |
 | Exact bounded profile certification | Requires current live readiness and authoritative cost calculation in addition to the certified contract facts | UNKNOWN; not certified |
 
 The inability to establish current credentials/quota or calculate the price is
 not evidence that the model or region is unsupported. Those facts remain
-UNKNOWN. Reference-image support is explicitly UNSUPPORTED for this model but
-is outside the VSS Film #1 profile and does not make the provider globally
-ineligible.
+UNKNOWN. Provider subject-reference conditioning is supported, but is a
+separate input mode from the Film #1 primary-image mode. Google's REST type
+states that `image` and `referenceImages` cannot both be supplied in the same
+instance. The VSS Film #1 request stays on `image`; its adapter is not evidence
+for or against the provider's separate reference capability.
 
 ## Authoritative evidence
 
-Google's [Veo 3.1 model page](https://cloud.google.com/vertex-ai/generative-ai/docs/models/veo/3-1-generate)
-identifies `veo-3.1-generate-001`, image-to-video, supported regions, 16:9,
+Google's [current Veo 3.1 model page](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/veo/3-1-generate)
+identifies `veo-3.1-generate-001`, primary image-to-video, subject reference
+images, supported regions, 16:9,
 720p/1080p, 24 FPS, MP4, the `generateAudio` control, and the 8-second
-image-to-video limit. It explicitly distinguishes unsupported reference-image
-input from ordinary image-to-video. The model-specific [API reference](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/veo-video-generation)
+image-to-video limit. The separate [generate-videos-from-references guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/video/generate-videos-from-references)
+explicitly lists `veo-3.1-generate-001` and `veo-3.1-fast-generate-001` as
+supporting up to three subject images. Its REST example uses
+`instances[].referenceImages[].image` with `referenceType: "asset"` and lists
+both `-001` models as supported. The model-specific [API reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/Shared.Types/VideoGenerationModelInstance)
 defines the image union (`bytesBase64Encoded` or `gcsUri` plus `mimeType`),
 `durationSeconds`, `aspectRatio`, `resolution`, `sampleCount`, and
-`generateAudio` request fields. The request produced by VSS selects 16:9,
+`generateAudio` request fields. This API type says `image` and
+`referenceImages` are mutually exclusive on one instance. The guide's SDK
+example spells the field `reference_images` and uses
+`VideoGenerationReferenceImage`, but its example selects
+`veo-3.1-generate-preview`; therefore this review does not certify that SDK
+call form for `veo-3.1-generate-001`. The Film #1 request uses only the primary
+`image` field and selects 16:9,
 720p, eight seconds, one sample, and `generateAudio: false`.
 
 Google documents the model in `us-central1` in the [Veo 3.1 availability
@@ -61,12 +75,21 @@ lists the model as released November 17, 2025 with retirement November 17,
 2026 or later. Google release notes record Veo 3.1 GA and migration from the
 separate `veo-3.1-generate-preview` identifier. The [quota documentation](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/quotas)
 names Veo's `long_running_online_prediction_requests_per_base_model` metric.
-The [pricing page](https://cloud.google.com/vertex-ai/generative-ai/pricing)
+The [pricing page](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing)
 currently displays video-only Veo 3.1 at `$0.20 / 1 count` for 720p/1080p.
 It does not define the count in that row as seconds or an eight-second output;
 therefore neither `$1.60` from a historical estimate nor `$0.20` is adopted as
-the certified expected cost. Expected 8-second cost is UNKNOWN; actual spend
-in this certification work is `$0`.
+the certified expected cost. Google's [Cloud Billing Catalog documentation](https://docs.cloud.google.com/billing/v1/how-tos/catalog-api)
+states that SKU records expose `usageUnit`, `usageUnitDescription`,
+`baseUnit`, and `baseUnitConversionFactor`, which would establish a billable
+unit. Its public Catalog API requires an API key; the OAuth catalog request
+made here was rejected with HTTP 401. Google's public [Gen AI video SKU group](https://cloud.google.com/skus/sku-groups/gen-ai-video-models)
+does not expose the Veo 3.1 SKU's usage-unit mapping. Thus current authoritative
+count-to-duration mapping remains UNKNOWN. Historical Shot 2 VSS operation
+evidence records `actual_cost_usd: 1.600000` for one 8-second 720p no-audio
+output; classify this as `HISTORICAL_OBSERVED` operational evidence, not an
+authoritative current price or billing-export verification. Expected
+8-second cost remains UNKNOWN; spend for this certification amendment is `$0`.
 
 Google's request examples use OAuth bearer access tokens, including
 `gcloud auth print-access-token`; the [Vertex authentication overview](https://cloud.google.com/vertex-ai/docs/authentication)
@@ -101,15 +124,20 @@ contract.
 ## Non-generation live checks and evidence freshness
 
 The environment exposes project `vss-film-poc`, location `us-central1`, and a
-configured `VSS_VERTEX_AI_ACCESS_TOKEN`. A read-only bearer-authenticated
-Cloud Resource Manager project lookup, Service Usage API lookup for
-`aiplatform.googleapis.com`, and Service Usage consumer quota lookup each
-returned HTTP 401. Thus the configured token is present but **not established
-as usable** for these Google APIs; current project lifecycle/API enablement
-and effective quota could not be refreshed. The local `gcloud` configuration
-also could not be used because its credential database is unavailable in this
-read-only workspace. No publisher-model metadata endpoint was called. No
-generation endpoint was called.
+configured OAuth access token. At 2026-09-12T00:54:01Z, Google's documented
+tokeninfo endpoint returned `invalid_token` / `Invalid Value` (no expiration
+metadata); OAuth userinfo, Cloud Resource Manager project lookup and
+read-only IAM policy/permission checks, Service Usage API lookup, consumer
+quota lookup, and Cloud Billing catalog lookup all returned HTTP 401. The
+token is rejected; whether it is expired, revoked, malformed, or otherwise
+invalid is UNKNOWN. The current principal cannot be identified, and project
+access, API enabled state, effective IAM, and current effective quota could
+not be established. This is a credential/readiness failure, not provider
+capability evidence. The quota refresh attempt is timestamped above but did
+not retrieve a fresh quota value. The local `gcloud` configuration also
+cannot refresh credentials because its credential database is unavailable in
+this read-only workspace. No publisher-model metadata endpoint was called.
+No generation endpoint was called.
 
 The preserved historical readiness record
 `docs/reviews/m11-0-vertex-readiness-evidence.json` records the API enabled,
@@ -139,14 +167,15 @@ Evidence was read without editing or resealing it:
   conformance; it is not current credential/quota evidence.
 
 Independent provider-specialist review compared the certification against
-Google's current model/API/lifecycle/pricing/quota docs and these operation
-records. It found and records these disagreements with the prior draft rather
-than carrying them forward silently:
+Google's current model/API/lifecycle/pricing/quota and billing-catalog docs
+and these operation records. It found and records these disagreements with
+the prior draft rather than carrying them forward silently:
 
-1. The prior draft listed reference-image-to-video as supported. The exact
-   `-001` model page says reference-image input is unsupported; only ordinary
-   image-to-video is in this profile. The separate preview model identifier
-   is not substituted.
+1. The prior review incorrectly said subject/reference images were
+   unsupported for `veo-3.1-generate-001`, relying on older/conflicting
+   documentation. Current Google model and reference-to-video docs establish
+   that up to three subject images are supported. This capability is recorded
+   as supported but unused by the Film #1 profile.
 2. The prior draft listed first-and-last-frame-to-video among the certified
    generation modes. That optional mode is excluded from this profile; this
    record does not certify it.
@@ -158,9 +187,21 @@ than carrying them forward silently:
    count` is retained verbatim, with the count-to-duration mapping UNKNOWN.
 5. The prior draft had no current lifecycle date. The lifecycle source now
    gives November 17, 2026 or later; it is a material near-term version risk.
+6. The provider's subject-reference feature does not mean it can be combined
+   with the profile's primary `image` field: Google's REST type states those
+   fields are mutually exclusive. The SDK spelling is documented in an
+   example against the preview model, so exact SDK behavior for the GA model
+   remains UNKNOWN; the REST form is documented for the exact `-001` model.
+7. Public pricing and the public SKU-group page do not map the `$0.20 / count`
+   label to seconds or one 8-second video. Cloud Billing usage-unit lookup
+   could not be refreshed because current token/catalog access returned 401.
 
-The narrow contract facts supported by current docs and historical operations
-are CERTIFIED. `referenceImages` is UNSUPPORTED. Current auth readiness,
-effective quota/freshness, and the expected eight-second cost remain UNKNOWN.
-Therefore the exact bounded Film #1 execution profile is **not yet
-CERTIFIED**. No generation call was made; actual cost is `$0`.
+The primary-image contract and the provider's separate subject-reference
+conditioning capability are CERTIFIED; only the primary image is used by
+Film #1. The exact REST subject-reference form is documented; exact SDK
+behavior for the GA model is UNKNOWN. Current token validity/principal,
+project/API/IAM readiness, effective quota/freshness, and expected eight-second
+cost remain UNKNOWN. The historical Shot 2 cost of `$1.60` is
+`HISTORICAL_OBSERVED`, not authoritative current pricing. Therefore the exact
+bounded Film #1 execution profile is **not yet CERTIFIED**. No generation call
+was made; actual cost of this amendment is `$0`.
