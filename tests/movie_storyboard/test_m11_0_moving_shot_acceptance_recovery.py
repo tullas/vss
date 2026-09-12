@@ -121,8 +121,10 @@ class MovingShotRecoveryRuntimeTests(unittest.TestCase):
             self.assertEqual(operation_evidence["execution_namespace"], EXPECTED_NAMESPACE)
 
             def recovery_transport(url, body, headers, timeout, maximum):
+                if url.endswith(":predictLongRunning"):
+                    submissions.append(url)
+                    return 200, json.dumps({"name": OPERATION}).encode()
                 self.assertTrue(url.endswith(":fetchPredictOperation"))
-                self.assertFalse(url.endswith(":predictLongRunning"))
                 self.assertEqual(json.loads(body)["operationName"], OPERATION)
                 polls.append(url)
                 return 200, json.dumps({"done": True, "response": {"videos": [{
@@ -134,6 +136,7 @@ class MovingShotRecoveryRuntimeTests(unittest.TestCase):
                 _, duplicate_code = self.run_runtime(self.controller(root, recovery_transport), admission, "generate")
             self.assertNotEqual(duplicate_code, 0)
             self.assertEqual(polls, [])
+            self.assertEqual(len(submissions), 1)
             recovery_preflight = NoNetworkPreflight()
             with self.runtime_environment():
                 os.environ.pop("VSS_VERTEX_AI_QUOTA_EVIDENCE_FILE", None)
