@@ -1,0 +1,149 @@
+{
+  "package_identity": "film-1-shot-3-continuity-reconciliation",
+  "package_version": "1",
+  "status": "reconciled_planning_only",
+  "film_id": "film-1",
+  "scene_id": "scene-91f5c8634519d8264e2dd5f8",
+  "continuity_authority_source": "human-accepted Shot 2 media",
+  "shot_2_acceptance": {
+    "status": "USE",
+    "acceptance_reference": "docs/reviews/m11-2-film1-shot2-creative-acceptance.json",
+    "review_sha256": "df07642cda107af53f3b6f8783cf5372f738c336541251ad71e186b87223e4c8",
+    "media_sha256": "2f90f65337a06c4b586021e2892cd876d5d5f02721007bbeaa9faaea49aed902"
+  },
+  "shot_2_planned_continuity": {
+    "setting": "dawn banyan-road axis beneath the banyan; no gate or lantern was part of the planned Shot 2 continuity",
+    "action": "Vikramaditya turns toward the already-present Vetala and takes one measured step; riddle remains unresolved",
+    "relationship": "both characters remain on the same established screen direction and camera axis",
+    "source": "docs/experiments/m11-2-film1-shot2-continuity-plan.json"
+  },
+  "shot_2_observed_accepted_continuity": {
+    "acceptance_status": "USE",
+    "authority_source": "human-accepted Shot 2 media, exact digest 2f90f65337a06c4b586021e2892cd876d5d5f02721007bbeaa9faaea49aed902",
+    "media_reference": ".local/movie/m11-0-moving-shot/shot-024b0d6352149eabb74df544/output/095e28b8fade7033c9dc9d927815a5f2dbeb21789dbb13058e848d013bce0b9d/shot.mp4",
+    "media_sha256": "2f90f65337a06c4b586021e2892cd876d5d5f02721007bbeaa9faaea49aed902",
+    "media_profile": {
+      "duration_seconds": 8,
+      "resolution": "1280x720",
+      "fps": "24/1",
+      "audio": false
+    },
+    "visible_setting": "stone-paved courtyard or threshold beside a tall fixed barred gate; masonry buildings recede in the background; low warm dawn horizon remains visible; no clear banyan-road composition is present",
+    "final_visible_blocking": "Vikramaditya stands at frame left facing screen right; Vetala is at frame right behind the bars, leaning toward him; both share a direct eyeline across the gate",
+    "shot_2_action": "Vikramaditya starts low/crouched near the gate, leans closer toward Vetala, then stands and holds; Vetala remains behind the gate",
+    "incidental_visible_details": [
+      "lit lantern in the lower foreground near the gate",
+      "padlock on the bars",
+      "specific distant masonry and skyline silhouettes"
+    ],
+    "inspection": "sampled four frames from the accepted video and inspected its final decoded frame (frame 191 of 192)"
+  },
+  "planned_vs_observed_differences": [
+    "The planned banyan-road setting is not the visible accepted Shot 2 setting; the accepted video shows a paved stone courtyard/threshold and barred gate.",
+    "The accepted Vetala is behind the gate, unlike the unconfined roadside presence described in the plan.",
+    "Vikramaditya crouches/leans near the bars before standing; this exceeds the planned turn plus one measured step.",
+    "A lantern and gate padlock appear in the accepted image sequence although neither is part of the planned story action.",
+    "The low warm dawn light, character identities, left/right relationship, screen direction, and unresolved exchange remain compatible."
+  ],
+  "classification": [
+    {
+      "element": "Vikramaditya identity and left-of-frame position, facing screen right",
+      "classification": "REQUIRED_CONTINUITY",
+      "reason": "core character identity and spatial direction in the accepted end-state"
+    },
+    {
+      "element": "Vetala identity at frame right behind the barred gate, facing toward Vikramaditya",
+      "classification": "REQUIRED_CONTINUITY",
+      "reason": "core identity and staging visible in human-accepted USE media"
+    },
+    {
+      "element": "stone-paved courtyard/threshold and fixed barred gate as the immediate setting",
+      "classification": "REQUIRED_CONTINUITY",
+      "reason": "preserve direct shot-to-shot spatial continuity; this does not make the accidental location permanent story canon"
+    },
+    {
+      "element": "early dawn light with low warm horizon",
+      "classification": "REQUIRED_CONTINUITY",
+      "reason": "visible time-of-day continuity; no transition is shown"
+    },
+    {
+      "element": "current end-state posture: Vikramaditya standing still and listening, Vetala at the bars",
+      "classification": "REQUIRED_CONTINUITY",
+      "reason": "Shot 3 should continue from the accepted final state"
+    },
+    {
+      "element": "broad restrained live-action historical visual grounding",
+      "classification": "REQUIRED_CONTINUITY",
+      "reason": "preserve the accepted media language without fixing exact costume or set dressing"
+    },
+    {
+      "element": "exact camera distance, framing, focal length, and background depth",
+      "classification": "OPTIONAL_CONTINUITY",
+      "reason": "may change modestly while keeping axis, left-right relation, and gate geography"
+    },
+    {
+      "element": "distant masonry and skyline silhouettes; small shifts in incidental background foliage",
+      "classification": "OPTIONAL_CONTINUITY",
+      "reason": "may soften or fall outside a tighter composition if the stone courtyard remains legible"
+    },
+    {
+      "element": "foreground lantern",
+      "classification": "INCIDENTAL_GENERATION_DRIFT",
+      "reason": "not in planned story action; can leave frame without implying removal or a new event"
+    },
+    {
+      "element": "padlock and exact gate hardware",
+      "classification": "INCIDENTAL_GENERATION_DRIFT",
+      "reason": "no narrative function established; keep the barred gate, but do not foreground the lock"
+    },
+    {
+      "element": "unexplained displacement from planned banyan-road to barred stone courtyard, including Vetala appearing confined",
+      "classification": "STORY_CONFLICT",
+      "reason": "conflicts with Shot 1 and Shot 2 plan; no transition or cause is shown. Accepted Shot 2 controls only the immediate next-shot visual continuity, not permanent canon."
+    },
+    {
+      "element": "Shot 2 movement differs from planned single measured step",
+      "classification": "STORY_CONFLICT",
+      "reason": "accepted output includes crouching/leaning and standing at the gate; do not add a new event to explain it."
+    }
+  ],
+  "changes_requiring_transition_or_retake": [
+    "A return to the banyan-road or a change to a different time/location requires a visible, human-approved scene transition; do not jump there in Shot 3.",
+    "Removing, opening, or moving the barred gate, or moving Vetala outside it, changes established Shot 2 geography and requires a visible transition or retake.",
+    "Explaining why Vetala is behind the gate would add story information and requires an explicit creative decision; do not invent a cause in Shot 3.",
+    "A tighter crop that simply excludes the lantern or padlock needs no story event or retake."
+  ],
+  "resulting_shot_3_continuity_specification": {
+    "starting_state": "continue from accepted Shot 2 final frame: early dawn stone-paved gate threshold; Vikramaditya standing at frame left facing right; Vetala behind bars at frame right; same eyeline and axis",
+    "narrative_beat": "Vetala raises one hand and begins answering the still-unresolved riddle; Vikramaditya remains stopped and listens.",
+    "must_preserve": [
+      "Vikramaditya and Vetala identities",
+      "left-right placement and screen direction",
+      "barred gate and stone threshold as immediate geography",
+      "early dawn",
+      "restrained live-action grounding",
+      "unresolved riddle",
+      "no time/location jump"
+    ],
+    "may_fall_out_of_frame": [
+      "foreground lantern",
+      "padlock",
+      "precise distant skyline and masonry details"
+    ],
+    "must_not_introduce": [
+      "banyan-road return without transition",
+      "new character, prop, location, time jump, magic, gate opening/release, or new explanation for the gate",
+      "riddle resolution",
+      "control-plane text"
+    ],
+    "canon_status": "Shot 2 observations establish adjacent-shot continuity only; incidental generated details are not promoted to permanent story canon."
+  },
+  "authority": {
+    "canon": false,
+    "production": false,
+    "provider_execution": false,
+    "spend": false,
+    "publication": false,
+    "workflow_activation": false
+  }
+}
