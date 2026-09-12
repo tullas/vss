@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -26,6 +27,10 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 MILESTONE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
+BASELINE_RESIDUE = ".secrets.baseline"
+CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
+CI_WORKFLOW_BLOB = "854774e24c3e7bc79838a20f9296dbf14d12891a"  # pragma: allowlist secret -- public workflow Git blob identity
+CI_REQUIRED_CHECKS = ("Scan for secrets", "Validate", "Test")
 RECONCILIATION_AUTHORIZATION = ("I authorize reconciliation of the m11-0-veo-shot controller source identity "
     "from a9c6ea... to descendant HEAD cf9106298ad485a55475099249d533b3908cf69b, provided "
     "canonical/governed validation passes, Attempts 1–5 remain unchanged, and no execution authority is granted.")
@@ -54,6 +59,14 @@ BOOTSTRAP_REPAIR_PATHS = tuple(sorted((
 LEVELS = {"none": -1, "L0": 0, "L1": 1, "L2": 2, "L3": 3}
 MAX_PACKET_BYTES = 16_384
 MAX_PACKET_PATHS = 64
+CHECKPOINT_PROTOCOL = "vss.agent-checkpoint"
+CHECKPOINT_MANIFEST_PROTOCOL = "vss.dev-milestone-checkpoint-artifact-manifest"
+CHECKPOINT_MANIFEST_SCHEMA = "schemas/dev-milestone-checkpoint-artifact-manifest-v1.schema.json"
+CHECKPOINT_MAX_ARTIFACTS = 4
+CHECKPOINT_MAX_ENVELOPE_BYTES = 16 * 1024
+CHECKPOINT_MAX_MANIFEST_BYTES = 16 * 1024
+CHECKPOINT_MAX_BUNDLE_BYTES = 80 * 1024
+CHECKPOINT_MANIFEST_MODE = "100644"
 MISSION_REVIEWS = {
     "strategic_concern": {"strategic"},
     "creative_production_authority": {"strategic", "constitutional", "unknown_unknown"},
@@ -73,6 +86,10 @@ def _canonical(value: Any) -> bytes:
 
 def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+CI_CHECK_INVENTORY_SHA256 = _digest({"workflow_blob": CI_WORKFLOW_BLOB,
+                                     "required_checks": list(CI_REQUIRED_CHECKS), "version": 1})
 
 
 def _read_json(path: Path, limit: int = 65536) -> dict[str, Any]:
@@ -104,9 +121,11 @@ class MilestoneController:
             raise MilestoneFailure("milestone policy grants authority")
         self.policy_digest = _digest(self.policy)
 
-    def _run(self, argv: list[str], maximum: int = 1_048_576) -> bytes:
+    def _run(self, argv: list[str], maximum: int = 1_048_576,
+             env: Mapping[str, str] | None = None) -> bytes:
         try:
-            result = subprocess.run(argv, cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+            result = subprocess.run(argv, cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    check=False, env=dict(env) if env is not None else None)
         except OSError as exc:
             raise MilestoneFailure("required command is unavailable") from exc
         if result.returncode != 0 or len(result.stdout) > maximum:
@@ -119,7 +138,8 @@ class MilestoneController:
             raise MilestoneFailure("repository identity is invalid")
         return value
 
-    def _repository(self, base: str | None = None) -> dict[str, str]:
+    def _repository(self, base: str | None = None,
+                    residue_provenance: dict[str, Any] | None = None) -> dict[str, str]:
         branch = self._line(["git", "symbolic-ref", "--quiet", "--short", "HEAD"])
         head = self._line(["git", "rev-parse", "HEAD"])
         origin = self._line(["git", "remote", "get-url", "origin"])
@@ -134,9 +154,118 @@ class MilestoneController:
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0:
             raise MilestoneFailure("base SHA is not an ancestor of HEAD")
         return {"name_with_owner": match.group(1), "branch": branch, "base_sha": base_value, "head_sha": head,
-                "change_identity": self._change_identity(base_value)}
+                "change_identity": self._change_identity(base_value, residue_provenance)}
 
-    def _changed_paths(self, base: str) -> list[str]:
+    def _tree_entry(self, revision: str, path: str) -> dict[str, str] | None:
+        raw = self._run(["git", "ls-tree", "-z", revision, "--", path], 4096)
+        records = [item for item in raw.split(b"\0") if item]
+        if not records:
+            return None
+        if len(records) != 1:
+            raise MilestoneFailure("residue Git tree entry is ambiguous")
+        try:
+            metadata, found_path = records[0].split(b"\t", 1)
+            mode, object_type, oid = metadata.split(b" ")
+        except ValueError as exc:
+            raise MilestoneFailure("residue Git tree entry is malformed") from exc
+        if found_path != path.encode("utf-8") or object_type != b"blob" or mode not in {b"100644", b"100755"}:
+            raise MilestoneFailure("residue Git tree entry is unsupported")
+        return {"mode": mode.decode("ascii"), "oid": oid.decode("ascii"), "type": "blob"}
+
+    def _index_entry(self, path: str) -> dict[str, str] | None:
+        records = [item for item in self._run(["git", "ls-files", "--stage", "-z", "--", path], 4096).split(b"\0") if item]
+        if not records:
+            return None
+        if len(records) != 1:
+            raise MilestoneFailure("residue index entry is ambiguous")
+        try:
+            metadata, found_path = records[0].split(b"\t", 1)
+            mode, oid, stage = metadata.split(b" ")
+        except ValueError as exc:
+            raise MilestoneFailure("residue index entry is malformed") from exc
+        if (found_path != path.encode("utf-8") or stage != b"0" or mode not in {b"100644", b"100755"}
+                or not SHA1.fullmatch(oid.decode("ascii"))):
+            raise MilestoneFailure("residue index entry is unsupported")
+        return {"mode": mode.decode("ascii"), "oid": oid.decode("ascii"), "stage": "0"}
+
+    def _worktree_entry(self, path: str) -> dict[str, str] | None:
+        candidate = self.root / path
+        try:
+            metadata = candidate.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise MilestoneFailure("residue worktree entry is unreadable") from exc
+        if not candidate.is_file() or candidate.is_symlink():
+            raise MilestoneFailure("residue worktree entry is unsupported")
+        mode = metadata.st_mode & 0o777
+        if mode not in {0o644, 0o755}:
+            raise MilestoneFailure("residue worktree mode is unsupported")
+        try:
+            content = candidate.read_bytes()
+        except OSError as exc:
+            raise MilestoneFailure("residue worktree entry is unreadable") from exc
+        return {"kind": "file", "mode": f"{mode:04o}", "sha256": hashlib.sha256(content).hexdigest()}
+
+    def _capture_residue(self, base: str) -> dict[str, Any] | None:
+        status = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 2_000_000)
+        dirty = any(entry[3:] == BASELINE_RESIDUE.encode("utf-8") for entry in status.split(b"\0") if entry)
+        if not dirty:
+            return None
+        head = self._line(["git", "rev-parse", "HEAD"])
+        head_entry = self._tree_entry(head, BASELINE_RESIDUE)
+        base_entry = self._tree_entry(base, BASELINE_RESIDUE)
+        index_entry = self._index_entry(BASELINE_RESIDUE)
+        worktree_entry = self._worktree_entry(BASELINE_RESIDUE)
+        validator = self.root / "scripts/security/validate-repository-governance.py"
+        if (head_entry is None or head_entry != base_entry or index_entry is None or worktree_entry is None or not validator.is_file()
+                or subprocess.run([sys.executable, str(validator)], cwd=self.root,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0):
+            raise MilestoneFailure("pre-existing baseline residue is not admissible")
+        return {"path": BASELINE_RESIDUE, "captured_head_sha": head,
+                "head_entry": head_entry, "index_entry": index_entry,
+                "worktree_entry": worktree_entry, "governance_validator": "passed"}
+
+    def _verify_residue(self, base: str, provenance: dict[str, Any] | None) -> None:
+        if provenance is None:
+            return
+        if (set(provenance) != {"path", "captured_head_sha", "head_entry", "index_entry",
+                               "worktree_entry", "governance_validator"}
+                or provenance["path"] != BASELINE_RESIDUE
+                or provenance["governance_validator"] != "passed"
+                or self._tree_entry("HEAD", BASELINE_RESIDUE) != provenance["head_entry"]):
+            raise MilestoneFailure("captured baseline residue provenance changed")
+        if self._index_entry(BASELINE_RESIDUE) != provenance["index_entry"]:
+            raise MilestoneFailure("captured baseline residue index changed")
+        current = self._worktree_entry(BASELINE_RESIDUE)
+        head_bytes = self._run(["git", "show", f"{provenance['captured_head_sha']}:{BASELINE_RESIDUE}"], 4 * 1024 * 1024)
+        head_mode = f"{int(provenance['head_entry']['mode'], 8) & 0o777:04o}"
+        head_worktree = {"kind": "file", "mode": head_mode,
+                         "sha256": hashlib.sha256(head_bytes).hexdigest()}
+        if current is not None and current not in {"worktree_entry": provenance["worktree_entry"],
+                                                   "head_worktree": head_worktree}.values():
+            raise MilestoneFailure("captured baseline residue content changed")
+        if current is not None:
+            validator = self.root / "scripts/security/validate-repository-governance.py"
+            if (not validator.is_file() or subprocess.run(
+                    [sys.executable, str(validator)], cwd=self.root,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0):
+                raise MilestoneFailure("captured baseline residue is no longer admissible")
+        # A tracked baseline change committed after capture is governed work, never residue.
+        if self._tree_entry(base, BASELINE_RESIDUE) != self._tree_entry("HEAD", BASELINE_RESIDUE):
+            raise MilestoneFailure("captured baseline residue became committed work")
+
+    @staticmethod
+    def _residue_from_events(events: list[dict[str, Any]]) -> dict[str, Any] | None:
+        value = events[0]["data"].get("residue_provenance")
+        return value if type(value) is dict else None
+
+    @staticmethod
+    def _residue_digest(provenance: dict[str, Any] | None) -> str:
+        return _digest({"residue_provenance": provenance})
+
+    def _changed_paths(self, base: str, residue_provenance: dict[str, Any] | None = None) -> list[str]:
+        self._verify_residue(base, residue_provenance)
         raw = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 2_000_000)
         entries = raw.split(b"\0")
         paths: list[str] = []
@@ -148,7 +277,9 @@ class MilestoneController:
             path = entry[3:].decode("utf-8")
             if path == PROTECTED_RESIDUE or path.startswith(".vss/milestones/"):
                 continue
-            if path == ".secrets.baseline":
+            if path == BASELINE_RESIDUE and residue_provenance is not None:
+                continue
+            if path == BASELINE_RESIDUE:
                 validator = self.root / "scripts/security/validate-repository-governance.py"
                 governed = validator.is_file() and subprocess.run(
                     [sys.executable, str(validator)], cwd=self.root,
@@ -162,12 +293,13 @@ class MilestoneController:
                 raise MilestoneFailure("unexpected sensitive changed path")
             paths.append(path)
         diff_paths = self._run(["git", "diff", "--name-only", "-z", base, "--"], 1_048_576).split(b"\0")
-        paths.extend(path.decode("utf-8") for path in diff_paths if path)
+        paths.extend(path.decode("utf-8") for path in diff_paths
+                     if path and not (residue_provenance is not None and path == BASELINE_RESIDUE.encode("utf-8")))
         return sorted(set(paths))
 
-    def _change_identity(self, base: str) -> str:
+    def _change_identity(self, base: str, residue_provenance: dict[str, Any] | None = None) -> str:
         """Hash one complete worktree snapshot so commit state cannot change identity."""
-        paths = self._changed_paths(base)
+        paths = self._changed_paths(base, residue_provenance)
         snapshot: list[dict[str, Any]] = []
         for path in paths:
             candidate = self.root / path
@@ -211,6 +343,371 @@ class MilestoneController:
             snapshot.append({"path": path, "kind": kind, "mode": f"{int(mode, 8) & 0o777:04o}",
                              "sha256": hashlib.sha256(content).hexdigest()})
         return _digest({"base": base, "paths": paths, "snapshot": snapshot})
+
+    def _tree_entries(self, commit: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
+        """Return exact Git path bytes mapped to mode, type, and object ID."""
+        raw = self._run(["git", "ls-tree", "-rz", "--full-tree", commit], 16 * 1024 * 1024)
+        entries: dict[bytes, tuple[bytes, bytes, bytes]] = {}
+        for record in raw.split(b"\0"):
+            if not record:
+                continue
+            try:
+                metadata, path = record.split(b"\t", 1)
+                mode, object_type, oid = metadata.split(b" ")
+            except ValueError as exc:
+                raise MilestoneFailure("checkpoint artifact Git tree is malformed") from exc
+            if not path or path in entries:
+                raise MilestoneFailure("checkpoint artifact Git paths are ambiguous")
+            entries[path] = (mode, object_type, oid)
+        return entries
+
+    def _checkpoint_manifest_path(self, milestone_id: str) -> str:
+        return f"docs/reviews/{milestone_id}-checkpoint-artifact-manifest.json"
+
+    def _checkpoint_artifact_path(self, milestone_id: str, raw_sha256: str) -> str:
+        return f"docs/reviews/{milestone_id}-checkpoint-artifacts/{raw_sha256}.json"
+
+    def _checkpoint_receipts(self, events: list[dict[str, Any]], state: dict[str, Any],
+                             head: str) -> list[dict[str, Any]]:
+        assessment_sha = state.get("mission_gate", {}).get("assessment_sha256")
+        required = state.get("mission_gate", {}).get("required_reviews", [])
+        if (state.get("mission_gate", {}).get("outcome") != "PROCEED"
+                or not required or not SHA256.fullmatch(assessment_sha or "")):
+            raise MilestoneFailure("checkpoint recovery requires complete current review receipts")
+        assessment_event = next((event for event in reversed(events)
+                                 if event["event_type"] in {"initialized", "mission_assessed"}
+                                 and event["event_sha256"] == assessment_sha), None)
+        if (assessment_event is None or assessment_event["subject_head_sha"] != head
+                or assessment_event["data"].get("change_identity") != state["repository"]["change_identity"]):
+            raise MilestoneFailure("checkpoint recovery assessment subject is stale")
+        tree = self._tree_entries(head)
+        latest: dict[str, dict[str, Any]] = {}
+        for event in events:
+            if (event["event_type"] == "mission_reviewed"
+                    and event["data"].get("assessment_sha256") == assessment_sha):
+                latest[event["data"]["review"]["mechanism"]] = event
+        receipts: list[dict[str, Any]] = []
+        for mechanism in sorted(required):
+            event = latest.get(mechanism)
+            accepted = {"CONTINUE", "CONTINUE_WITH_GUARDRAIL"} if mechanism == "strategic" else {"ACCEPT"}
+            if (event is None or event["subject_head_sha"] != head
+                    or event["data"].get("change_identity") != state["repository"]["change_identity"]
+                    or event["data"]["review"]["disposition"] not in accepted):
+                raise MilestoneFailure("checkpoint recovery review receipt is stale or non-accepting")
+            evidence: list[dict[str, str]] = []
+            evidence_path = self._packet_reference(event["data"]["review"]["evidence"])
+            path_bytes = evidence_path.encode("utf-8", errors="strict")
+            entry = tree.get(path_bytes)
+            if entry is None or entry[0] != b"100644" or entry[1] != b"blob":
+                raise MilestoneFailure("checkpoint recovery receipt evidence is not an A-tree blob")
+            content = self._run(["git", "cat-file", "blob", entry[2].decode("ascii")], 16 * 1024 * 1024)
+            evidence.append({"path": evidence_path, "blob_oid": entry[2].decode("ascii"),
+                             "sha256": hashlib.sha256(content).hexdigest()})
+            receipts.append({"event_sha256": event["event_sha256"],
+                             "assessment_sha256": event["data"]["assessment_sha256"],
+                             "mechanism": mechanism,
+                             "disposition": event["data"]["review"]["disposition"],
+                             "change_identity": event["data"]["change_identity"],
+                             "evidence": evidence})
+        if len(receipts) > 3:
+            raise MilestoneFailure("checkpoint recovery receipt inventory exceeded its bound")
+        return receipts
+
+    def _validate_checkpoint_envelope(self, envelope: Any, repository: dict[str, str],
+                                      issue: int) -> tuple[bytes, str]:
+        schema = _read_json(self.root / "schemas/agent-checkpoint-v1.schema.json", 65_536)
+        if type(envelope) is not dict or list(Draft202012Validator(schema).iter_errors(envelope)):
+            raise MilestoneFailure("checkpoint artifact does not match the closed agent-checkpoint contract")
+        if (envelope["protocol"] != CHECKPOINT_PROTOCOL or envelope["schema_version"] != "1"
+                or envelope["checkpoint_type"] not in {"design", "review"}
+                or envelope["subject"] != {"kind": "issue", "number": issue}
+                or envelope["approval"] is not None
+                or envelope["delta"]["omitted_path_count"] != 0
+                or envelope["repository"] != {
+                    "name_with_owner": repository["name_with_owner"],
+                    "branch": repository["branch"], "base_sha": repository["base_sha"],
+                    "head_sha": repository["head_sha"], "code_dirty": False,
+                }):
+            raise MilestoneFailure("checkpoint artifact source identity or type is inadmissible")
+        raw = _canonical(envelope)
+        if len(raw) > CHECKPOINT_MAX_ENVELOPE_BYTES:
+            raise MilestoneFailure("checkpoint artifact exceeded its byte bound")
+        return raw, hashlib.sha256(raw).hexdigest()
+
+    def register_checkpoint_artifacts(self, milestone_id: str, bundle_path: Path,
+                                      summary: str, expected_generation: int,
+                                      human_disposition: str, reviewer: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Register exact checkpoint envelopes against a clean REVIEW_READY HEAD."""
+        if (MILESTONE.fullmatch(milestone_id) is None or not summary or len(summary) > 512
+                or type(expected_generation) is not int or not isinstance(bundle_path, Path)
+                or not isinstance(human_disposition, str) or not human_disposition.strip()
+                or len(human_disposition) > 240 or any(ord(char) < 32 or ord(char) == 127 for char in human_disposition)
+                or not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 80
+                or any(ord(char) < 32 or ord(char) == 127 for char in reviewer)):
+            raise MilestoneFailure("checkpoint artifact registration is invalid")
+        try:
+            bundle_real = bundle_path.resolve(strict=True)
+            bundle_real.relative_to(self.root)
+        except (OSError, ValueError):
+            bundle_real = None
+        if bundle_real is not None:
+            raise MilestoneFailure("checkpoint artifact bundle must be outside the repository")
+        try:
+            bundle_raw = bundle_path.read_bytes()
+            if len(bundle_raw) > CHECKPOINT_MAX_BUNDLE_BYTES:
+                raise MilestoneFailure("checkpoint artifact bundle exceeded its byte bound")
+            candidate_values = json.loads(bundle_raw)
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise MilestoneFailure("checkpoint artifact bundle is malformed") from exc
+        if (type(candidate_values) is not list or not 1 <= len(candidate_values) <= CHECKPOINT_MAX_ARTIFACTS):
+            raise MilestoneFailure("checkpoint artifact bundle cardinality is invalid")
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id)
+            stored = _read_json(state_path)
+            repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
+            if expected_generation != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            if _digest(stored) != _digest(self._materialized(milestone_id, events, stored["repository"])):
+                raise MilestoneFailure("milestone state identity recovery conflict")
+            if (stored["status"] != "REVIEW_READY"
+                    or stored["scope"]["issue"] != 160
+                    or stored["next"] != {"action": "request_merge", "human_boundary": True}
+                    or stored["repository"]["head_sha"] != repository["head_sha"]
+                    or stored["repository"]["branch"] != repository["branch"]
+                    or stored["repository"]["base_sha"] != repository["base_sha"]
+                    or stored["repository"]["change_identity"] != repository["change_identity"]):
+                raise MilestoneFailure("checkpoint artifact registration requires REVIEW_READY at unchanged A")
+            self._require_clean_worktree("checkpoint artifact registration")
+            if events[-1]["event_type"] == "checkpoint_artifacts_registered":
+                raise MilestoneFailure("checkpoint artifact registration is already pending")
+            envelopes = [self._validate_checkpoint_envelope(value, repository, stored["scope"]["issue"])
+                         for value in candidate_values]
+            if len({digest for _, digest in envelopes}) != len(envelopes):
+                raise MilestoneFailure("checkpoint artifact bundle contains duplicate content")
+            manifest_path = self._checkpoint_manifest_path(milestone_id)
+            if manifest_path.encode("utf-8") in self._tree_entries(repository["head_sha"]):
+                raise MilestoneFailure("checkpoint artifact manifest path already exists at A")
+            receipts = self._checkpoint_receipts(events, stored, repository["head_sha"])
+            receipt_snapshot_sha = _digest(receipts)
+            artifacts = []
+            for value, (raw, digest) in zip(candidate_values, envelopes):
+                path = self._checkpoint_artifact_path(milestone_id, digest)
+                if len(path.encode("utf-8")) > 240 or path.encode("utf-8") in self._tree_entries(repository["head_sha"]):
+                    raise MilestoneFailure("checkpoint artifact path is invalid or already exists at A")
+                artifacts.append({"path": path, "checkpoint_type": value["checkpoint_type"],
+                                  "mode": CHECKPOINT_MANIFEST_MODE, "sha256": digest})
+            manifest = {"schema_version": "1", "protocol": CHECKPOINT_MANIFEST_PROTOCOL,
+                        "milestone_id": milestone_id, "issue": stored["scope"]["issue"],
+                        "repository": repository, "artifacts": artifacts,
+                        "receipt_snapshot_sha256": receipt_snapshot_sha, "receipts": receipts}
+            manifest_schema = _read_json(self.root / CHECKPOINT_MANIFEST_SCHEMA, 65_536)
+            if list(Draft202012Validator(manifest_schema).iter_errors(manifest)):
+                raise MilestoneFailure("checkpoint artifact manifest is malformed")
+            manifest_raw = _canonical(manifest)
+            if len(manifest_raw) > CHECKPOINT_MAX_MANIFEST_BYTES:
+                raise MilestoneFailure("checkpoint artifact manifest exceeded its byte bound")
+            manifest_sha = hashlib.sha256(manifest_raw).hexdigest()
+            data = {"manifest_path": manifest_path, "manifest_sha256": manifest_sha,
+                    "source_change_identity": stored["repository"]["change_identity"],
+                    "assessment_sha256": stored["mission_gate"]["assessment_sha256"],
+                    "receipt_snapshot_sha256": receipt_snapshot_sha,
+                    "human_disposition": human_disposition, "reviewer": reviewer,
+                    "expected_generation": expected_generation,
+                    "prior_history_tail_sha256": events[-1]["event_sha256"],
+                    "base_sha": repository["base_sha"], "branch": repository["branch"],
+                    "issue": stored["scope"]["issue"], "name_with_owner": repository["name_with_owner"],
+                    "change_identity": repository["change_identity"]}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": milestone_id, "sequence": len(events) + 1,
+                     "event_type": "checkpoint_artifacts_registered",
+                     "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"], "summary": summary,
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event)
+            self._validate(event)
+            if len(events) > self.policy["limits"]["max_events"] - 2 or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]:
+                raise MilestoneFailure("checkpoint artifact registration exceeds history bounds")
+            current_events = self._read_events(milestone_id)
+            current_repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(current_events))
+            current_state = _read_json(state_path)
+            self._require_clean_worktree("checkpoint artifact registration")
+            if (len(current_events) != len(events)
+                    or current_events[-1]["event_sha256"] != events[-1]["event_sha256"]
+                    or _digest(current_state) != _digest(stored)
+                    or current_repository != repository):
+                raise MilestoneFailure("checkpoint artifact registration identity changed during verification")
+            state = self._project(events + [event], repository)
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            self._atomic_json(state_path, state); self._write_pointer(state)
+            return state, manifest
+
+    def _require_clean_worktree(self, operation: str) -> None:
+        status = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 1_048_576)
+        entries = [entry for entry in status.split(b"\0") if entry]
+        if any(len(entry) < 4 or entry[2:3] != b" " or entry[3:].decode("utf-8") != PROTECTED_RESIDUE
+               for entry in entries):
+            raise MilestoneFailure(f"{operation} requires a clean worktree")
+
+    def _checkpoint_delta(self, old_head: str, new_head: str,
+                          expected_paths: set[bytes]) -> None:
+        raw = self._run(["git", "diff-tree", "--raw", "-r", "-z", "--no-abbrev", "--no-renames",
+                         old_head, new_head, "--"], 1_048_576)
+        parts = raw.split(b"\0")
+        changed: dict[bytes, tuple[bytes, bytes, bytes, bytes, bytes]] = {}
+        i = 0
+        while i < len(parts) and parts[i]:
+            header = parts[i]; i += 1
+            if not header.startswith(b":") or i >= len(parts) or not parts[i]:
+                raise MilestoneFailure("checkpoint artifact tree delta is malformed")
+            try:
+                old_mode, new_mode, old_oid, new_oid, status = header[1:].split(b" ")
+            except ValueError as exc:
+                raise MilestoneFailure("checkpoint artifact tree delta is malformed") from exc
+            path = parts[i]; i += 1
+            if path in changed:
+                raise MilestoneFailure("checkpoint artifact tree delta has ambiguous paths")
+            changed[path] = (old_mode, new_mode, old_oid, new_oid, status)
+        if set(changed) != expected_paths:
+            raise MilestoneFailure("checkpoint artifact tree delta contains unregistered or missing paths")
+        for path, (old_mode, new_mode, old_oid, _new_oid, status) in changed.items():
+            if status != b"A" or old_mode != b"000000" or old_oid != b"0" * 40 or new_mode != b"100644":
+                raise MilestoneFailure("checkpoint artifact tree delta contains a modification or unsupported mode")
+
+    def _verify_checkpoint_recovery(self, events: list[dict[str, Any]], index: int,
+                                    bound_head: str, bound_identity: str,
+                                    data: dict[str, Any]) -> None:
+        event = events[index]
+        if index == 0 or events[index - 1]["event_type"] != "checkpoint_artifacts_registered":
+            raise MilestoneFailure("checkpoint recovery registration is missing or stale")
+        registration = events[index - 1]
+        reg = registration["data"]
+        if (data.get("registration_event_sha256") != registration["event_sha256"]
+                or registration["subject_head_sha"] != bound_head
+                or reg["source_change_identity"] != bound_identity
+                or data["rebound_from_head"] != bound_head
+                or data["old_change_identity"] != bound_identity
+                or data["new_head"] != event["subject_head_sha"]
+                or data["manifest_path"] != reg["manifest_path"]
+                or data["manifest_sha256"] != reg["manifest_sha256"]
+                or data["receipt_snapshot_sha256"] != reg["receipt_snapshot_sha256"]
+                or data["expected_generation"] != event["sequence"] - 2
+                or data["prior_history_tail_sha256"] != event["prior_event_sha256"]
+                or data["base_sha"] != reg["base_sha"]
+                or data["branch"] != reg["branch"]
+                or reg["manifest_path"] != self._checkpoint_manifest_path(event["milestone_id"])
+                or reg["expected_generation"] != registration["sequence"] - 2
+                or reg["prior_history_tail_sha256"] != registration["prior_event_sha256"]
+                or reg["issue"] != events[0]["data"]["issue"]
+                or reg["issue"] != 160
+                or data["resulting_state"] != {"status": "CI_PENDING", "next_action": "ingest_ci",
+                                                "ci_status": "not_observed", "ci_head_sha": None}):
+            raise MilestoneFailure("checkpoint recovery provenance is inconsistent")
+        if not data["human_disposition"].strip() or not data["reviewer"].strip():
+            raise MilestoneFailure("checkpoint recovery human disposition is inconsistent")
+        old_head = bound_head
+        new_head = event["subject_head_sha"]
+        parents = self._line(["git", "rev-list", "--parents", "-n", "1", new_head]).split()
+        if parents != [new_head, old_head]:
+            raise MilestoneFailure("checkpoint recovery requires a direct child descendant HEAD")
+        try:
+            manifest_entry = self._tree_entries(new_head).get(data["manifest_path"].encode("utf-8"))
+        except (UnicodeError, KeyError) as exc:
+            raise MilestoneFailure("checkpoint recovery manifest path is invalid") from exc
+        if manifest_entry is None or manifest_entry[:2] != (b"100644", b"blob"):
+            raise MilestoneFailure("checkpoint recovery manifest blob is missing")
+        manifest_raw = self._run(["git", "cat-file", "blob", manifest_entry[2].decode("ascii")], CHECKPOINT_MAX_MANIFEST_BYTES)
+        if hashlib.sha256(manifest_raw).hexdigest() != data["manifest_sha256"]:
+            raise MilestoneFailure("checkpoint recovery manifest digest does not match registration")
+        try:
+            manifest = json.loads(manifest_raw)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise MilestoneFailure("checkpoint recovery manifest is malformed") from exc
+        manifest_schema = _read_json(self.root / CHECKPOINT_MANIFEST_SCHEMA, 65_536)
+        if (manifest_raw != _canonical(manifest)
+                or list(Draft202012Validator(manifest_schema).iter_errors(manifest))
+                or manifest["milestone_id"] != event["milestone_id"]
+                or manifest["issue"] != reg["issue"]
+                or manifest["repository"] != {"name_with_owner": reg["name_with_owner"],
+                                                "branch": reg["branch"], "base_sha": reg["base_sha"],
+                                                "head_sha": old_head, "change_identity": bound_identity}
+                or manifest["repository"]["change_identity"] != reg["source_change_identity"]
+                or manifest["receipt_snapshot_sha256"] != reg["receipt_snapshot_sha256"]
+                or _digest(manifest["receipts"]) != reg["receipt_snapshot_sha256"]):
+            raise MilestoneFailure("checkpoint recovery manifest contract or source binding is invalid")
+        prior_events = events[:index - 1]
+        prior_repository = {"name_with_owner": reg["name_with_owner"], "branch": reg["branch"],
+                            "base_sha": reg["base_sha"], "head_sha": old_head,
+                            "change_identity": bound_identity}
+        prior_state = self._project(prior_events, prior_repository)
+        if (prior_state["status"] != "REVIEW_READY"
+                or prior_state["mission_gate"]["assessment_sha256"] != reg["assessment_sha256"]
+                or self._checkpoint_receipts(prior_events, prior_state, old_head) != manifest["receipts"]):
+            raise MilestoneFailure("checkpoint recovery receipt inventory is incomplete or changed")
+        artifact_paths: set[bytes] = set()
+        artifact_files: dict[bytes, dict[str, Any]] = {}
+        checkpoint_schema = _read_json(self.root / "schemas/agent-checkpoint-v1.schema.json", 65_536)
+        new_tree = self._tree_entries(new_head)
+        old_tree = self._tree_entries(old_head)
+        for artifact in manifest["artifacts"]:
+            path_bytes = artifact["path"].encode("utf-8")
+            expected_path = self._checkpoint_artifact_path(event["milestone_id"], artifact["sha256"])
+            if (artifact["path"] != expected_path or path_bytes in old_tree or path_bytes in artifact_paths
+                    or artifact["mode"] != CHECKPOINT_MANIFEST_MODE):
+                raise MilestoneFailure("checkpoint recovery artifact path is substituted")
+            entry = new_tree.get(path_bytes)
+            if entry is None or entry[:2] != (b"100644", b"blob"):
+                raise MilestoneFailure("checkpoint recovery artifact blob is missing or unsupported")
+            raw = self._run(["git", "cat-file", "blob", entry[2].decode("ascii")], CHECKPOINT_MAX_ENVELOPE_BYTES)
+            if hashlib.sha256(raw).hexdigest() != artifact["sha256"]:
+                raise MilestoneFailure("checkpoint recovery artifact digest is substituted")
+            try:
+                envelope = json.loads(raw)
+            except (UnicodeError, json.JSONDecodeError) as exc:
+                raise MilestoneFailure("checkpoint recovery artifact is malformed") from exc
+            if (raw != _canonical(envelope) or list(Draft202012Validator(checkpoint_schema).iter_errors(envelope))
+                    or envelope["checkpoint_type"] != artifact["checkpoint_type"]
+                    or envelope["subject"] != {"kind": "issue", "number": reg["issue"]}
+                    or envelope["repository"] != {"name_with_owner": manifest["repository"]["name_with_owner"],
+                                                   "branch": reg["branch"], "base_sha": reg["base_sha"],
+                                                   "head_sha": old_head, "code_dirty": False}
+                    or envelope["approval"] is not None or envelope["delta"]["omitted_path_count"] != 0):
+                raise MilestoneFailure("checkpoint recovery artifact contract or source binding is invalid")
+            artifact_paths.add(path_bytes); artifact_files[path_bytes] = artifact
+        manifest_path_bytes = data["manifest_path"].encode("utf-8")
+        if manifest_path_bytes in old_tree:
+            raise MilestoneFailure("checkpoint recovery manifest was not absent at A")
+        self._checkpoint_delta(old_head, new_head, artifact_paths | {manifest_path_bytes})
+        for receipt in manifest["receipts"]:
+            found = next((item for item in events[:index - 1]
+                          if item["event_sha256"] == receipt["event_sha256"]), None)
+            if (found is None or found["event_type"] != "mission_reviewed"
+                    or found["subject_head_sha"] != old_head
+                    or found["data"].get("assessment_sha256") != receipt["assessment_sha256"]
+                    or found["data"].get("change_identity") != receipt["change_identity"]
+                    or found["data"]["review"]["mechanism"] != receipt["mechanism"]
+                    or found["data"]["review"]["disposition"] != receipt["disposition"]
+                    or receipt["change_identity"] != bound_identity
+                    or len(receipt["evidence"]) != 1
+                    or found["data"]["review"]["evidence"] != receipt["evidence"][0]["path"]):
+                raise MilestoneFailure("checkpoint recovery retained receipt is misbound")
+            for evidence in receipt["evidence"]:
+                path_bytes = evidence["path"].encode("utf-8")
+                old_blob = old_tree.get(path_bytes); new_blob = new_tree.get(path_bytes)
+                if (old_blob is None or new_blob is None or old_blob[:2] != (b"100644", b"blob")
+                        or new_blob != old_blob or old_blob[2].decode("ascii") != evidence["blob_oid"]):
+                    raise MilestoneFailure("checkpoint recovery retained receipt evidence changed")
+                content = self._run(["git", "cat-file", "blob", old_blob[2].decode("ascii")], 16 * 1024 * 1024)
+                if hashlib.sha256(content).hexdigest() != evidence["sha256"]:
+                    raise MilestoneFailure("checkpoint recovery retained receipt evidence digest changed")
+        excluded = tuple([data["manifest_path"], *(artifact["path"] for artifact in manifest["artifacts"])])
+        if self._committed_change_identity(reg["base_sha"], old_head) != bound_identity:
+            raise MilestoneFailure("checkpoint recovery old source identity is inconsistent")
+        if self._committed_change_identity(reg["base_sha"], new_head, excluded) != bound_identity:
+            raise MilestoneFailure("checkpoint recovery includes unrelated source changes")
+        if self._committed_change_identity(reg["base_sha"], new_head) != data["change_identity"]:
+            raise MilestoneFailure("checkpoint recovery new source identity is inconsistent")
 
     def _controller_identity(self, head: str, paths: tuple[str, ...], diff_sha256: str) -> str:
         return _digest({"head_sha": head, "paths": list(paths), "diff_sha256": diff_sha256})
@@ -511,7 +1008,8 @@ class MilestoneController:
             raise MilestoneFailure("execution packet is malformed")
         if len(_canonical(packet)) > MAX_PACKET_BYTES:
             raise MilestoneFailure("execution packet exceeded its bound")
-        if self._repository(state["repository"]["base_sha"]) != state["repository"]:
+        events = self._read_events(state["milestone_id"])
+        if self._repository(state["repository"]["base_sha"], self._residue_from_events(events)) != state["repository"]:
             raise MilestoneFailure("repository changed during execution packet generation")
         return packet
 
@@ -547,7 +1045,10 @@ class MilestoneController:
         if (first["event_type"] != "initialized"
                 or (set(scope) - {"mission"}) not in ({"issue", "domains", "paths"},
                                       {"issue", "domains", "paths", "initial_branch", "base_sha",
-                                       "change_identity"})
+                                       "change_identity"},
+                                      {"issue", "domains", "paths", "initial_branch", "base_sha",
+                                       "change_identity", "residue_provenance",
+                                       "residue_provenance_sha256"})
                 or type(scope["issue"]) is not int or scope["issue"] < 1
                 or type(scope["domains"]) is not list or type(scope["paths"]) is not list):
             raise MilestoneFailure("milestone initialization history is malformed")
@@ -555,11 +1056,32 @@ class MilestoneController:
         ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
         ci_subject_head: str | None = None
         ci_change_identity: str | None = None
+        ci_evidence_version: int | None = None
+        bound_head = first["subject_head_sha"]
+        bound_change_identity = scope.get("change_identity", repository["change_identity"])
+        residue_digest = scope.get("residue_provenance_sha256", self._residue_digest(None))
+        modern_binding = "residue_provenance_sha256" in scope
         repair = {"attempts": 0, "stop_reason": None}
         status = "READY_FOR_IMPLEMENTATION"; action = "start_bounded_work"; human = False
         for event in events[1:]:
             data = event["data"]
             if event["event_type"] == "validation_completed":
+                if data.get("evidence_binding_version") == 1:
+                    if (type(data.get("governed_change_identity")) is not str
+                            or not SHA256.fullmatch(data["governed_change_identity"])
+                            or data.get("residue_provenance_sha256") != residue_digest
+                            or data.get("controller_policy_sha256") != self.policy_digest
+                            or type(data.get("validation_subject_head_sha")) is not str
+                            or not SHA1.fullmatch(data["validation_subject_head_sha"])
+                            or type(data.get("validation_map_sha256")) is not str
+                            or not SHA256.fullmatch(data["validation_map_sha256"])):
+                        raise MilestoneFailure("validation evidence binding is malformed")
+                    modern_binding = True
+                    bound_head = event["subject_head_sha"]
+                    bound_change_identity = data["change_identity"]
+                    if ci_evidence_version != 1:
+                        ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
+                        ci_subject_head = None; ci_change_identity = None; ci_evidence_version = None
                 validation = {"evidence_sha256": data.get("evidence_sha256"), "level": data.get("validation_level", "none")}
                 if (ci["status"] == "passed" and ci["head_sha"] == event["subject_head_sha"]
                         and ci_subject_head == event["subject_head_sha"]
@@ -568,9 +1090,69 @@ class MilestoneController:
                 else:
                     status, action = "CI_PENDING", "ingest_ci"
             elif event["event_type"] == "ci_observed":
+                if data.get("ci_evidence_version") == 1:
+                    evidence = data.get("ci_evidence")
+                    if (data.get("governed_change_identity") != bound_change_identity
+                            or data.get("residue_provenance_sha256") != residue_digest
+                            or data.get("source_head_sha") != bound_head
+                            or event["subject_head_sha"] != bound_head
+                            or data.get("ci_head_sha") != bound_head
+                            or type(evidence) is not dict
+                            or evidence.get("workflow_blob") != CI_WORKFLOW_BLOB
+                            or evidence.get("inventory_sha256") != CI_CHECK_INVENTORY_SHA256
+                            or evidence.get("head_sha") != bound_head
+                            or evidence.get("workflow_path") != CI_WORKFLOW_PATH
+                            or type(evidence.get("observation_sha256")) is not str
+                            or not SHA256.fullmatch(evidence["observation_sha256"])
+                            or evidence.get("repository") != repository["name_with_owner"]
+                            or type(evidence.get("workflow_id")) is not int
+                            or type(evidence.get("run_id")) is not int
+                            or evidence.get("run_status") not in {"completed", "in_progress", "queued", "requested"}
+                            or evidence.get("run_conclusion") not in {"success", "failure", "cancelled", "timed_out", "action_required", ""}
+                            or type(evidence.get("jobs")) is not list
+                            or len(evidence["jobs"]) != len(CI_REQUIRED_CHECKS)
+                            or any(type(item) is not dict or type(item.get("name")) is not str
+                                   for item in evidence["jobs"])
+                            or sorted(item.get("name") for item in evidence["jobs"] if type(item) is dict)
+                            != sorted(CI_REQUIRED_CHECKS)
+                            or any(type(item) is not dict or set(item) != {"name", "status", "conclusion", "head_sha"}
+                                   or item.get("head_sha") != bound_head for item in evidence["jobs"])
+                            or len({item["name"] for item in evidence["jobs"]}) != len(CI_REQUIRED_CHECKS)
+                            or (data.get("ci_status") == "passed" and (
+                                evidence.get("run_status") != "completed"
+                                or evidence.get("run_conclusion") != "success"
+                                or any(item.get("status") != "completed" or item.get("conclusion") != "success"
+                                       for item in evidence["jobs"])))
+                            or type(evidence.get("run_attempt")) is not int
+                            or evidence.get("run_attempt", 0) < 1
+                            or evidence.get("observation_sha256") != _digest({
+                                key: evidence.get(key) for key in (
+                                    "repository", "head_sha", "workflow_id", "workflow_path", "workflow_blob",
+                                    "run_id", "run_attempt", "run_status", "run_conclusion", "jobs")})
+                            or data.get("ci_status") != (
+                                "pending" if evidence.get("run_status") != "completed"
+                                or any(item.get("status") != "completed" for item in evidence["jobs"])
+                                else "passed" if evidence.get("run_conclusion") == "success"
+                                and all(item.get("conclusion") == "success" for item in evidence["jobs"])
+                                else "failed")
+                            or data.get("ci_classification") != (
+                                "none" if data.get("ci_status") == "pending"
+                                else "none" if data.get("ci_status") == "passed"
+                                else "security" if any(item.get("name") == "Scan for secrets"
+                                                         and item.get("conclusion") not in {"success", ""}
+                                                         for item in evidence["jobs"])
+                                else "code")):
+                        raise MilestoneFailure("CI observation is not bound to current source identity")
+                    modern_binding = True
+                    ci_evidence_version = 1
+                elif modern_binding:
+                    # Historical CI remains replayable but cannot satisfy a modern source binding.
+                    ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
+                    ci_subject_head = None; ci_change_identity = None; ci_evidence_version = None
+                    continue
                 ci = {"head_sha": data.get("ci_head_sha"), "status": data.get("ci_status", "not_observed"), "classification": data.get("ci_classification", "none")}
                 ci_subject_head = event["subject_head_sha"]
-                ci_change_identity = data.get("change_identity")
+                ci_change_identity = data.get("governed_change_identity", data.get("change_identity"))
                 if ci["status"] == "failed":
                     mapping = {"code": "repair_code", "fixture": "repair_fixture", "flaky/unknown": "reproduce_flaky"}
                     action = mapping.get(ci["classification"], "request_security_review" if ci["classification"] == "security" else "recover_state")
@@ -594,15 +1176,21 @@ class MilestoneController:
                     status, action, human = "LOCAL_VALIDATION_REQUIRED", "run_affected_validation", False
                 else:
                     status, action, human = "CI_PENDING", "ingest_ci", False
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
             elif event["event_type"] == "identity_reconciled":
                 validation = {"evidence_sha256": data["validation_evidence_sha256"], "level": "L3"}
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 ci_subject_head = None; ci_change_identity = None
                 status, action, human = "CI_PENDING", "ingest_ci", False
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
             elif event["event_type"] == "controller_bootstrap":
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 ci_subject_head = None; ci_change_identity = None
                 status, action, human = "CI_PENDING", "ingest_ci", False
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
             elif event["event_type"] == "blocked": status, action, human, repair["stop_reason"] = "BLOCKED", "request_architecture_review", True, data.get("stop_reason")
             elif event["event_type"] == "completed": status, action, human = "COMPLETE", "none", True
         tail = events[-1]
@@ -632,12 +1220,15 @@ class MilestoneController:
         directory, state_path, history = self._paths(milestone_id)
         if issue < 1 or not summary or len(summary) > 512 or len(domains) > 16 or len(paths) > 64:
             raise MilestoneFailure("milestone initialization is invalid")
-        repository = self._repository(base)
+        residue_provenance = self._capture_residue(base)
+        repository = self._repository(base, residue_provenance)
         with self._locked(directory):
             if state_path.exists() or history.exists(): raise MilestoneFailure("milestone already exists")
             data = {"issue": issue, "domains": sorted(set(domains)), "paths": sorted(set(paths)),
                     "initial_branch": repository["branch"], "base_sha": repository["base_sha"],
-                    "change_identity": repository["change_identity"]}
+                    "change_identity": repository["change_identity"],
+                    "residue_provenance": residue_provenance,
+                    "residue_provenance_sha256": self._residue_digest(residue_provenance)}
             if mission is not None:
                 data["mission"] = mission
             event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event", "milestone_id": milestone_id,
@@ -658,6 +1249,10 @@ class MilestoneController:
         self._validate(stored)
         first = events[0]
         initialization = first["data"]
+        if ("residue_provenance_sha256" in initialization
+                and initialization["residue_provenance_sha256"]
+                != self._residue_digest(initialization.get("residue_provenance"))):
+            raise MilestoneFailure("milestone residue provenance digest conflicts")
         transitions = [event for event in events if event["event_type"] == "branch_transitioned"]
         if len(transitions) > 1:
             raise MilestoneFailure("milestone branch transition conflict")
@@ -665,6 +1260,8 @@ class MilestoneController:
         initial_branch = initialization.get(
             "initial_branch", transition_data.get("from_branch", stored["repository"]["branch"]))
         base_sha = initialization.get("base_sha", first["subject_head_sha"])
+        modern_protocol = "residue_provenance_sha256" in initialization
+        residue_digest = initialization.get("residue_provenance_sha256", self._residue_digest(None))
         baseline_change_identity = initialization.get(
             "change_identity", transition_data.get(
                 "change_identity", stored["repository"]["change_identity"]))
@@ -684,15 +1281,33 @@ class MilestoneController:
         for index, event in enumerate(events[1:], 1):
             data = event["data"]
             if event["event_type"] == "validation_invalidated":
-                if (data.get("recovered_event_sha256") != events[index - 1]["event_sha256"]
-                        or "change_identity" in events[index - 1]["data"]):
+                if data.get("legacy_quarantine") is True:
+                    prior_validation = next((prior for prior in reversed(events[:index])
+                                             if prior["event_type"] == "validation_completed"), None)
+                    if (prior_validation is None
+                            or prior_validation["data"].get("evidence_binding_version") == 1
+                            or data.get("recovered_event_sha256") != prior_validation["event_sha256"]
+                            or data.get("prior_history_tail_sha256") != events[index - 1]["event_sha256"]
+                            or data.get("change_identity") != bound_change_identity
+                            or data.get("residue_provenance_sha256") != residue_digest
+                            or data.get("expected_generation") != index - 1
+                            or event["subject_head_sha"] != bound_head):
+                        raise MilestoneFailure("legacy validation quarantine conflicts with source identity")
+                elif (data.get("recovered_event_sha256") != events[index - 1]["event_sha256"]
+                      or "change_identity" in events[index - 1]["data"]):
                     raise MilestoneFailure("milestone state identity recovery conflict")
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
             if event["event_type"] == "identity_rebound":
                 if (data.get("rebound_from_head") != bound_head
                         or event["subject_head_sha"] == bound_head):
                     raise MilestoneFailure("milestone state identity recovery conflict")
+                if data.get("recovery_kind") == "review_ready_checkpoint_artifacts":
+                    self._verify_checkpoint_recovery(events, index, bound_head,
+                                                    bound_change_identity, data)
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
+                modern_protocol = True
             elif event["event_type"] == "controller_bootstrap":
                 if (data.get("old_head") != bound_head
                         or data.get("new_head") != event["subject_head_sha"]
@@ -700,7 +1315,42 @@ class MilestoneController:
                     raise MilestoneFailure("milestone state identity recovery conflict")
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
-            elif event["event_type"] != "branch_transitioned" and "change_identity" in data:
+                modern_protocol = True
+            elif (event["event_type"] == "validation_completed"
+                  and data.get("evidence_binding_version") == 1):
+                equivalent_recovery = next((prior for prior in reversed(events[:index])
+                                            if prior["event_type"] == "identity_rebound"), None)
+                if (data.get("residue_provenance_sha256") != self._residue_digest(self._residue_from_events(events))
+                        or (data.get("change_identity") != data.get("governed_change_identity")
+                            and (equivalent_recovery is None
+                                 or equivalent_recovery["data"].get("recovery_kind") != "review_ready_checkpoint_artifacts"
+                                 or equivalent_recovery["data"].get("old_change_identity")
+                                 != data.get("governed_change_identity")))):
+                    raise MilestoneFailure("validation evidence binding conflicts with source identity")
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
+                modern_protocol = True
+            elif (event["event_type"] in {"mission_assessed", "mission_reviewed"}
+                  and "change_identity" in data):
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
+                modern_protocol = True
+            elif event["event_type"] == "identity_reconciled":
+                # This narrowly scoped, human-authorized legacy reconciliation
+                # carries fresh exact-HEAD canonical evidence. It advances the
+                # replayed source binding, while _validation_current still
+                # refuses to reuse older validation receipts across it.
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
+                if data.get("human_authorization") in {
+                        POST_MERGE_RECONCILIATION_AUTHORIZATION,
+                        POST_REPAIR_RECONCILIATION_AUTHORIZATION}:
+                    bound_branch = repository["branch"]
+                modern_protocol = True
+            elif event["event_type"] == "ci_observed" and data.get("ci_evidence_version") == 1:
+                modern_protocol = True
+            elif (not modern_protocol and event["event_type"] != "branch_transitioned"
+                  and "change_identity" in data):
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
                 if (event["event_type"] == "identity_reconciled"
@@ -708,7 +1358,7 @@ class MilestoneController:
                             POST_MERGE_RECONCILIATION_AUTHORIZATION,
                             POST_REPAIR_RECONCILIATION_AUTHORIZATION,
                         }):
-                    bound_branch = repository["branch"]
+                        bound_branch = repository["branch"]
         historical_repository = {
             "name_with_owner": repository["name_with_owner"], "branch": bound_branch,
             "base_sha": base_sha, "head_sha": bound_head,
@@ -743,7 +1393,8 @@ class MilestoneController:
                     or any(type(pointer[key]) is not str or SHA256.fullmatch(pointer[key]) is None
                            for key in ("state_sha256", "history_tail_sha256"))):
                 raise MilestoneFailure("milestone pointer is malformed")
-        events = self._read_events(milestone_id); repository = self._repository(events[0]["subject_head_sha"])
+        events = self._read_events(milestone_id)
+        repository = self._repository(events[0]["subject_head_sha"], self._residue_from_events(events))
         stored = self._materialized(milestone_id, events, repository)
         if used_current_pointer:
             pointer = _read_json(self.state_root / "current.json", 2048)
@@ -751,13 +1402,27 @@ class MilestoneController:
             if (pointer["state_sha256"] not in {_digest(stored), _digest(persisted)}
                     or pointer["history_tail_sha256"] != stored["history_tail"]["sha256"]):
                 raise MilestoneFailure("milestone pointer conflict")
+        latest_ci = next((event for event in reversed(events)
+                          if event["event_type"] == "ci_observed"), None)
+        ci_change_identity = (latest_ci["data"].get("governed_change_identity",
+                                                    latest_ci["data"].get("change_identity"))
+                              if latest_ci is not None else None)
         if (repository["branch"] != stored["repository"]["branch"]
                 or repository["head_sha"] != stored["repository"]["head_sha"]):
             conflict = self._project(events, repository)
+            if self._validation_current(events, repository) is None:
+                conflict["validation"] = {"evidence_sha256": None, "level": "none"}
+            if (conflict["ci"].get("head_sha") != repository["head_sha"]
+                    or ci_change_identity != repository["change_identity"]):
+                conflict["ci"] = {"head_sha": None, "status": "not_observed", "classification": "none"}
             conflict["status"] = "CONFLICT"; conflict["next"] = {"action": "recover_state", "human_boundary": True}
             return conflict
         if repository["change_identity"] != stored["repository"]["change_identity"]:
             partial = self._project(events, repository)
+            if self._validation_current(events, repository) is None:
+                partial["validation"] = {"evidence_sha256": None, "level": "none"}
+            if ci_change_identity != repository["change_identity"]:
+                partial["ci"] = {"head_sha": None, "status": "not_observed", "classification": "none"}
             partial["status"] = "WORKING"; partial["next"] = {"action": "run_affected_validation", "human_boundary": False}
             return self._apply_mission_gate(partial)
         return stored
@@ -771,7 +1436,7 @@ class MilestoneController:
         directory, state_path, history = self._paths(milestone_id)
         with self._locked(directory):
             events = self._read_events(milestone_id)
-            repository = self._repository(events[0]["subject_head_sha"])
+            repository = self._repository(events[0]["subject_head_sha"], self._residue_from_events(events))
             stored = self._materialized(milestone_id, events, repository)
             if expected_generation != stored["generation"]:
                 raise MilestoneFailure("milestone writer conflict")
@@ -837,7 +1502,7 @@ class MilestoneController:
             events = self._read_events(milestone_id); stored = _read_json(state_path); self._validate(stored)
             if expected_generation != stored["generation"]:
                 raise MilestoneFailure("milestone writer conflict")
-            repository = self._repository(stored["repository"]["base_sha"])
+            repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
             if any(event["event_type"] == "identity_reconciled"
                    and event["data"].get("new_head") == repository["head_sha"]
                    for event in events):
@@ -893,7 +1558,7 @@ class MilestoneController:
         directory, state_path, history = self._paths(milestone_id)
         with self._locked(directory):
             events = self._read_events(milestone_id)
-            repository = self._repository(events[0]["subject_head_sha"])
+            repository = self._repository(events[0]["subject_head_sha"], self._residue_from_events(events))
             stored = _read_json(state_path); self._validate(stored)
             tail = events[-1]
             transitions = [event for event in events if event["event_type"] == "branch_transitioned"]
@@ -933,7 +1598,10 @@ class MilestoneController:
 
     def rebind_committed_head(self, milestone_id: str, summary: str,
                               expected_generation: int, reviewed_head: str | None = None,
-                              validation_evidence: Path | None = None) -> dict[str, Any]:
+                              validation_evidence: Path | None = None,
+                              checkpoint_manifest_sha256: str | None = None,
+                              human_disposition: str | None = None,
+                              reviewer: str | None = None) -> dict[str, Any]:
         """Explicitly bind a committed modern milestone head without rewriting history."""
         if (MILESTONE.fullmatch(milestone_id) is None or not summary or len(summary) > 512
                 or type(expected_generation) is not int):
@@ -945,17 +1613,80 @@ class MilestoneController:
             if expected_generation != stored["generation"]:
                 raise MilestoneFailure("milestone writer conflict")
             try:
-                repository = self._repository(stored["repository"]["base_sha"])
+                repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
             except MilestoneFailure as exc:
                 raise MilestoneFailure("milestone head rebind is unauthorized") from exc
             historical = dict(stored["repository"])
             if _digest(stored) != _digest(self._project(events, historical)):
                 raise MilestoneFailure("milestone state identity recovery conflict")
-            status = self._run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], 1_048_576)
-            entries = [entry for entry in status.split(b"\0") if entry]
-            if any(len(entry) < 4 or entry[2:3] != b" " or entry[3:].decode("utf-8") != PROTECTED_RESIDUE
-                   for entry in entries):
-                raise MilestoneFailure("milestone head rebind requires a clean worktree")
+            recovery_args = (checkpoint_manifest_sha256, human_disposition, reviewer)
+            if any(value is not None for value in recovery_args) and not all(value is not None for value in recovery_args):
+                raise MilestoneFailure("checkpoint recovery requires manifest digest and human disposition")
+            self._require_clean_worktree("milestone head rebind")
+            if all(value is not None for value in recovery_args):
+                if (not isinstance(checkpoint_manifest_sha256, str)
+                        or SHA256.fullmatch(checkpoint_manifest_sha256) is None
+                        or not isinstance(human_disposition, str) or not human_disposition.strip()
+                        or len(human_disposition) > 240
+                        or any(ord(char) < 32 or ord(char) == 127 for char in human_disposition)
+                        or not isinstance(reviewer, str) or not reviewer.strip() or len(reviewer) > 80
+                        or any(ord(char) < 32 or ord(char) == 127 for char in reviewer)):
+                    raise MilestoneFailure("checkpoint recovery invocation is invalid")
+                if (stored["status"] != "REVIEW_READY"
+                        or stored["next"] != {"action": "request_merge", "human_boundary": True}
+                        or repository["branch"] != stored["repository"]["branch"]
+                        or repository["base_sha"] != stored["repository"]["base_sha"]
+                        or repository["head_sha"] == stored["repository"]["head_sha"]
+                        or not events or events[-1]["event_type"] != "checkpoint_artifacts_registered"
+                        or events[-1]["data"]["manifest_sha256"] != checkpoint_manifest_sha256):
+                    raise MilestoneFailure("checkpoint recovery is unauthorized or registration is stale")
+                registration = events[-1]
+                old_head = stored["repository"]["head_sha"]
+                data = {"recovery_kind": "review_ready_checkpoint_artifacts",
+                        "registration_event_sha256": registration["event_sha256"],
+                        "rebound_from_head": old_head, "new_head": repository["head_sha"],
+                        "old_change_identity": stored["repository"]["change_identity"],
+                        "change_identity": repository["change_identity"],
+                        "manifest_path": registration["data"]["manifest_path"],
+                        "manifest_sha256": checkpoint_manifest_sha256,
+                        "receipt_snapshot_sha256": registration["data"]["receipt_snapshot_sha256"],
+                        "human_disposition": human_disposition, "reviewer": reviewer,
+                        "expected_generation": expected_generation,
+                        "prior_history_tail_sha256": events[-1]["event_sha256"],
+                        "ancestry_proof": "prior_bound_head_is_ancestor_of_new_head",
+                        "base_sha": stored["repository"]["base_sha"],
+                        "branch": stored["repository"]["branch"],
+                        "resulting_state": {"status": "CI_PENDING", "next_action": "ingest_ci",
+                                            "ci_status": "not_observed", "ci_head_sha": None}}
+                event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                         "milestone_id": milestone_id, "sequence": len(events) + 1,
+                         "event_type": "identity_rebound", "prior_event_sha256": events[-1]["event_sha256"],
+                         "subject_head_sha": repository["head_sha"], "summary": summary,
+                         "data": data, "authority": dict(AUTHORITY)}
+                event["event_sha256"] = _digest(event); self._validate(event)
+                self._verify_checkpoint_recovery(events + [event], len(events), old_head,
+                                                 stored["repository"]["change_identity"], data)
+                if (len(events) >= self.policy["limits"]["max_events"]
+                        or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]):
+                    raise MilestoneFailure("checkpoint recovery event exceeded its bound")
+                # This final identity/worktree/history check is the linearization point.
+                current_events = self._read_events(milestone_id)
+                current_repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(current_events))
+                current_state = _read_json(state_path)
+                self._require_clean_worktree("checkpoint recovery")
+                if (len(current_events) != len(events)
+                        or current_events[-1]["event_sha256"] != events[-1]["event_sha256"]
+                        or _digest(current_state) != _digest(stored)
+                        or current_repository["branch"] != repository["branch"]
+                        or current_repository["base_sha"] != repository["base_sha"]
+                        or current_repository["head_sha"] != repository["head_sha"]
+                        or current_repository["change_identity"] != repository["change_identity"]):
+                    raise MilestoneFailure("checkpoint recovery repository identity changed during verification")
+                with history.open("ab") as stream:
+                    stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+                state = self._project(events + [event], current_repository)
+                self._atomic_json(state_path, state); self._write_pointer(state)
+                return self.load(milestone_id)
             if (stored["status"] != "CI_PENDING"
                     or stored["next"]["action"] != "ingest_ci"
                     or repository["branch"] != stored["repository"]["branch"]
@@ -1014,7 +1745,8 @@ class MilestoneController:
                               cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0:
                 raise MilestoneFailure("milestone head rebind is unauthorized")
             data = {"rebound_from_head": stored["repository"]["head_sha"],
-                    "change_identity": repository["change_identity"]}
+                    "change_identity": repository["change_identity"],
+                    "validation_invalidated": not identity_matches}
             event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
                      "milestone_id": milestone_id, "sequence": len(events) + 1,
                      "event_type": "identity_rebound", "prior_event_sha256": events[-1]["event_sha256"],
@@ -1051,7 +1783,7 @@ class MilestoneController:
                     or stored["next"]["action"] != "ingest_ci":
                 raise MilestoneFailure("controller bootstrap is unauthorized")
             try:
-                repository = self._repository(stored["repository"]["base_sha"])
+                repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
             except MilestoneFailure as exc:
                 raise MilestoneFailure("controller bootstrap is unauthorized") from exc
             if (repository["branch"] != f"feature/{BOOTSTRAP_MILESTONE}"
@@ -1110,7 +1842,7 @@ class MilestoneController:
     def checkpoint(self, milestone_id: str | None, event_type: str, summary: str, data: dict[str, Any] | None = None,
                    expected_generation: int | None = None) -> dict[str, Any]:
         state = self.load(milestone_id); milestone_id = state["milestone_id"]
-        if event_type not in {"mission_assessed", "mission_reviewed", "checkpointed", "validation_completed", "ci_observed", "repair_started", "repair_completed", "blocked", "completed"} or not summary or len(summary) > 512:
+        if event_type not in {"mission_assessed", "mission_reviewed", "checkpointed", "repair_started", "repair_completed", "blocked", "completed"} or not summary or len(summary) > 512:
             raise MilestoneFailure("milestone checkpoint is invalid")
         if (state["mission_gate"]["outcome"] != "PROCEED"
                 and event_type in {"repair_started", "repair_completed", "completed"}):
@@ -1132,7 +1864,15 @@ class MilestoneController:
         with self._locked(directory):
             events = self._read_events(milestone_id)
             if len(events) - 1 != state["generation"]: raise MilestoneFailure("milestone writer conflict")
-            repository = self._repository(events[0]["subject_head_sha"])
+            repository = self._repository(events[0]["subject_head_sha"], self._residue_from_events(events))
+            if state["status"] == "CONFLICT" or repository["head_sha"] != state["repository"]["head_sha"]:
+                raise MilestoneFailure("milestone source identity conflict")
+            stored = _read_json(state_path)
+            if expected_generation is not None and stored["generation"] != expected_generation:
+                raise MilestoneFailure("milestone writer conflict")
+            if (event_type not in {"mission_assessed", "mission_reviewed"}
+                    and repository["change_identity"] != stored["repository"]["change_identity"]):
+                raise MilestoneFailure("governed source identity requires validation")
             if event_type in {"mission_assessed", "mission_reviewed"} and repository != state["repository"]:
                 raise MilestoneFailure("mission checkpoint repository identity changed")
             data = {**data, "change_identity": repository["change_identity"]}
@@ -1148,6 +1888,178 @@ class MilestoneController:
             self._atomic_json(state_path, state); self._write_pointer(state)
             return state
 
+    def _validation_current(self, events: list[dict[str, Any]], repository: dict[str, str],
+                            map_sha256: str | None = None) -> dict[str, Any] | None:
+        index = next((i for i in range(len(events) - 1, 0, -1)
+                      if events[i]["event_type"] == "validation_completed"), None)
+        if index is None:
+            return None
+        event = events[index]
+        data = event["data"]
+        if (data.get("evidence_binding_version") != 1
+                or data.get("residue_provenance_sha256") != self._residue_digest(self._residue_from_events(events))
+                or data.get("controller_policy_sha256") != self.policy_digest
+                or (map_sha256 is not None and data.get("validation_map_sha256") != map_sha256)):
+            return None
+        identity = data["governed_change_identity"]
+        equivalent = identity == repository["change_identity"]
+        if not equivalent:
+            prior_recovery = next((later for later in reversed(events[:index])
+                                   if later["event_type"] == "identity_rebound"), None)
+            equivalent = bool(prior_recovery
+                              and prior_recovery["data"].get("recovery_kind") == "review_ready_checkpoint_artifacts"
+                              and prior_recovery["data"].get("old_change_identity") == identity)
+        for later in events[index + 1:]:
+            if later["event_type"] == "validation_invalidated":
+                return None
+            if later["event_type"] == "identity_rebound":
+                rebound = later["data"]
+                if (rebound.get("recovery_kind") == "review_ready_checkpoint_artifacts"
+                        and rebound.get("old_change_identity") == identity
+                        and rebound.get("residue_provenance_sha256", data["residue_provenance_sha256"])
+                        == data["residue_provenance_sha256"]
+                        and rebound.get("change_identity") == repository["change_identity"]):
+                    equivalent = True
+                elif (rebound.get("change_identity") == identity
+                      and identity == repository["change_identity"]):
+                    equivalent = True
+                else:
+                    return None
+            elif later["event_type"] in {"controller_bootstrap", "identity_reconciled"}:
+                if later["data"].get("change_identity") != identity:
+                    return None
+        if not equivalent:
+            return None
+        return data
+
+    def _append_validation(self, milestone_id: str, summary: str, expected_generation: int,
+                           repository_snapshot: dict[str, str], evidence: dict[str, Any],
+                           evidence_sha256: str, level: str) -> dict[str, Any]:
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id)
+            stored = _read_json(state_path); self._validate(stored)
+            if expected_generation != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
+            if (repository != repository_snapshot or repository["branch"] != stored["repository"]["branch"]
+                    or repository["base_sha"] != stored["repository"]["base_sha"]
+                    or stored["status"] == "CONFLICT"):
+                raise MilestoneFailure("validation source identity changed during validation")
+            residue_digest = self._residue_digest(self._residue_from_events(events))
+            binding = evidence.get("milestone_binding")
+            if (type(binding) is not dict or binding.get("version") != 1
+                    or binding.get("governed_change_identity") != repository["change_identity"]
+                    or binding.get("residue_provenance_sha256") != residue_digest
+                    or evidence.get("repository") != {
+                        "name_with_owner": repository["name_with_owner"], "branch": repository["branch"],
+                        "base_sha": repository["base_sha"], "head_sha": evidence.get("repository", {}).get("head_sha")}
+                    or evidence.get("repository", {}).get("head_sha") != repository["head_sha"]
+                    or evidence.get("passed") is not True or evidence.get("plan", {}).get("executed_level") != level
+                    or not SHA256.fullmatch(evidence_sha256)):
+                raise MilestoneFailure("validation evidence does not match governed source identity")
+            data = {"validation_level": level, "evidence_sha256": evidence_sha256,
+                    "change_identity": repository["change_identity"],
+                    "evidence_binding_version": 1,
+                    "governed_change_identity": repository["change_identity"],
+                    "residue_provenance_sha256": residue_digest,
+                    "validation_subject_head_sha": evidence["repository"]["head_sha"],
+                    "validation_map_sha256": evidence["map"]["sha256"],
+                    "controller_policy_sha256": self.policy_digest}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": milestone_id, "sequence": len(events) + 1,
+                     "event_type": "validation_completed", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"], "summary": summary,
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event); self._validate(event)
+            if len(events) >= self.policy["limits"]["max_events"] or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]:
+                raise MilestoneFailure("validation evidence event exceeded its bound")
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            state = self._project(events + [event], repository)
+            self._atomic_json(state_path, state); self._write_pointer(state)
+        return self.load(milestone_id)
+
+    def _append_legacy_validation_quarantine(self, state: dict[str, Any],
+                                             validation_event: dict[str, Any]) -> dict[str, Any]:
+        directory, state_path, history = self._paths(state["milestone_id"])
+        with self._locked(directory):
+            events = self._read_events(state["milestone_id"])
+            stored = _read_json(state_path); self._validate(stored)
+            repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
+            if (state["generation"] != stored["generation"]
+                    or _digest(repository) != _digest(state["repository"])
+                    or stored["status"] == "CONFLICT"
+                    or not events or events[-1]["event_sha256"] != state["history_tail"]["sha256"]
+                    or validation_event not in events
+                    or validation_event["data"].get("evidence_binding_version") == 1):
+                raise MilestoneFailure("legacy validation quarantine is stale")
+            if any(event["event_type"] == "validation_invalidated"
+                   and event["data"].get("recovered_event_sha256") == validation_event["event_sha256"]
+                   for event in events):
+                return self.load(state["milestone_id"])
+            data = {"legacy_quarantine": True,
+                    "recovered_event_sha256": validation_event["event_sha256"],
+                    "prior_history_tail_sha256": events[-1]["event_sha256"],
+                    "change_identity": repository["change_identity"],
+                    "residue_provenance_sha256": self._residue_digest(self._residue_from_events(events)),
+                    "expected_generation": stored["generation"]}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": state["milestone_id"], "sequence": len(events) + 1,
+                     "event_type": "validation_invalidated", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"],
+                     "summary": "Unbound legacy validation evidence quarantined before current validation.",
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event); self._validate(event)
+            current_events = self._read_events(state["milestone_id"])
+            current_state = _read_json(state_path)
+            current_repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(current_events))
+            if (len(current_events) != len(events)
+                    or current_events[-1]["event_sha256"] != events[-1]["event_sha256"]
+                    or _digest(current_state) != _digest(stored)
+                    or current_repository != repository):
+                raise MilestoneFailure("legacy validation quarantine changed during verification")
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            projected = self._project(events + [event], repository)
+            self._atomic_json(state_path, projected); self._write_pointer(projected)
+        return self.load(state["milestone_id"])
+
+    def _append_validation_reuse(self, milestone_id: str, expected_generation: int,
+                                 repository_snapshot: dict[str, str], binding: dict[str, Any]) -> dict[str, Any]:
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id); stored = _read_json(state_path)
+            if expected_generation != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
+            impact = json.loads(self._run(["scripts/vss-agent", "impact", "--base",
+                                           stored["repository"]["base_sha"]], 65536))
+            current = self._validation_current(events, repository, impact.get("map_sha256"))
+            if (repository != repository_snapshot or current != binding
+                    or stored["status"] == "CONFLICT"):
+                raise MilestoneFailure("validation receipt is stale")
+            data = {"validation_level": binding["validation_level"],
+                    "evidence_sha256": binding["evidence_sha256"],
+                    "change_identity": repository["change_identity"],
+                    "evidence_binding_version": 1,
+                    "governed_change_identity": binding["governed_change_identity"],
+                    "residue_provenance_sha256": binding["residue_provenance_sha256"],
+                    "validation_subject_head_sha": binding["validation_subject_head_sha"],
+                    "validation_map_sha256": binding["validation_map_sha256"],
+                    "controller_policy_sha256": binding["controller_policy_sha256"]}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": milestone_id, "sequence": len(events) + 1,
+                     "event_type": "validation_completed", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"], "summary": "canonical validation evidence reused.",
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event); self._validate(event)
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            state = self._project(events + [event], repository)
+            self._atomic_json(state_path, state); self._write_pointer(state)
+        return self.load(milestone_id)
+
     def validate(self, tier: str, milestone_id: str | None = None) -> dict[str, Any]:
         state = self.load(milestone_id)
         if tier not in {"affected", "subsystem", "canonical"}: raise MilestoneFailure("validation tier is invalid")
@@ -1157,62 +2069,191 @@ class MilestoneController:
         impact = json.loads(self._run(["scripts/vss-agent", "impact", "--base", state["repository"]["base_sha"]], 65536))
         required = impact["minimum_level"]
         level = requested if LEVELS[requested] >= LEVELS[required] else required
-        if (state["status"] not in {"WORKING", "LOCAL_VALIDATION_REQUIRED"}
-                and LEVELS.get(state["validation"]["level"], -1) >= LEVELS[level]
-                and state["validation"]["evidence_sha256"]):
+        events = self._read_events(state["milestone_id"])
+        last_validation = next(((index, event) for index, event in reversed(list(enumerate(events)))
+                                if event["event_type"] == "validation_completed"), None)
+        if last_validation is not None:
+            validation_index, validation_event = last_validation
+            if (validation_event["data"].get("evidence_binding_version") != 1
+                    and not any(event["event_type"] == "validation_invalidated"
+                                and event["data"].get("recovered_event_sha256") == validation_event["event_sha256"]
+                                for event in events[validation_index + 1:])):
+                state = self._append_legacy_validation_quarantine(state, validation_event)
+                events = self._read_events(state["milestone_id"])
+        prior_binding = self._validation_current(events, state["repository"], impact.get("map_sha256"))
+        if (prior_binding is not None
+                and LEVELS.get(prior_binding.get("validation_level", "none"), -1) >= LEVELS[level]
+                and prior_binding.get("evidence_sha256")):
             if tier == "canonical" and state["next"]["action"] == "run_canonical_validation":
-                self.checkpoint(
-                    state["milestone_id"], "validation_completed",
-                    "canonical validation evidence reused.",
-                    {"validation_level": state["validation"]["level"],
-                     "evidence_sha256": state["validation"]["evidence_sha256"]},
-                    state["generation"])
-            return {"status": "reused", "level": state["validation"]["level"], "evidence_sha256": state["validation"]["evidence_sha256"]}
+                self._append_validation_reuse(state["milestone_id"], state["generation"],
+                                               state["repository"], prior_binding)
+            return {"status": "reused", "level": prior_binding["validation_level"],
+                    "evidence_sha256": prior_binding["evidence_sha256"]}
         evidence = Path(tempfile.gettempdir()) / f"vss-dev-{state['milestone_id']}-evidence.json"
-        self._run(["scripts/vss-agent", "validate-change", "--base", state["repository"]["base_sha"], "--level", level, "--output", str(evidence)], 65536)
+        residue_digest = self._residue_digest(self._residue_from_events(events))
+        with tempfile.TemporaryDirectory(prefix="vss-milestone-baseline-") as directory:
+            baseline = Path(directory) / "base-secrets.baseline"
+            try:
+                baseline.write_bytes(self._run(["git", "show", f"{state['repository']['base_sha']}:{BASELINE_RESIDUE}"], 4 * 1024 * 1024))
+            except MilestoneFailure as exc:
+                raise MilestoneFailure("bound base-HEAD secrets baseline is unavailable") from exc
+            environment = os.environ.copy()
+            environment["VSS_VALIDATION_SECRETS_BASELINE"] = str(baseline)
+            environment["VSS_VALIDATION_BASE_SHA"] = state["repository"]["base_sha"]
+            command = ["scripts/vss-agent", "validate-change", "--base", state["repository"]["base_sha"],
+                       "--level", level, "--output", str(evidence),
+                       "--governed-change-identity", state["repository"]["change_identity"],
+                       "--residue-provenance-sha256", residue_digest]
+            self._run(command, 65536, environment)
         proof = _read_json(evidence, 16384); evidence_digest = _digest(proof)
-        self.checkpoint(state["milestone_id"], "validation_completed", f"{tier} validation passed.", {"validation_level": level, "evidence_sha256": evidence_digest}, state["generation"])
-        return {"status": "passed", "level": level, "evidence_sha256": evidence_digest}
+        result = self._append_validation(state["milestone_id"], f"{tier} validation passed.",
+                                         state["generation"], state["repository"], proof,
+                                         evidence_digest, level)
+        return {"status": "passed", "level": level, "evidence_sha256": evidence_digest,
+                "milestone_status": result["status"]}
 
     def ingest_ci(self, document: dict[str, Any], milestone_id: str | None = None) -> dict[str, Any]:
-        state = self.load(milestone_id)
-        if state["status"] in {"CANONICAL_VALIDATION_REQUIRED", "REVIEW_READY", "COMPLETE"}:
-            raise MilestoneFailure("CI observation is not required")
-        if set(document) != {"head_sha", "checks"} or type(document["checks"]) is not list or len(document["checks"]) > 64:
-            raise MilestoneFailure("CI observation is malformed")
-        head = document["head_sha"]
-        if type(head) is not str or SHA1.fullmatch(head) is None: raise MilestoneFailure("CI observation is malformed")
-        if head != state["repository"]["head_sha"]:
-            result = {"status": "stale", "classification": "none", "head_sha": head}
+        raise MilestoneFailure("caller-supplied CI observations are not admissible; use API refresh")
+
+    def _ci_api(self, endpoint: str) -> dict[str, Any]:
+        return _read_external_json(self._run(["gh", "api", endpoint], 1_048_576))
+
+    def _fetch_ci_observation(self, state: dict[str, Any]) -> dict[str, Any]:
+        repository = state["repository"]
+        head = repository["head_sha"]
+        local_blob = self._line(["git", "rev-parse", f"{head}:{CI_WORKFLOW_PATH}"])
+        if local_blob != CI_WORKFLOW_BLOB:
+            raise MilestoneFailure("CI workflow differs from the admitted workflow identity")
+        workflow = self._ci_api(f"repos/{repository['name_with_owner']}/actions/workflows/ci.yml")
+        workflow_id = workflow.get("id")
+        if (type(workflow_id) is not int or workflow_id < 1
+                or workflow.get("path") != CI_WORKFLOW_PATH or workflow.get("state") != "active"):
+            raise MilestoneFailure("GitHub CI workflow identity is unavailable or ambiguous")
+        runs_value = self._ci_api(
+            f"repos/{repository['name_with_owner']}/actions/workflows/{workflow_id}/runs?head_sha={head}"
+            f"&branch={repository['branch']}&event=pull_request&per_page=100")
+        runs = runs_value.get("workflow_runs")
+        if (type(runs) is not list or type(runs_value.get("total_count")) is not int
+                or runs_value["total_count"] != len(runs)):
+            raise MilestoneFailure("GitHub CI workflow run inventory is malformed or incomplete")
+        matching = [run for run in runs if type(run) is dict and run.get("head_sha") == head
+                    and run.get("workflow_id") == workflow_id
+                    and run.get("head_branch") == repository["branch"]
+                    and run.get("event") == "pull_request"]
+        if len(matching) != 1:
+            raise MilestoneFailure("GitHub CI run for exact HEAD is missing or ambiguous")
+        run = matching[0]
+        run_id = run.get("id"); attempt = run.get("run_attempt")
+        if (type(run_id) is not int or run_id < 1 or type(attempt) is not int or attempt < 1
+                or run.get("path") != CI_WORKFLOW_PATH):
+            raise MilestoneFailure("GitHub CI run identity is malformed")
+        jobs_value = self._ci_api(
+            f"repos/{repository['name_with_owner']}/actions/runs/{run_id}/jobs?filter=latest&per_page=100")
+        jobs = jobs_value.get("jobs")
+        if type(jobs) is not list or jobs_value.get("total_count") != len(jobs):
+            raise MilestoneFailure("GitHub CI job inventory is incomplete")
+        normalized_jobs = []
+        for job in jobs:
+            if type(job) is not dict:
+                raise MilestoneFailure("GitHub CI job is malformed")
+            normalized_jobs.append({"name": job.get("name"), "status": job.get("status"),
+                                    "conclusion": job.get("conclusion") or "", "head_sha": job.get("head_sha")})
+        return {"repository": repository["name_with_owner"], "head_sha": head,
+                "workflow_id": workflow_id, "workflow_path": CI_WORKFLOW_PATH,
+                "workflow_blob": local_blob, "run_id": run_id, "run_attempt": attempt,
+                "run_status": run.get("status"), "run_conclusion": run.get("conclusion") or "",
+                "jobs": normalized_jobs}
+
+    def _append_ci_observation(self, state: dict[str, Any], observation: dict[str, Any]) -> dict[str, Any]:
+        repository_snapshot = state["repository"]
+        evidence = {key: observation[key] for key in (
+            "repository", "head_sha", "workflow_id", "workflow_path", "workflow_blob",
+            "run_id", "run_attempt", "run_status", "run_conclusion", "jobs")}
+        if (evidence["repository"] != repository_snapshot["name_with_owner"]
+                or evidence["head_sha"] != repository_snapshot["head_sha"]
+                or evidence["workflow_path"] != CI_WORKFLOW_PATH
+                or evidence["workflow_blob"] != CI_WORKFLOW_BLOB
+                or type(evidence["workflow_id"]) is not int or evidence["workflow_id"] < 1
+                or type(evidence["run_id"]) is not int or evidence["run_id"] < 1
+                or type(evidence["run_attempt"]) is not int or evidence["run_attempt"] < 1
+                or evidence["run_status"] not in {"completed", "in_progress", "queued", "requested"}
+                or evidence["run_conclusion"] not in {"success", "failure", "cancelled", "timed_out", "action_required", ""}):
+            raise MilestoneFailure("CI observation is not for the exact admitted source")
+        jobs = evidence["jobs"]
+        if (type(jobs) is not list or len(jobs) != len(CI_REQUIRED_CHECKS)
+                or any(type(item) is not dict or set(item) != {"name", "status", "conclusion", "head_sha"}
+                       for item in jobs)
+                or any(type(item["name"]) is not str for item in jobs)
+                or sorted(item["name"] for item in jobs) != sorted(CI_REQUIRED_CHECKS)
+                or len({item["name"] for item in jobs}) != len(CI_REQUIRED_CHECKS)
+                or any(item["head_sha"] != repository_snapshot["head_sha"] for item in jobs)):
+            raise MilestoneFailure("CI check set is empty, partial, duplicate, or bound to another SHA")
+        pending = evidence["run_status"] != "completed" or any(item["status"] != "completed" for item in jobs)
+        passed = (not pending and evidence["run_conclusion"] == "success"
+                  and all(item["conclusion"] == "success" for item in jobs))
+        if pending:
+            ci_status = "pending"
+        elif passed:
+            ci_status = "passed"
         else:
-            text: list[str] = []; pending = False; failed = False
-            for check in document["checks"]:
-                if type(check) is not dict or set(check) != {"name", "status", "conclusion", "summary"}:
-                    raise MilestoneFailure("CI observation is malformed")
-                if not all(type(check[key]) is str and len(check[key]) <= 512 for key in check): raise MilestoneFailure("CI observation is malformed")
-                pending = pending or check["status"] != "completed"; failed = failed or check["conclusion"] not in {"success", "skipped", "neutral"}
-                text.append((check["name"] + " " + check["summary"]).lower())
-            joined = " ".join(text)
-            terms = self.policy["classification"]
-            def contains(name: str) -> bool: return any(term in joined for term in terms[name])
-            if pending: result = {"status": "pending", "classification": "none", "head_sha": head}
-            elif not failed: result = {"status": "passed", "classification": "none", "head_sha": head}
-            elif contains("security_terms"): result = {"status": "failed", "classification": "security", "head_sha": head}
-            elif contains("infrastructure_terms"): result = {"status": "failed", "classification": "infrastructure", "head_sha": head}
-            elif contains("fixture_terms"): result = {"status": "failed", "classification": "fixture", "head_sha": head}
-            elif contains("flaky_terms"): result = {"status": "failed", "classification": "flaky/unknown", "head_sha": head}
-            else: result = {"status": "failed", "classification": "code", "head_sha": head}
-        data = {"ci_status": result["status"], "ci_classification": result["classification"], "ci_head_sha": result["head_sha"]}
-        self.checkpoint(state["milestone_id"], "ci_observed", "CI observation ingested.", data, state["generation"])
-        return result
+            ci_status = "failed"
+        failed_names = [item["name"] for item in jobs if item["conclusion"] not in {"success", ""}]
+        classification = "none"
+        if ci_status == "failed":
+            classification = "security" if "Scan for secrets" in failed_names else "code"
+        evidence_digest = _digest(evidence)
+        data = {"ci_status": ci_status, "ci_classification": classification,
+                "ci_head_sha": repository_snapshot["head_sha"], "ci_evidence_version": 1,
+                "governed_change_identity": repository_snapshot["change_identity"],
+                "residue_provenance_sha256": self._residue_digest(
+                    self._residue_from_events(self._read_events(state["milestone_id"]))),
+                "source_head_sha": repository_snapshot["head_sha"],
+                "ci_evidence": {"head_sha": evidence["head_sha"], "workflow_path": evidence["workflow_path"],
+                                "repository": evidence["repository"], "workflow_id": evidence["workflow_id"],
+                                "workflow_blob": evidence["workflow_blob"],
+                                "inventory_sha256": CI_CHECK_INVENTORY_SHA256,
+                                "run_id": evidence["run_id"], "run_attempt": evidence["run_attempt"],
+                                "run_status": evidence["run_status"], "run_conclusion": evidence["run_conclusion"],
+                                "jobs": evidence["jobs"], "observation_sha256": evidence_digest}}
+        directory, state_path, history = self._paths(state["milestone_id"])
+        with self._locked(directory):
+            events = self._read_events(state["milestone_id"])
+            stored = _read_json(state_path); self._validate(stored)
+            if state["generation"] != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            self._require_clean_worktree("CI observation")
+            repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
+            if (stored["status"] != "CI_PENDING" or stored["next"].get("action") != "ingest_ci"
+                    or repository != repository_snapshot
+                    or repository["head_sha"] != evidence["head_sha"]):
+                raise MilestoneFailure("CI observation source identity or state changed")
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": state["milestone_id"], "sequence": len(events) + 1,
+                     "event_type": "ci_observed", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"], "summary": "Exact-HEAD CI API observation recorded.",
+                     "data": {**data, "change_identity": repository["change_identity"]},
+                     "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event); self._validate(event)
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            projected = self._project(events + [event], repository)
+            self._atomic_json(state_path, projected); self._write_pointer(projected)
+        return {"status": ci_status, "classification": classification, "head_sha": repository_snapshot["head_sha"],
+                "observation_sha256": evidence_digest}
 
     def ci_refresh(self, milestone_id: str | None = None) -> dict[str, Any]:
-        state = self.load(milestone_id); repo = state["repository"]["name_with_owner"]; head = state["repository"]["head_sha"]
-        raw = self._run(["gh", "api", f"repos/{repo}/commits/{head}/check-runs"], 1_048_576)
-        value = _read_external_json(raw)
-        checks = [{"name": item.get("name", ""), "status": item.get("status", ""), "conclusion": item.get("conclusion") or "",
-                   "summary": ((item.get("output") or {}).get("summary") or "")[:512]} for item in value.get("check_runs", [])]
-        return self.ingest_ci({"head_sha": head, "checks": checks}, state["milestone_id"])
+        state = self.load(milestone_id)
+        if state["status"] == "CONFLICT":
+            raise MilestoneFailure("CI cannot reconcile a source identity conflict")
+        if state["status"] != "CI_PENDING" or state["next"].get("action") != "ingest_ci":
+            raise MilestoneFailure("CI observation is not legal in the current milestone state")
+        self._require_clean_worktree("CI observation")
+        current = self._repository(state["repository"]["base_sha"],
+                                   self._residue_from_events(self._read_events(state["milestone_id"])))
+        if current != state["repository"]:
+            raise MilestoneFailure("CI observation requires exact bound HEAD and change identity")
+        observation = self._fetch_ci_observation(state)
+        return self._append_ci_observation(state, observation)
 
     def analyze(self, milestone_id: str | None = None) -> dict[str, Any]:
         """Derive bounded, advisory findings from the existing milestone history."""

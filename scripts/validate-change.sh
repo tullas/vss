@@ -45,7 +45,12 @@ validate_changed_secrets() {
         local temporary_baseline
         temporary_baseline=$(mktemp)
         trap 'rm -f "${temporary_baseline:-}"' RETURN
-        cp .secrets.baseline "$temporary_baseline"
+        local baseline_source=${VSS_VALIDATION_SECRETS_BASELINE:-.secrets.baseline}
+        if [[ ! -f $baseline_source || -L $baseline_source ]]; then
+            printf 'Configured validation secrets baseline is unavailable or unsupported\n' >&2
+            return 1
+        fi
+        cp "$baseline_source" "$temporary_baseline"
         "${scanner[@]}" --baseline "$temporary_baseline" "${changed_files[@]}"
     fi
 }

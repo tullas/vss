@@ -400,9 +400,18 @@ def change_identity(base: str) -> str:
 
 
 def validate_evidence(value: Any) -> dict[str, Any]:
-    if type(value) is not dict or set(value) - {"schema_version", "protocol", "repository", "map", "change_identity", "plan", "results", "passed", "authority", "telemetry"}:
+    allowed = {"schema_version", "protocol", "repository", "map", "change_identity", "plan", "results", "passed", "authority", "telemetry", "milestone_binding"}
+    required = allowed - {"telemetry", "milestone_binding"}
+    if type(value) is not dict or set(value) - allowed or not required.issubset(value):
         fail("validation evidence is malformed")
-    root = exact_keys({key: value[key] for key in value if key != "telemetry"}, {"schema_version", "protocol", "repository", "map", "change_identity", "plan", "results", "passed", "authority"}, "validation evidence")
+    root = {key: value[key] for key in value if key != "telemetry"}
+    if "milestone_binding" in root:
+        binding = exact_keys(root["milestone_binding"], {"version", "governed_change_identity", "residue_provenance_sha256"}, "milestone validation binding")
+        if (binding["version"] != 1 or type(binding["governed_change_identity"]) is not str
+                or SHA256.fullmatch(binding["governed_change_identity"]) is None
+                or type(binding["residue_provenance_sha256"]) is not str
+                or SHA256.fullmatch(binding["residue_provenance_sha256"]) is None):
+            fail("milestone validation binding is invalid")
     if root["schema_version"] != "1" or root["protocol"] != "vss.agent-validation-evidence" or root["passed"] is not True:
         fail("validation evidence identity is invalid")
     repository = exact_keys(root["repository"], {"name_with_owner", "branch", "base_sha", "head_sha"}, "evidence repository")
@@ -463,7 +472,18 @@ def validate_evidence(value: Any) -> dict[str, Any]:
     return root
 
 
-def run_validation(base: str, selected_level: str, output: str | None) -> None:
+def run_validation(base: str, selected_level: str, output: str | None,
+                   governed_change_identity: str | None = None,
+                   residue_provenance_sha256: str | None = None) -> None:
+    if (governed_change_identity is None) != (residue_provenance_sha256 is None):
+        fail("milestone validation binding is incomplete")
+    milestone_binding = None
+    if governed_change_identity is not None:
+        if (SHA256.fullmatch(governed_change_identity) is None
+                or SHA256.fullmatch(residue_provenance_sha256 or "") is None):
+            fail("milestone validation binding is invalid")
+        milestone_binding = {"version": 1, "governed_change_identity": governed_change_identity,
+                             "residue_provenance_sha256": residue_provenance_sha256}
     mapping, map_digest = harness_map()
     plan = impact_plan(base, mapping)
     if LEVELS[selected_level] < LEVELS[plan["minimum_level"]]:
@@ -515,6 +535,8 @@ def run_validation(base: str, selected_level: str, output: str | None) -> None:
                        "peak_rss_platform": platform.system().lower()[:32],
                        "profile_timings_ms": profile_timings},
     }
+    if milestone_binding is not None:
+        evidence["milestone_binding"] = milestone_binding
     validate_evidence(evidence)
     encoded = canonical(evidence).decode("utf-8") + "\n"
     if output is None:
@@ -753,6 +775,8 @@ def parser() -> argparse.ArgumentParser:
     validation_parser.add_argument("--base", required=True)
     validation_parser.add_argument("--level", required=True, choices=sorted(LEVELS))
     validation_parser.add_argument("--output")
+    validation_parser.add_argument("--governed-change-identity")
+    validation_parser.add_argument("--residue-provenance-sha256")
     evidence_parser = commands.add_parser("evidence")
     evidence_parser.add_argument("--input", required=True)
     evidence_parser.add_argument("--require-current-change", action="store_true")
@@ -815,7 +839,8 @@ def main(arguments: list[str] | None = None) -> int:
         print(json.dumps({"schema_version": "2", "map_sha256": digest, **plan}, sort_keys=True, separators=(",", ":")))
         return 0
     if args.command == "validate-change":
-        run_validation(args.base, args.level, args.output)
+        run_validation(args.base, args.level, args.output, args.governed_change_identity,
+                       args.residue_provenance_sha256)
         return 0
     if args.command == "evidence":
         try:

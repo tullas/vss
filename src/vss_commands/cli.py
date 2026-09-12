@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import stat
@@ -94,6 +95,16 @@ def _parser() -> argparse.ArgumentParser:
     milestone_rebind.add_argument("--expected-generation", required=True, type=int)
     milestone_rebind.add_argument("--reviewed-head")
     milestone_rebind.add_argument("--validation-evidence", type=Path)
+    milestone_rebind.add_argument("--checkpoint-manifest-sha256")
+    milestone_rebind.add_argument("--human-disposition")
+    milestone_rebind.add_argument("--reviewer")
+    milestone_checkpoint_artifacts = milestone_actions.add_parser("register-checkpoint-artifacts")
+    milestone_checkpoint_artifacts.add_argument("--milestone-id", required=True)
+    milestone_checkpoint_artifacts.add_argument("--input", type=Path, required=True)
+    milestone_checkpoint_artifacts.add_argument("--summary", required=True)
+    milestone_checkpoint_artifacts.add_argument("--expected-generation", required=True, type=int)
+    milestone_checkpoint_artifacts.add_argument("--human-disposition", required=True)
+    milestone_checkpoint_artifacts.add_argument("--reviewer", required=True)
     milestone_reconcile = milestone_actions.add_parser("reconcile-source-identity")
     milestone_reconcile.add_argument("--milestone-id", required=True)
     milestone_reconcile.add_argument("--summary", required=True)
@@ -452,7 +463,16 @@ def main(argv: list[str] | None = None) -> int:
             elif args.milestone_action == "rebind-committed-head":
                 value = controller.rebind_committed_head(
                     args.milestone_id, args.summary, args.expected_generation,
-                    args.reviewed_head, args.validation_evidence)
+                    args.reviewed_head, args.validation_evidence,
+                    args.checkpoint_manifest_sha256, args.human_disposition, args.reviewer)
+            elif args.milestone_action == "register-checkpoint-artifacts":
+                state, manifest = controller.register_checkpoint_artifacts(
+                    args.milestone_id, args.input, args.summary, args.expected_generation,
+                    args.human_disposition, args.reviewer)
+                manifest_raw = json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                                           ensure_ascii=False).encode("utf-8")
+                value = {"state": state, "manifest": manifest,
+                         "manifest_sha256": hashlib.sha256(manifest_raw).hexdigest()}
             elif args.milestone_action == "reconcile-source-identity":
                 value = controller.reconcile_source_identity(
                     args.milestone_id, args.summary, args.reason, args.authorization,

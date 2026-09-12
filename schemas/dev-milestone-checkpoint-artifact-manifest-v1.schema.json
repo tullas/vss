@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/dev-milestone-checkpoint-artifact-manifest-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol", "milestone_id", "issue", "repository", "artifacts", "receipt_snapshot_sha256", "receipts"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "protocol": {"const": "vss.dev-milestone-checkpoint-artifact-manifest"},
+    "milestone_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "issue": {"type": "integer", "minimum": 1},
+    "repository": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name_with_owner", "branch", "base_sha", "head_sha", "change_identity"],
+      "properties": {
+        "name_with_owner": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"},
+        "branch": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$"},
+        "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "change_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "artifacts": {
+      "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["path", "checkpoint_type", "mode", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^docs/reviews/[a-z][a-z0-9-]{0,63}-checkpoint-artifacts/[0-9a-f]{64}\\.json$"},
+          "checkpoint_type": {"enum": ["design", "review"]},
+          "mode": {"const": "100644"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "receipt_snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "receipts": {
+      "type": "array", "minItems": 1, "maxItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["event_sha256", "assessment_sha256", "mechanism", "disposition", "change_identity", "evidence"],
+        "properties": {
+          "event_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "assessment_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "mechanism": {"enum": ["strategic", "constitutional", "unknown_unknown"]},
+          "disposition": {"enum": ["CONTINUE", "CONTINUE_WITH_GUARDRAIL", "ACCEPT"]},
+          "change_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "evidence": {
+            "type": "array", "minItems": 1, "maxItems": 1,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["path", "blob_oid", "sha256"],
+              "properties": {
+                "path": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^[^\\x00-\\x1f\\x7f]+$"},
+                "blob_oid": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
