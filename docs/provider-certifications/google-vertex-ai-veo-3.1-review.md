@@ -22,18 +22,23 @@ repair is part of this record.
 | Output media | `video/mp4` | CERTIFIED |
 | Audio | Provider supports `generateAudio` boolean; VSS sends `false`; successful historical output has no audio stream | CERTIFIED for VSS no-audio profile |
 | Authentication mechanism | OAuth 2.0 bearer access token; API enabled and project authorization required | CERTIFIED as contract |
-| Current principal/project/API/IAM readiness | Tokeninfo returns `invalid_token` / `Invalid Value`; project, service, IAM policy, `testIamPermissions`, and quota reads all return HTTP 401 | UNKNOWN; token expiry versus revocation/other invalidity is not distinguished |
-| Current effective quota | Historical evidence records fixed quota 50 requests/minute for the exact model/region; refresh attempt returned HTTP 401 at 2026-09-12T00:54:01Z | UNKNOWN; failed refresh is timestamped, not a fresh quota value |
+| Current principal/project/API/IAM readiness | OAuth userinfo identified `t.ullas@gmail.com`; project `vss-film-poc` is active; `aiplatform.googleapis.com` is enabled; `testIamPermissions` returned `aiplatform.endpoints.predict`, `serviceusage.services.use`, and `serviceusage.quotas.get` | CERTIFIED for technical readiness; checked 2026-09-12T01:09:04Z–01:10:10Z |
+| Current effective quota | Service Usage reports 50 requests/minute for `veo-3.1-generate-001` in `us-central1` | CERTIFIED; refreshed 2026-09-12T01:10:38Z–01:10:41Z |
 | Current expected 8-second cost | Google pricing currently lists video-only 720p/1080p as `$0.20 / 1 count`, without defining that count in the cited row as a second or an 8-second video | UNKNOWN |
-| Exact bounded profile certification | Requires current live readiness and authoritative cost calculation in addition to the certified contract facts | UNKNOWN; not certified |
+| TECHNICAL_EXECUTION | Existing Film #1 primary-image profile, provider conformance, current OAuth/project/API/IAM, and exact model/region quota are established | CERTIFIED; 2026-09-12T01:10:41Z |
+| PRICING | The official `$0.20 / 1 count` rate is known, but its mapping to one 8-second output is not | UNKNOWN; historical 8-second cost remains `$1.60`, `HISTORICAL_OBSERVED` |
 
-The inability to establish current credentials/quota or calculate the price is
-not evidence that the model or region is unsupported. Those facts remain
-UNKNOWN. Provider subject-reference conditioning is supported, but is a
-separate input mode from the Film #1 primary-image mode. Google's REST type
-states that `image` and `referenceImages` cannot both be supplied in the same
-instance. The VSS Film #1 request stays on `image`; its adapter is not evidence
-for or against the provider's separate reference capability.
+Technical provider certification is independent of pricing certification:
+the Film #1 provider profile is technically certified for execution, while
+pricing certification remains UNKNOWN. This does not approve, authorize, or
+reserve any execution or spend; no human spend ceiling is established here.
+Provider subject-reference conditioning is supported, but is a separate input
+mode from the Film #1 primary-image mode. Google's REST type states that
+`image` and `referenceImages` cannot both be supplied in the same instance.
+The VSS Film #1 request stays on `image`; its adapter is not evidence for or
+against the provider's separate reference capability. The exact GA SDK
+subject-reference transport remains UNKNOWN and is outside this bounded
+primary-image profile, so it does not block its technical certification.
 
 ## Authoritative evidence
 
@@ -82,8 +87,8 @@ therefore neither `$1.60` from a historical estimate nor `$0.20` is adopted as
 the certified expected cost. Google's [Cloud Billing Catalog documentation](https://docs.cloud.google.com/billing/v1/how-tos/catalog-api)
 states that SKU records expose `usageUnit`, `usageUnitDescription`,
 `baseUnit`, and `baseUnitConversionFactor`, which would establish a billable
-unit. Its public Catalog API requires an API key; the OAuth catalog request
-made here was rejected with HTTP 401. Google's public [Gen AI video SKU group](https://cloud.google.com/skus/sku-groups/gen-ai-video-models)
+unit. Its public Catalog API requires an API key; a prior OAuth catalog
+refresh attempt was rejected with HTTP 401. Google's public [Gen AI video SKU group](https://cloud.google.com/skus/sku-groups/gen-ai-video-models)
 does not expose the Veo 3.1 SKU's usage-unit mapping. Thus current authoritative
 count-to-duration mapping remains UNKNOWN. Historical Shot 2 VSS operation
 evidence records `actual_cost_usd: 1.600000` for one 8-second 720p no-audio
@@ -123,21 +128,23 @@ contract.
 
 ## Non-generation live checks and evidence freshness
 
-The environment exposes project `vss-film-poc`, location `us-central1`, and a
-configured OAuth access token. At 2026-09-12T00:54:01Z, Google's documented
-tokeninfo endpoint returned `invalid_token` / `Invalid Value` (no expiration
-metadata); OAuth userinfo, Cloud Resource Manager project lookup and
-read-only IAM policy/permission checks, Service Usage API lookup, consumer
-quota lookup, and Cloud Billing catalog lookup all returned HTTP 401. The
-token is rejected; whether it is expired, revoked, malformed, or otherwise
-invalid is UNKNOWN. The current principal cannot be identified, and project
-access, API enabled state, effective IAM, and current effective quota could
-not be established. This is a credential/readiness failure, not provider
-capability evidence. The quota refresh attempt is timestamped above but did
-not retrieve a fresh quota value. The local `gcloud` configuration also
-cannot refresh credentials because its credential database is unavailable in
-this read-only workspace. No publisher-model metadata endpoint was called.
-No generation endpoint was called.
+All live checks used the freshly inherited OAuth bearer token and were
+read-only. OAuth userinfo returned HTTP 200 and principal
+`t.ullas@gmail.com` at 2026-09-12T01:09:04Z–01:09:06Z. Cloud Resource Manager
+returned HTTP 200 for active project `vss-film-poc` (project number
+`1008607911742`) at 2026-09-12T01:09:04Z–01:09:06Z. Service Usage returned
+HTTP 200 and state `ENABLED` for `aiplatform.googleapis.com` at
+2026-09-12T01:10:05Z–01:10:10Z. Project-level `testIamPermissions` returned
+`aiplatform.endpoints.predict`, `serviceusage.services.use`, and
+`serviceusage.quotas.get`, establishing the permissions needed for the
+existing request path and this quota read. The quota metric
+`aiplatform.googleapis.com/long_running_online_prediction_requests_per_base_model`
+was read from Service Usage `consumerQuotaMetrics` at
+2026-09-12T01:10:38Z–01:10:41Z. Its exact bucket for
+`base_model=veo-3.1-generate-001`, `region=us-central1` has effective and
+default limits of 50 requests/minute. These timestamps are the freshness bound
+for this evidence. No publisher-model metadata endpoint or generation
+endpoint was called. Generation submissions remain zero and cost remains $0.
 
 The preserved historical readiness record
 `docs/reviews/m11-0-vertex-readiness-evidence.json` records the API enabled,
@@ -145,8 +152,9 @@ project number `1008607911742`, and Vertex service-agent role binding. The
 historical quota evidence `.local/config/m11-0-veo-quota-evidence.json`
 records metric `aiplatform.googleapis.com/long_running_online_prediction_requests_per_base_model`,
 base model `veo-3.1-generate-001`, region `us-central1`, and default/effective
-limit 50 per minute for `vss-film-poc`. Neither record contains a freshness
-timestamp establishing it as current on this review date.
+limit 50 per minute for `vss-film-poc`. That historical record has no
+freshness timestamp; the timestamped Service Usage read above is the current
+quota evidence and supersedes it for live readiness.
 
 ## Historical conformance evidence and independent review
 
@@ -193,15 +201,19 @@ the prior draft rather than carrying them forward silently:
    example against the preview model, so exact SDK behavior for the GA model
    remains UNKNOWN; the REST form is documented for the exact `-001` model.
 7. Public pricing and the public SKU-group page do not map the `$0.20 / count`
-   label to seconds or one 8-second video. Cloud Billing usage-unit lookup
-   could not be refreshed because current token/catalog access returned 401.
+   label to seconds or one 8-second video. A prior Cloud Billing catalog
+   refresh attempt returned 401; this evidence refresh did not retry catalog
+   lookup because the unresolved public unit mapping does not block technical
+   certification.
 
 The primary-image contract and the provider's separate subject-reference
 conditioning capability are CERTIFIED; only the primary image is used by
 Film #1. The exact REST subject-reference form is documented; exact SDK
-behavior for the GA model is UNKNOWN. Current token validity/principal,
-project/API/IAM readiness, effective quota/freshness, and expected eight-second
-cost remain UNKNOWN. The historical Shot 2 cost of `$1.60` is
-`HISTORICAL_OBSERVED`, not authoritative current pricing. Therefore the exact
-bounded Film #1 execution profile is **not yet CERTIFIED**. No generation call
-was made; actual cost of this amendment is `$0`.
+behavior for the GA model is UNKNOWN. The bounded Film #1 profile is
+**technically CERTIFIED for execution** based on current token, principal,
+project, API, IAM, quota, and historical conformance evidence. Pricing
+certification remains UNKNOWN: the official `$0.20 / 1 count` rate still has
+no authoritative mapping to one 8-second output. The historical Shot 2 cost
+of `$1.60` remains `HISTORICAL_OBSERVED`. This refresh does not establish a
+human-approved spend ceiling or execution authority. No generation call was
+made; actual cost of this amendment is `$0`.

@@ -63,7 +63,7 @@ class CertificationTests(unittest.TestCase):
         self.assertEqual(readiness["provider_call_count"], 0)
         self.assertFalse(readiness["checks"]["metadata_lookup_required"])
 
-    def test_exact_film1_profile_records_model_specific_support_and_live_blockers(self):
+    def test_exact_film1_profile_records_technical_certification_and_pricing_blocker(self):
         value = json.loads(CERTIFICATION.read_text())
         review = (ROOT / "docs/provider-certifications/google-vertex-ai-veo-3.1-review.md").read_text()
         self.assertEqual(value["model_version"], "veo-3.1-generate-001")
@@ -75,25 +75,27 @@ class CertificationTests(unittest.TestCase):
         self.assertEqual(value["media_contract"]["fps"], [24])
         self.assertEqual(value["media_contract"]["maximum_outputs"], 1)
         self.assertIn("generateAudio=false", value["submission_semantics"]["method"])
-        self.assertEqual(value["live_certification"]["status"], "UNKNOWN")
+        self.assertEqual(value["live_certification"]["status"], "CERTIFIED")
+        self.assertEqual(value["live_certification"]["certified_at"], "2026-09-12T01:10:41Z")
         self.assertFalse(value["production_eligibility"]["eligible"])
         self.assertEqual(value["pricing_evidence"]["expected_shot_cost_usd"], "UNKNOWN")
         self.assertIn("referenceImages", value["request_schema_mapping"]["mapping"]["image"])
         self.assertIn("mutually exclusive", value["request_schema_mapping"]["mapping"]["image"])
         self.assertIn("UNKNOWN", value["request_schema_mapping"]["unknowns"][0])
         self.assertNotIn("referenceImages", value["submission_semantics"]["method"])
-        self.assertIn("HTTP 401", review)
-        self.assertIn("not yet CERTIFIED", review)
+        self.assertIn("pricing certification remains UNKNOWN", review)
+        self.assertIn("technically CERTIFIED for execution", review)
         self.assertIn("expected 8-second cost", review)
-        self.assertIn("generation endpoint was called", review)
+        self.assertIn("Generation submissions remain zero", review)
         self.assertIn("HISTORICAL_OBSERVED", review)
-        self.assertIn("2026-09-12T00:54:01Z", value["quota_evidence"]["freshness"])
+        self.assertIn("2026-09-12T01:10:38Z-01:10:41Z", value["quota_evidence"]["freshness"])
 
     def test_current_pricing_unit_is_not_extrapolated_to_eight_seconds(self):
         value = json.loads(CERTIFICATION.read_text())
         self.assertIn("$0.20 / 1 count", value["pricing_evidence"]["rate_basis"])
         self.assertEqual(value["pricing_evidence"]["expected_shot_cost_usd"], "UNKNOWN")
         self.assertIn("actual_cost_usd=1.600000", value["pricing_evidence"]["authoritative_quote"])
+        self.assertIn("no human-approved spend ceiling", value["pricing_evidence"]["hard_ceiling_usd"])
         self.assertEqual(value["conformance"]["provider_calls"], 0)
 
     def test_provider_contract_mismatch_and_uncertified_provider_fail_closed(self):
