@@ -220,6 +220,24 @@ or repair-budget exhaustion fails closed. The controller may classify routine
 code or registered-fixture failure but never authorizes the repair, push, PR,
 merge, paid call, or Runtime/provider execution.
 
+Milestone initialization may record one pre-existing residue candidate: a modified
+tracked `.secrets.baseline` whose HEAD/base blobs agree and whose fixed-path governance
+check passes. Its append-only provenance binds the HEAD, index, and worktree path,
+type, mode, and content. This is identity bookkeeping only: validation secret scanning
+uses the baseline blob from the milestone's pinned base HEAD. No caller-selected
+exclusion is accepted, a later baseline edit is governed work, and strict clean-worktree
+checks still apply to every non-protected path.
+
+Validation receipts bind the governed change identity, residue-provenance digest,
+evidence subject HEAD, harness map, and controller policy. A legacy receipt without
+that binding remains in history but is quarantined before new validation can advance
+the milestone. CI is admitted only through the controller's read-only API refresh for
+the exact committed HEAD on the pinned `.github/workflows/ci.yml` blob and the complete
+required job set (`Scan for secrets`, `Validate`, `Test`). CI cannot change source
+identity or clear `CONFLICT`; every identity rebound clears CI and requires a fresh
+exact-HEAD observation. The API refresh and local history append cannot be atomic with
+Git ref movement, so any movement during admission fails closed and requires recovery.
+
 `vss dev milestone next --packet` emits a strict, deterministic
 `vss.dev-milestone-execution-packet` for reset-session handoff. The packet binds the exact
 milestone generation and history tail, base and HEAD SHAs, worktree change identity, issue,

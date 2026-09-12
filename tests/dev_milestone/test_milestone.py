@@ -7,11 +7,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
 from vss_dev import ImprovementBacklog, ImprovementBacklogFailure, MilestoneController, MilestoneFailure
-from vss_dev.milestone import BOOTSTRAP_REPAIR_PATHS, POST_MERGE_RECONCILIATION_AUTHORIZATION, POST_REPAIR_RECONCILIATION_AUTHORIZATION, RECONCILIATION_AUTHORIZATION
+from vss_dev.milestone import AUTHORITY, BOOTSTRAP_REPAIR_PATHS, POST_MERGE_RECONCILIATION_AUTHORIZATION, POST_REPAIR_RECONCILIATION_AUTHORIZATION, RECONCILIATION_AUTHORIZATION
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,7 +54,14 @@ class MilestoneControllerTests(unittest.TestCase):
         (self.root / "tests/movie_storyboard").mkdir(parents=True)
         (self.root / "tests/performance").mkdir(parents=True)
         (self.root / "scripts/vss-agent").chmod(0o755)
-        (self.root / "scripts/validate-change.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        workflow = self.root / ".github/workflows/ci.yml"
+        workflow.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / ".github/workflows/ci.yml", workflow)
+        (self.root / "scripts/validate-change.sh").write_text(
+            "#!/usr/bin/env bash\n"
+            "if [[ -n ${VSS_VALIDATION_SECRETS_BASELINE:-} ]]; then\n"
+            "  git show \"${VSS_VALIDATION_BASE_SHA}:.secrets.baseline\" | cmp - \"$VSS_VALIDATION_SECRETS_BASELINE\" || exit 9\n"
+            "fi\nexit 0\n", encoding="utf-8")
         (self.root / "scripts/validate-change.sh").chmod(0o755)
         self.git("init", "-q", "-b", "main"); self.git("config", "user.name", "test"); self.git("config", "user.email", "test@example.invalid")
         self.git("remote", "add", "origin", "https://github.com/example/vss.git")
@@ -74,23 +82,46 @@ class MilestoneControllerTests(unittest.TestCase):
     def initialize(self) -> dict:
         return self.controller.initialize("dev-wf-1", self.base, 114, ["agent-coordination"], ["src/demo"], "Approved bounded development milestone.", mission_evidence())
 
+    def ci_observation(self, state: dict, *, run_status: str = "completed",
+                       run_conclusion: str = "success", failed_job: str | None = None,
+                       job_status: str | None = None, head_sha: str | None = None) -> dict:
+        head = head_sha or state["repository"]["head_sha"]
+        jobs = []
+        for name in ("Scan for secrets", "Validate", "Test"):
+            conclusion = "failure" if name == failed_job else "success"
+            jobs.append({"name": name, "status": job_status or run_status,
+                         "conclusion": conclusion, "head_sha": head})
+        return {"repository": state["repository"]["name_with_owner"], "head_sha": head,
+                "workflow_id": 41, "workflow_path": ".github/workflows/ci.yml",
+                "workflow_blob": "854774e24c3e7bc79838a20f9296dbf14d12891a",  # pragma: allowlist secret -- public workflow Git blob identity
+                "run_id": 1001, "run_attempt": 1, "run_status": run_status,
+                "run_conclusion": run_conclusion, "jobs": jobs}
+
+    def refresh_ci(self, identifier: str = "dev-wf-1", observation: dict | None = None) -> dict:
+        state = self.controller.load(identifier)
+        prepared = observation or self.ci_observation(state)
+        with patch.object(self.controller, "_fetch_ci_observation", return_value=prepared):
+            return self.controller.ci_refresh(identifier)
+
     def moving_shot_reconciliation_fixture(self, *, merge: bool = True) -> tuple[dict, str, str]:
         state = self.controller.initialize("m11-0-veo-shot", self.base, 132, ["movie"], ["src", "tests"], "Moving-shot reconciliation fixture.", mission_evidence())
         self.git("switch", "-c", "feature/m11-0-veo-shot")
         state = self.controller.transition_branch("m11-0-veo-shot", "main", "feature/m11-0-veo-shot", "branch", state["generation"])
         (self.root / "README.md").write_text("reviewed\n", encoding="utf-8")
+        self.controller.validate("canonical", "m11-0-veo-shot")
+        pending = self.controller.load("m11-0-veo-shot")
         self.git("add", "README.md"); self.git("commit", "-qm", "reviewed PR")
-        reviewed = self.git("rev-parse", "HEAD").stdout.strip()
-        self.controller.ingest_ci({"head_sha": reviewed, "checks": []}, "m11-0-veo-shot")
+        self.controller.rebind_committed_head("m11-0-veo-shot", "Bind reviewed descendant.", pending["generation"])
+        self.refresh_ci("m11-0-veo-shot")
+        self.controller.validate("canonical", "m11-0-veo-shot")
         state = self.controller.load("m11-0-veo-shot")
-        state = self.controller.checkpoint("m11-0-veo-shot", "validation_completed", "L3", {"validation_level": "L3", "evidence_sha256": "a" * 64}, state["generation"])
+        reviewed = self.git("rev-parse", "HEAD").stdout.strip()
         for attempt in range(1, 6):
             path = self.root / ".local/movie/m11-0-moving-shot" / (f"attempt-{attempt}.attempt.json")
             path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps({"attempt": attempt}), encoding="utf-8")
         self.git("add", ".local"); self.git("commit", "-qm", "historical attempts")
         if merge:
             self.git("switch", "main"); self.git("merge", "--no-ff", "feature/m11-0-veo-shot", "-qm", "merge PR")
-        head = self.git("rev-parse", "HEAD").stdout.strip()
         repository = self.controller._repository(self.base)
         evidence = self.root / ".vss/validation.json"
         evidence.write_text(json.dumps({"protocol": "vss.agent-validation-evidence", "passed": True, "repository": {key: repository[key] for key in ("name_with_owner", "branch", "base_sha", "head_sha")}, "plan": {"executed_level": "L3"}}), encoding="utf-8")
@@ -105,7 +136,7 @@ class MilestoneControllerTests(unittest.TestCase):
         _, evidence, historical = self.moving_shot_reconciliation_fixture()
         result = self.reconcile(evidence, historical)
         self.assertEqual(result["status"], "CI_PENDING")
-        self.assertEqual(result["generation"], 4)
+        self.assertEqual(result["generation"], 6)
         self.assertTrue(all(value is False for value in result["authority"].values()))
 
     def test_post_repair_authorization_is_registered_without_authority_escalation(self) -> None:
@@ -165,9 +196,8 @@ class MilestoneControllerTests(unittest.TestCase):
             "dev-wf-1", "main", "feature/dev-wf-1", "Authorized milestone branch.", initialized["generation"])
         changed = self.root / "README.md"
         changed.write_text("accepted implementation\n", encoding="utf-8")
-        pending = self.controller.checkpoint(
-            "dev-wf-1", "validation_completed", "Canonical validation passed.",
-            {"validation_level": "L3", "evidence_sha256": "a" * 64}, transitioned["generation"])
+        self.controller.validate("canonical", "dev-wf-1")
+        pending = self.controller.load("dev-wf-1")
         history_before = (self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes()
         self.git("add", "README.md"); self.git("commit", "-qm", "accepted implementation")
         return pending, self.git("rev-parse", "HEAD").stdout.strip(), history_before
@@ -204,14 +234,11 @@ class MilestoneControllerTests(unittest.TestCase):
                  "review": {"mechanism": mechanism, "disposition": "ACCEPT",
                             "owner": "test-reviewer", "evidence": path}}, state["generation"])
         self.assertEqual(state["mission_gate"]["outcome"], "PROCEED")
-        ci = self.controller.ingest_ci({"head_sha": self.base, "checks": []},
-                                       "review-ready-source-identity-recovery")
+        self.controller.validate("canonical", "review-ready-source-identity-recovery")
+        ci = self.refresh_ci("review-ready-source-identity-recovery")
         self.assertEqual(ci["status"], "passed")
         state = self.controller.load("review-ready-source-identity-recovery")
-        state = self.controller.checkpoint(
-            "review-ready-source-identity-recovery", "validation_completed", "Canonical validation passed.",
-            {"validation_level": "L3", "evidence_sha256": "c" * 64},
-            self.controller.load("review-ready-source-identity-recovery")["generation"])
+        self.controller.validate("canonical", "review-ready-source-identity-recovery")
         state = self.controller.load("review-ready-source-identity-recovery")
         self.assertEqual(state["status"], "REVIEW_READY")
         return state
@@ -297,9 +324,8 @@ class MilestoneControllerTests(unittest.TestCase):
             "dev-wf-2-engineering-observability", "main", "feature/dev-wf-2-engineering-observability",
             "Authorized milestone branch.", initialized["generation"])
         (self.root / "README.md").write_text("accepted implementation\n", encoding="utf-8")
-        pending = self.controller.checkpoint(
-            "dev-wf-2-engineering-observability", "validation_completed", "Canonical validation passed.",
-            {"validation_level": "L3", "evidence_sha256": "a" * 64}, transitioned["generation"])
+        self.controller.validate("canonical", "dev-wf-2-engineering-observability")
+        pending = self.controller.load("dev-wf-2-engineering-observability")
         old_head = pending["repository"]["head_sha"]
         self.git("add", "README.md"); self.git("commit", "-qm", "accepted implementation")
         reviewed_head = self.git("rev-parse", "HEAD").stdout.strip()
@@ -414,38 +440,28 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertIn("dev-milestone-tests", validation["validation"]["profiles"])
 
         changed.unlink()
-        state = self.controller.checkpoint(
-            "dev-wf-1", "validation_completed", "Affected validation passed.",
-            {"validation_level": "L1", "evidence_sha256": "a" * 64}, initialized["generation"])
-        pending = self.controller.ingest_ci({
-            "head_sha": state["repository"]["head_sha"],
-            "checks": [{"name": "tests", "status": "queued", "conclusion": "", "summary": ""}],
-        }, "dev-wf-1")
+        validation_result = self.controller.validate("affected", "dev-wf-1")
+        state = self.controller.load("dev-wf-1")
+        pending = self.refresh_ci("dev-wf-1", self.ci_observation(
+            state, run_status="in_progress", run_conclusion="", job_status="queued"))
         self.assertEqual(pending["status"], "pending")
         ci_packet = self.controller.execution_packet("dev-wf-1")
         self.assertEqual(ci_packet["controller"]["next"]["action"], "ingest_ci")
         self.assertEqual(ci_packet["ci"]["status"], "pending")
-        self.assertEqual(ci_packet["validation"]["evidence_sha256"], "a" * 64)
+        self.assertEqual(ci_packet["validation"]["evidence_sha256"], validation_result["evidence_sha256"])
 
         canonical_state = self.controller.initialize("canonical", self.base, 115, [], [], "Canonical route.", mission_evidence())
-        canonical_state = self.controller.checkpoint(
-            "canonical", "validation_completed", "Affected validation passed.",
-            {"validation_level": "L1", "evidence_sha256": "b" * 64}, canonical_state["generation"])
-        self.controller.ingest_ci({"head_sha": canonical_state["repository"]["head_sha"], "checks": []}, "canonical")
+        self.controller.validate("affected", "canonical")
+        self.refresh_ci("canonical")
         canonical = self.controller.execution_packet("canonical")
         self.assertEqual(canonical["controller"]["next"]["action"], "run_canonical_validation")
         self.assertEqual(canonical["validation"]["required_tier"], "canonical")
         self.assertEqual(canonical["validation"]["required_level"], "L3")
 
         repair_state = self.controller.initialize("repair", self.base, 116, [], [], "Repair route.", mission_evidence())
-        repair_state = self.controller.checkpoint(
-            "repair", "validation_completed", "Affected validation passed.",
-            {"validation_level": "L1", "evidence_sha256": "c" * 64}, repair_state["generation"])
-        self.controller.ingest_ci({
-            "head_sha": repair_state["repository"]["head_sha"],
-            "checks": [{"name": "tests", "status": "completed", "conclusion": "failure",
-                        "summary": "assertion failed"}],
-        }, "repair")
+        self.controller.validate("affected", "repair")
+        self.refresh_ci("repair", self.ci_observation(
+            self.controller.load("repair"), failed_job="Validate", run_conclusion="failure"))
         repair = self.controller.execution_packet("repair")
         self.assertEqual(repair["controller"]["next"]["action"], "repair_code")
         self.assertEqual(repair["repair"], {"attempts": 0, "maximum_attempts": 3,
@@ -453,14 +469,9 @@ class MilestoneControllerTests(unittest.TestCase):
 
     def test_human_architecture_security_and_review_boundaries_remain_non_authoritative(self) -> None:
         security = self.initialize()
-        security = self.controller.checkpoint(
-            "dev-wf-1", "validation_completed", "Validation passed.",
-            {"validation_level": "L1", "evidence_sha256": "a" * 64}, security["generation"])
-        self.controller.ingest_ci({
-            "head_sha": security["repository"]["head_sha"],
-            "checks": [{"name": "security", "status": "completed", "conclusion": "failure",
-                        "summary": "security policy failure"}],
-        }, "dev-wf-1")
+        self.controller.validate("affected", "dev-wf-1")
+        self.refresh_ci("dev-wf-1", self.ci_observation(
+            self.controller.load("dev-wf-1"), failed_job="Scan for secrets", run_conclusion="failure"))
         security_packet = self.controller.execution_packet("dev-wf-1")
         self.assertEqual(security_packet["controller"]["next"],
                          {"action": "request_security_review", "human_boundary": True})
@@ -473,14 +484,10 @@ class MilestoneControllerTests(unittest.TestCase):
                          {"action": "request_architecture_review", "human_boundary": True})
 
         review = self.controller.initialize("review", self.base, 116, [], [], "Review route.", mission_evidence())
-        review = self.controller.checkpoint(
-            "review", "validation_completed", "Validation passed.",
-            {"validation_level": "L3", "evidence_sha256": "d" * 64}, review["generation"])
-        self.controller.ingest_ci({"head_sha": review["repository"]["head_sha"], "checks": []}, "review")
+        self.controller.validate("canonical", "review")
+        self.refresh_ci("review")
         review = self.controller.load("review")
-        self.controller.checkpoint(
-            "review", "validation_completed", "Canonical validation passed.",
-            {"validation_level": "L3", "evidence_sha256": "d" * 64}, review["generation"])
+        self.controller.validate("canonical", "review")
         review_packet = self.controller.execution_packet("review")
         self.assertEqual(review_packet["controller"]["next"],
                          {"action": "request_merge", "human_boundary": True})
@@ -781,12 +788,11 @@ class MilestoneControllerTests(unittest.TestCase):
                 "review-ready-source-identity-recovery", "Reject stale concurrent recovery.",
                 registered["generation"], checkpoint_manifest_sha256=registration["data"]["manifest_sha256"],
                 human_disposition="I authorize this registered recovery.", reviewer="second-writer")
-        stale = self.controller.ingest_ci({"head_sha": old_head, "checks": []},
-                                          "review-ready-source-identity-recovery")
-        self.assertEqual(stale["status"], "stale")
+        with self.assertRaisesRegex(MilestoneFailure, "caller-supplied CI"):
+            self.controller.ingest_ci({"head_sha": old_head, "checks": []},
+                                      "review-ready-source-identity-recovery")
         self.assertNotEqual(self.controller.load("review-ready-source-identity-recovery")["status"], "REVIEW_READY")
-        fresh = self.controller.ingest_ci({"head_sha": new_head, "checks": []},
-                                          "review-ready-source-identity-recovery")
+        fresh = self.refresh_ci("review-ready-source-identity-recovery")
         self.assertEqual(fresh["status"], "passed")
         after_ci = self.controller.load("review-ready-source-identity-recovery")
         self.assertEqual(after_ci["ci"]["head_sha"], new_head)
@@ -1132,15 +1138,12 @@ class MilestoneControllerTests(unittest.TestCase):
 
     def test_controller_upgrade_bootstrap_rejects_stale_ci(self) -> None:
         pending, old_head, reviewed_head, target_head, history_before = self.committed_controller_upgrade()
-        self.controller.ingest_ci({"head_sha": old_head, "checks": []}, "dev-wf-2-engineering-observability")
-        current_generation = self.controller.load("dev-wf-2-engineering-observability")["generation"]
-        with self.assertRaisesRegex(MilestoneFailure, "unauthorized"):
-            self.controller.bootstrap_controller_upgrade(
-                "dev-wf-2-engineering-observability", self.base, old_head, reviewed_head, target_head,
-                "Reject stale CI.", current_generation)
+        with self.assertRaisesRegex(MilestoneFailure, "caller-supplied CI"):
+            self.controller.ingest_ci({"head_sha": old_head, "checks": []}, "dev-wf-2-engineering-observability")
         current = (self.root / ".vss/milestones/dev-wf-2-engineering-observability/history.ndjson").read_text(encoding="utf-8")
         self.assertNotIn('"event_type":"controller_bootstrap"', current)
         self.assertTrue(current.encode().startswith(history_before))
+        self.assertEqual(self.controller.load("dev-wf-2-engineering-observability")["status"], "CONFLICT")
 
     def test_controller_upgrade_bootstrap_rejects_non_descendant_replay_and_tampering(self) -> None:
         pending, old_head, reviewed_head, target_head, history_before = self.committed_controller_upgrade()
@@ -1183,16 +1186,31 @@ class MilestoneControllerTests(unittest.TestCase):
 
     def test_ci_exact_head_precedence_and_stop_boundaries(self) -> None:
         self.initialize()
-        stale = self.controller.ingest_ci({"head_sha": "f" * 40, "checks": []}, "dev-wf-1")
-        self.assertEqual(stale["status"], "stale")
-        # Start a fresh state for each independent classifier because observations are append-only.
-        for suffix, summary, expected in (("code", "assertion failed", "code"), ("fixture", "fixture digest mismatch", "fixture"),
-                                          ("security", "security policy failure", "security"), ("infra", "runner network timeout", "infrastructure"),
-                                          ("flaky", "intermittent retry", "flaky/unknown")):
+        with self.assertRaisesRegex(MilestoneFailure, "not legal"):
+            self.controller.ci_refresh("dev-wf-1")
+        with self.assertRaisesRegex(MilestoneFailure, "caller-supplied CI"):
+            self.controller.ingest_ci({"head_sha": self.base, "checks": []}, "dev-wf-1")
+        self.controller.validate("canonical", "dev-wf-1")
+        state = self.controller.load("dev-wf-1")
+        with self.assertRaisesRegex(MilestoneFailure, "exact admitted source"):
+            self.refresh_ci("dev-wf-1", self.ci_observation(state, head_sha="f" * 40))
+        partial = self.ci_observation(state); partial["jobs"].pop()
+        with self.assertRaisesRegex(MilestoneFailure, "empty, partial, duplicate"):
+            self.refresh_ci("dev-wf-1", partial)
+        duplicate = self.ci_observation(state); duplicate["jobs"][2]["name"] = "Validate"
+        with self.assertRaisesRegex(MilestoneFailure, "empty, partial, duplicate"):
+            self.refresh_ci("dev-wf-1", duplicate)
+        self.assertEqual(self.controller.load("dev-wf-1")["status"], "CI_PENDING")
+        self.assertTrue(all(value is False for value in self.controller.load("dev-wf-1")["authority"].values()))
+        # API-derived job identity is trusted for failure classification; caller labels are absent.
+        for suffix, failed_job, expected in (("code", "Validate", "code"),
+                                             ("security", "Scan for secrets", "security")):
             identifier = f"ci-{suffix}"
             self.controller.initialize(identifier, self.base, 114, [], [], "CI classification.", mission_evidence())
-            head = self.controller.load(identifier)["repository"]["head_sha"]
-            result = self.controller.ingest_ci({"head_sha": head, "checks": [{"name": "check", "status": "completed", "conclusion": "failure", "summary": summary}]}, identifier)
+            self.controller.validate("canonical", identifier)
+            failed = self.ci_observation(self.controller.load(identifier), failed_job=failed_job,
+                                         run_conclusion="failure")
+            result = self.refresh_ci(identifier, failed)
             self.assertEqual(result["classification"], expected)
         security_state = self.controller.load("ci-security")
         self.assertEqual(security_state["status"], "BLOCKED")
@@ -1207,12 +1225,12 @@ class MilestoneControllerTests(unittest.TestCase):
         current = self.controller.load("dev-wf-1")
         with self.assertRaisesRegex(MilestoneFailure, "repair budget"):
             self.controller.checkpoint("dev-wf-1", "repair_started", "Over budget.", expected_generation=current["generation"])
-        with self.assertRaisesRegex(MilestoneFailure, "CI observation is malformed"):
+        with self.assertRaisesRegex(MilestoneFailure, "caller-supplied CI"):
             self.controller.ingest_ci({"head_sha": self.base, "checks": [{"name": "x"}]}, "dev-wf-1")
 
     def test_repair_cannot_cross_scope_or_protected_boundary(self) -> None:
         self.initialize()
-        protected = self.root / ".github/workflows/unsafe.yml"; protected.parent.mkdir(parents=True); protected.write_text("name: unsafe\n", encoding="utf-8")
+        protected = self.root / ".github/workflows/unsafe.yml"; protected.parent.mkdir(parents=True, exist_ok=True); protected.write_text("name: unsafe\n", encoding="utf-8")
         state = self.controller.load("dev-wf-1")
         with self.assertRaisesRegex(MilestoneFailure, "protected boundary"):
             self.controller.checkpoint("dev-wf-1", "repair_started", "Unsafe repair.", expected_generation=state["generation"])
@@ -1272,14 +1290,182 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(second["status"], "reused")
         self.assertEqual(first["evidence_sha256"], second["evidence_sha256"])
 
-    def test_fresh_canonical_success_after_exact_ci_progresses_to_review(self) -> None:
+    def test_issue161_preexisting_baseline_residue_is_provenanced_and_excluded_narrowly(self) -> None:
+        baseline_path = self.root / ".secrets.baseline"
+        original = json.loads(baseline_path.read_text(encoding="utf-8"))
+        modified = {**original, "generated_at": "pre-existing local residue"}
+        baseline_path.write_text(json.dumps(modified, sort_keys=True) + "\n", encoding="utf-8")
+        state = self.initialize()
+        event = self.controller._read_events("dev-wf-1")[0]
+        provenance = event["data"]["residue_provenance"]
+        self.assertEqual(provenance["path"], ".secrets.baseline")
+        self.assertEqual(provenance["governance_validator"], "passed")
+        self.assertEqual(event["data"]["residue_provenance_sha256"],
+                         self.controller._residue_digest(provenance))
+        self.assertEqual(provenance["worktree_entry"]["sha256"],
+                         hashlib.sha256(baseline_path.read_bytes()).hexdigest())
+        initial_identity = state["repository"]["change_identity"]
+        with self.assertRaisesRegex(MilestoneFailure, "clean worktree"):
+            self.controller._require_clean_worktree("test rebind")
+        captured_bytes = baseline_path.read_bytes()
+        base_bytes = self.controller._run(["git", "show", f"{self.base}:.secrets.baseline"])
+        baseline_path.write_bytes(base_bytes)  # stashing restores the tracked base version
+        self.assertEqual(self.controller._repository(self.base, provenance)["change_identity"], initial_identity)
+        self.controller._require_clean_worktree("test rebind")
+        baseline_path.write_bytes(captured_bytes)
+        self.assertEqual(self.controller._repository(self.base, provenance)["change_identity"], initial_identity)
+
+        # The validation harness must receive the committed base baseline, not this residue.
+        changed = self.root / "src/demo/change.py"
+        changed.parent.mkdir(parents=True, exist_ok=True)
+        changed.write_text("print('governed')\n", encoding="utf-8")
+        validation = self.controller.validate("canonical", "dev-wf-1")
+        self.assertEqual(validation["status"], "passed")
+        validated = [item for item in self.controller._read_events("dev-wf-1")
+                     if item["event_type"] == "validation_completed"][-1]
+        self.assertEqual(validated["data"]["governed_change_identity"],
+                         self.controller.load("dev-wf-1")["repository"]["change_identity"])
+        self.assertEqual(validated["data"]["residue_provenance_sha256"],
+                         event["data"]["residue_provenance_sha256"])
+
+        governed_identity = self.controller.load("dev-wf-1")["repository"]["change_identity"]
+        captured_bytes = baseline_path.read_bytes()
+        baseline_path.write_bytes(base_bytes)
+        self.assertEqual(self.controller._repository(self.base, provenance)["change_identity"], governed_identity)
+        baseline_path.write_bytes(captured_bytes)
+        self.assertEqual(self.controller._repository(self.base, provenance)["change_identity"], governed_identity)
+        self.assertNotEqual(governed_identity, initial_identity)
+
+        baseline_path.write_text(json.dumps({**modified, "generated_at": "substituted"}), encoding="utf-8")
+        with self.assertRaisesRegex(MilestoneFailure, "content changed"):
+            self.controller._repository(self.base, provenance)
+        baseline_path.write_bytes(captured_bytes)
+        baseline_path.chmod(0o755)
+        with self.assertRaisesRegex(MilestoneFailure, "content changed"):
+            self.controller._repository(self.base, provenance)
+        baseline_path.chmod(0o644)
+        baseline_path.unlink()
+        baseline_path.symlink_to("/etc/hosts")
+        with self.assertRaisesRegex(MilestoneFailure, "unsupported"):
+            self.controller._repository(self.base, provenance)
+        baseline_path.unlink(); baseline_path.write_bytes(captured_bytes)
+
+    def test_issue161_new_baseline_or_extra_path_is_not_excluded(self) -> None:
         initialized = self.initialize()
-        self.controller.checkpoint(
-            "dev-wf-1", "validation_completed", "Sealed lower-level validation.",
-            {"validation_level": "L1", "evidence_sha256": "a" * 64},
-            initialized["generation"])
-        head = self.controller.load("dev-wf-1")["repository"]["head_sha"]
-        self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        self.assertIsNone(self.controller._read_events("dev-wf-1")[0]["data"]["residue_provenance"])
+        before = initialized["repository"]["change_identity"]
+        baseline_path = self.root / ".secrets.baseline"
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        baseline["generated_at"] = "introduced after initialization"
+        baseline_path.write_text(json.dumps(baseline, sort_keys=True) + "\n", encoding="utf-8")
+        after = self.controller._repository(self.base)["change_identity"]
+        self.assertNotEqual(before, after)
+        extra = self.root / "docs/unrelated.md"
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("unrelated\n", encoding="utf-8")
+        both = self.controller._repository(self.base)["change_identity"]
+        self.assertNotEqual(after, both)
+        with self.assertRaisesRegex(MilestoneFailure, "caller-supplied CI"):
+            self.controller.ingest_ci({"exclude_paths": ["docs/unrelated.md"]}, "dev-wf-1")
+
+    def test_issue161_exact_captured_baseline_does_not_relax_clean_ci_admission(self) -> None:
+        baseline_path = self.root / ".secrets.baseline"
+        original = baseline_path.read_bytes()
+        baseline = json.loads(original)
+        baseline["generated_at"] = "pre-existing local edit"
+        baseline_path.write_text(json.dumps(baseline, sort_keys=True) + "\n", encoding="utf-8")
+        initialized = self.initialize()
+        identity = initialized["repository"]["change_identity"]
+        self.assertIsNotNone(self.controller._read_events("dev-wf-1")[0]["data"]["residue_provenance"])
+        self.controller.validate("canonical", "dev-wf-1")
+        with self.assertRaisesRegex(MilestoneFailure, "clean worktree"):
+            self.refresh_ci("dev-wf-1")
+        baseline_path.write_bytes(original)
+        self.assertEqual(self.controller._repository(self.base,
+                         self.controller._residue_from_events(self.controller._read_events("dev-wf-1")))["change_identity"], identity)
+        self.assertEqual(self.refresh_ci("dev-wf-1")["status"], "passed")
+
+    def test_issue162_empty_wrong_or_partial_ci_cannot_mutate_identity_or_clear_conflict(self) -> None:
+        self.initialize()
+        self.controller.validate("canonical", "dev-wf-1")
+        pending = self.controller.load("dev-wf-1")
+        history_path = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
+        before = history_path.read_bytes()
+        empty = self.ci_observation(pending); empty["jobs"] = []
+        with self.assertRaisesRegex(MilestoneFailure, "empty, partial, duplicate"):
+            self.refresh_ci("dev-wf-1", empty)
+        wrong_sha = self.ci_observation(pending, head_sha="f" * 40)
+        with self.assertRaisesRegex(MilestoneFailure, "exact admitted source"):
+            self.refresh_ci("dev-wf-1", wrong_sha)
+        partial = self.ci_observation(pending); partial["jobs"].pop()
+        with self.assertRaisesRegex(MilestoneFailure, "empty, partial, duplicate"):
+            self.refresh_ci("dev-wf-1", partial)
+        self.assertEqual(history_path.read_bytes(), before)
+        self.assertEqual(self.controller.load("dev-wf-1")["repository"], pending["repository"])
+
+        changed = self.root / "src/demo/conflicting.py"
+        changed.parent.mkdir(parents=True, exist_ok=True)
+        changed.write_text("value = 1\n", encoding="utf-8")
+        self.git("add", "src/demo/conflicting.py"); self.git("commit", "-qm", "identity moves after validation")
+        conflict = self.controller.load("dev-wf-1")
+        self.assertEqual(conflict["status"], "CONFLICT")
+        self.assertEqual(conflict["validation"], {"evidence_sha256": None, "level": "none"})
+        self.assertEqual(conflict["ci"], {"head_sha": None, "status": "not_observed", "classification": "none"})
+        with self.assertRaisesRegex(MilestoneFailure, "cannot reconcile"):
+            self.controller.ci_refresh("dev-wf-1")
+        with self.assertRaisesRegex(MilestoneFailure, "source identity conflict"):
+            self.controller.validate("canonical", "dev-wf-1")
+        self.assertIsNone(self.controller._validation_current(
+            self.controller._read_events("dev-wf-1"), conflict["repository"]))
+        events = self.controller._read_events("dev-wf-1")
+        self.assertEqual(len(events), 2)  # initialize, validation, no injected CI transition
+        self.assertTrue(all(value is False for value in conflict["authority"].values()))
+
+    def test_unbound_legacy_validation_is_explicitly_quarantined_before_new_validation(self) -> None:
+        from vss_dev.milestone import _canonical, _digest
+        self.legacy_initialize()
+        directory = self.root / ".vss/milestones/dev-wf-1"
+        history = directory / "history.ndjson"
+        events = self.controller._read_events("dev-wf-1")
+        legacy_validation = {"schema_version": "1", "protocol": "vss.dev-milestone", "record_kind": "event",
+                             "milestone_id": "dev-wf-1", "sequence": len(events) + 1,
+                             "event_type": "validation_completed", "prior_event_sha256": events[-1]["event_sha256"],
+                             "subject_head_sha": self.base, "summary": "Legacy unbound validation.",
+                             "data": {"validation_level": "L3", "evidence_sha256": "a" * 64},
+                             "authority": dict(AUTHORITY)}
+        legacy_validation["event_sha256"] = _digest(legacy_validation)
+        events.append(legacy_validation)
+        history.write_bytes(b"\n".join(_canonical(event) for event in events) + b"\n")
+        legacy_state = self.controller._project(events, self.controller._repository(self.base), legacy=True)
+        self.controller._atomic_json(directory / "state.json", legacy_state)
+        self.controller._write_pointer(legacy_state)
+
+        self.controller.validate("canonical", "dev-wf-1")
+        events = self.controller._read_events("dev-wf-1")
+        quarantine = next(event for event in events if event["event_type"] == "validation_invalidated")
+        modern_validation = events[-1]
+        self.assertTrue(quarantine["data"]["legacy_quarantine"])
+        self.assertEqual(quarantine["data"]["recovered_event_sha256"], legacy_validation["event_sha256"])
+        self.assertEqual(modern_validation["event_type"], "validation_completed")
+        self.assertEqual(modern_validation["data"]["evidence_binding_version"], 1)
+        self.assertTrue(all(value is False for value in quarantine["authority"].values()))
+
+    def test_exact_ci_binding_replay_and_authority_are_deterministic(self) -> None:
+        self.initialize()
+        self.controller.validate("canonical", "dev-wf-1")
+        result = self.refresh_ci("dev-wf-1")
+        self.assertEqual(result["status"], "passed")
+        first = self.controller.load("dev-wf-1")
+        second = self.controller.load("dev-wf-1")
+        self.assertEqual(first, second)
+        self.assertEqual(first["ci"]["head_sha"], first["repository"]["head_sha"])
+        self.assertEqual(first["status"], "CANONICAL_VALIDATION_REQUIRED")
+        self.assertTrue(all(value is False for value in first["authority"].values()))
+
+    def test_fresh_canonical_success_after_exact_ci_progresses_to_review(self) -> None:
+        self.initialize()
+        self.controller.validate("affected", "dev-wf-1")
+        self.refresh_ci("dev-wf-1")
         fresh = self.controller.validate("canonical", "dev-wf-1")
         state = self.controller.load("dev-wf-1")
         self.assertEqual(fresh["status"], "passed")
@@ -1290,8 +1476,7 @@ class MilestoneControllerTests(unittest.TestCase):
     def test_reused_canonical_success_after_exact_ci_progresses_to_review(self) -> None:
         self.initialize()
         canonical = self.controller.validate("canonical", "dev-wf-1")
-        head = self.controller.load("dev-wf-1")["repository"]["head_sha"]
-        self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        self.refresh_ci("dev-wf-1")
         reused = self.controller.validate("canonical", "dev-wf-1")
         state = self.controller.load("dev-wf-1")
         self.assertEqual(reused, {"status": "reused", "level": "L3",
@@ -1302,8 +1487,7 @@ class MilestoneControllerTests(unittest.TestCase):
     def test_prior_ci_pending_materialization_recovers_only_the_exact_review_projection(self) -> None:
         self.initialize()
         self.controller.validate("canonical", "dev-wf-1")
-        head = self.controller.load("dev-wf-1")["repository"]["head_sha"]
-        self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        self.refresh_ci("dev-wf-1")
         self.controller.validate("canonical", "dev-wf-1")
         expected = self.controller.load("dev-wf-1")
         legacy = {**expected, "status": "CI_PENDING",
@@ -1319,16 +1503,15 @@ class MilestoneControllerTests(unittest.TestCase):
     def test_exact_ci_and_canonical_validation_cannot_cycle_or_duplicate(self) -> None:
         self.initialize()
         self.controller.validate("canonical", "dev-wf-1")
-        head = self.controller.load("dev-wf-1")["repository"]["head_sha"]
-        self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        self.refresh_ci("dev-wf-1")
         self.controller.validate("canonical", "dev-wf-1")
         history = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
         before = history.read_text(encoding="utf-8")
         repeated = self.controller.validate("canonical", "dev-wf-1")
         self.assertEqual(repeated["status"], "reused")
         self.assertEqual(history.read_text(encoding="utf-8"), before)
-        with self.assertRaisesRegex(MilestoneFailure, "not required"):
-            self.controller.ingest_ci({"head_sha": head, "checks": []}, "dev-wf-1")
+        with self.assertRaisesRegex(MilestoneFailure, "caller-supplied CI"):
+            self.controller.ingest_ci({"head_sha": self.base, "checks": []}, "dev-wf-1")
 
     def test_stale_or_changed_source_never_reuses_canonical_evidence(self) -> None:
         self.initialize()
@@ -1367,11 +1550,12 @@ class MilestoneControllerTests(unittest.TestCase):
                             ("validation_completed", {"validation_level": "L3", "evidence_sha256": "a" * 64}),
                             ("ci_observed", {"ci_head_sha": self.base, "ci_status": "failed", "ci_classification": "code"})):
             with self.subTest(event=event):
-                self.controller.checkpoint("ungated", event, "Cannot clear mission gate.", data)
-                packet = self.controller.execution_packet("ungated")
-                self.assertEqual(packet["controller"]["next"],
-                                 {"action": "request_design_review", "human_boundary": True})
-                self.assertTrue(packet["stop_and_challenge"])
+                with self.assertRaises(MilestoneFailure):
+                    self.controller.checkpoint("ungated", event, "Cannot clear mission gate.", data)
+        packet = self.controller.execution_packet("ungated")
+        self.assertEqual(packet["controller"]["next"],
+                         {"action": "request_design_review", "human_boundary": True})
+        self.assertTrue(packet["stop_and_challenge"])
         self.assertTrue(all(value is False for value in packet["authority"].values()))
         for event in ("repair_started", "repair_completed", "completed"):
             with self.assertRaisesRegex(MilestoneFailure, "mission review is required"):
@@ -1612,14 +1796,12 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(recovered["status"], "DESIGN_REVIEW_REQUIRED")
         self.assertIsNone(recovered["validation"]["evidence_sha256"])
         self.controller.validate("canonical", "dev-wf-1")
-        self.controller.ingest_ci({"head_sha": self.base, "checks": []}, "dev-wf-1")
-        self.controller.checkpoint("dev-wf-1", "validation_completed", "Legacy canonical evidence.",
-                                   {"validation_level": "L3", "evidence_sha256": "a" * 64})
+        with self.assertRaisesRegex(MilestoneFailure, "legal"):
+            self.refresh_ci("dev-wf-1")
+        self.assertEqual(self.controller.load("dev-wf-1")["status"], "DESIGN_REVIEW_REQUIRED")
         events = self.controller._read_events("dev-wf-1")
         legacy = self.controller._project(events, repository, legacy=True)
-        self.assertEqual(legacy["status"], "REVIEW_READY")
-        legacy.update(status="CI_PENDING", next={"action": "ingest_ci", "human_boundary": False},
-                      routing={"model": self.controller.policy["model_routing"]["maintenance"], "advisory": True})
+        self.assertEqual(legacy["status"], "CI_PENDING")
         self.controller._atomic_json(directory / "state.json", legacy); self.controller._write_pointer(legacy)
         self.assertEqual(self.controller.load()["status"], "DESIGN_REVIEW_REQUIRED")
 
