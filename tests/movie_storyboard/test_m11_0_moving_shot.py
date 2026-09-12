@@ -33,7 +33,7 @@ class FakeVideoProvider:
     def generate(self, request, *, credential, transport=None):
         self.calls += 1
         raw = transport(request) if transport else b"{}"
-        operation = "operations.test-1"
+        operation = "projects/vss-film-poc/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/test-1"
         if getattr(request, "on_accepted", None) is not None:
             request.operation_evidence_path.write_text(json.dumps({
                 "operation_name": operation, "request_sha256": request.request_sha256,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,6 +10,34 @@ from typing import Any
 
 class AttemptLedgerError(ValueError):
     """The one-attempt moving-shot ledger cannot make the requested transition."""
+
+
+def _atomic_write(path: Path, content: bytes) -> None:
+    """Durably replace a local control record without exposing partial JSON."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except Exception:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    _atomic_write(path, json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
 def classify_legacy_record(path: Path, request_sha256: str) -> dict[str, Any]:
@@ -47,7 +77,7 @@ def record_existing_authorization(path: Path, request_sha256: str) -> None:
             raise AttemptLedgerError("authorization record does not match existing approval")
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(expected, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    _atomic_write_json(path, expected)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +120,7 @@ class AttemptLedger:
             return
         if value != authorized:
             raise AttemptLedgerError("current attempt authorization cannot be consumed")
-        path.write_text(json.dumps(consumed, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        _atomic_write_json(path, consumed)
 
     def _read(self) -> dict[str, Any]:
         try:
@@ -98,9 +128,10 @@ class AttemptLedger:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise AttemptLedgerError("attempt ledger is unavailable or invalid") from exc
         fields = {"request_sha256", "attempts", "maximum_cost_usd", "status"}
+        namespace_field = {"execution_namespace"}
         operation_fields = {"operation_name", "execution_namespace"}
         if (not isinstance(value, dict)
-                or set(value) not in (fields, fields | operation_fields)
+                or set(value) not in (fields, fields | namespace_field, fields | operation_fields)
                 or value["request_sha256"] != self.request_sha256
                 or value["maximum_cost_usd"] != self.maximum_cost_usd
                 or type(value["attempts"]) is not int
@@ -111,17 +142,21 @@ class AttemptLedger:
             raise AttemptLedgerError("unsubmitted ledger has consumed attempts")
         if value["status"] in {"submitted", "completed", "failed"} and value["attempts"] != 1:
             raise AttemptLedgerError("submitted ledger has invalid attempt count")
-        if set(value) == fields | operation_fields:
+        if "execution_namespace" in value and (
+                not isinstance(value["execution_namespace"], str)
+                or not value["execution_namespace"] or len(value["execution_namespace"]) > 256):
+            raise AttemptLedgerError("execution namespace is invalid")
+        if "operation_name" in value:
             if (value["status"] not in {"submitted", "completed", "failed"}
                     or not isinstance(value["operation_name"], str) or not value["operation_name"]
-                    or len(value["operation_name"]) > 512
-                    or not isinstance(value["execution_namespace"], str) or not value["execution_namespace"]
-                    or len(value["execution_namespace"]) > 256):
+                    or len(value["operation_name"]) > 512):
                 raise AttemptLedgerError("accepted operation identity is invalid")
+        if value["status"] == "reserved" and "operation_name" in value:
+            raise AttemptLedgerError("reserved attempt already has an operation")
         return value
 
     def _write(self, value: dict[str, Any]) -> None:
-        self.path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        _atomic_write_json(self.path, value)
 
     def authorize(self) -> None:
         """Record approval only; it consumes no provider attempt."""
@@ -132,18 +167,27 @@ class AttemptLedger:
                      "maximum_cost_usd": self.maximum_cost_usd, "status": "authorized"})
         record_existing_authorization(self._authorization_path(), self.request_sha256)
 
-    def reserve_execution(self) -> None:
+    def reserve_execution(self, execution_namespace: str | None = None) -> None:
         """Reserve the one execution slot without counting a submission."""
+        if (execution_namespace is not None
+                and (not isinstance(execution_namespace, str) or not execution_namespace
+                     or len(execution_namespace) > 256)):
+            raise AttemptLedgerError("execution namespace is invalid")
         self._require_authorization()
         if not self.path.exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._write({"request_sha256": self.request_sha256, "attempts": 0,
-                         "maximum_cost_usd": self.maximum_cost_usd, "status": "reserved"})
+            value = {"request_sha256": self.request_sha256, "attempts": 0,
+                     "maximum_cost_usd": self.maximum_cost_usd, "status": "reserved"}
+            if execution_namespace is not None:
+                value["execution_namespace"] = execution_namespace
+            self._write(value)
             return
         value = self._read()
         if value["status"] != "authorized":
             raise AttemptLedgerError("execution reservation is not available")
         value["status"] = "reserved"
+        if execution_namespace is not None:
+            value["execution_namespace"] = execution_namespace
         self._write(value)
 
     def mark_submitted(self) -> None:
@@ -155,15 +199,15 @@ class AttemptLedger:
         value["status"] = "submitted"
         self._write(value)
 
-    def accept_operation(self, operation_name: str, execution_namespace: str) -> None:
-        """Seal one accepted provider operation and consume its authorization."""
+    def _bind_accepted_operation(self, operation_name: str, execution_namespace: str) -> dict[str, Any]:
         if (not isinstance(operation_name, str) or not operation_name or len(operation_name) > 512
                 or not isinstance(execution_namespace, str) or not execution_namespace
                 or len(execution_namespace) > 256):
             raise AttemptLedgerError("accepted operation identity is invalid")
         value = self._read()
         identity = {"operation_name": operation_name, "execution_namespace": execution_namespace}
-        if value["status"] == "reserved" and value["attempts"] == 0:
+        if (value["status"] == "reserved" and value["attempts"] == 0
+                and value.get("execution_namespace") == execution_namespace):
             value.update(identity)
             value["attempts"] = 1
             value["status"] = "submitted"
@@ -175,6 +219,15 @@ class AttemptLedger:
         else:
             raise AttemptLedgerError("accepted operation does not match the reserved attempt")
         self._consume_authorization()
+        return self._read()
+
+    def accept_operation(self, operation_name: str, execution_namespace: str) -> None:
+        """Seal one accepted provider operation and consume its authorization."""
+        self._bind_accepted_operation(operation_name, execution_namespace)
+
+    def reconcile_accepted_operation(self, operation_name: str, execution_namespace: str) -> dict[str, Any]:
+        """Idempotently reconcile exact durable acceptance evidence to this reservation."""
+        return self._bind_accepted_operation(operation_name, execution_namespace)
 
     def assert_operation(self, operation_name: str, execution_namespace: str) -> dict[str, Any]:
         """Fail closed unless recovery addresses this ledger's accepted operation."""

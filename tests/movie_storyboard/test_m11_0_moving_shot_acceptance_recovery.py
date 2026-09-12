@@ -1,126 +1,184 @@
 from __future__ import annotations
 
 import base64
-import hashlib
+import importlib.util
 import json
 import os
+import sys
 import tempfile
 import unittest
 import urllib.error
-from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError, MovingShotAdmission, record_existing_authorization, validate_moving_shot_admission
-from vss_provider_reliability import reconstruct_durable_moving_shot_request
+from vss_movie_moving_shot import AttemptLedger, AttemptLedgerError
 from vss_providers import ProviderAccess
-from vss_runtime import RuntimeController
+
+from m11_0_moving_shot_recovery_support import (
+    MP4, OPERATION, MovingShotRecoveryHarness, NoNetworkPreflight, synthetic_admission,
+)
 
 
 REPO = Path(__file__).resolve().parents[2]
-EXPECTED_DIGEST = "6f482e960dc12faa5f9bfc51599a423cb6364374ebc8bb58d919ca6212095d86"
-EXPECTED_NAMESPACE = "vikramaditya-local/shot-471187bad6ae782a5ef83800"
-EXPECTED_PNG = "96aa4941105438137a82dbb9acd71869354900d9320946c9bc548f76960b5459"
-OPERATION = "projects/vss-film-poc/locations/us-central1/publishers/google/models/veo-3.1-generate-001/operations/offline-rehearsal"
-MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
+HANDLER_SPEC = importlib.util.spec_from_file_location(
+    "acceptance_recovery_handler", REPO / "capabilities/movie-moving-shot/handler.py")
+assert HANDLER_SPEC and HANDLER_SPEC.loader
+HANDLER = importlib.util.module_from_spec(HANDLER_SPEC)
+HANDLER_SPEC.loader.exec_module(HANDLER)
 
 
-def shot3_admission() -> MovingShotAdmission:
-    package = json.loads((REPO / "docs/experiments/m11-3-film1-shot3-durable-planning-package.json").read_text())
-    request, digest, namespace = reconstruct_durable_moving_shot_request(package["runtime_package"])
-    input_path = REPO / ".local/movie/m11-3-film1-shot3/shot-471187bad6ae782a5ef83800/inputs/shot-2-final-frame-191.png"
-    image = input_path.read_bytes()
-    if digest != EXPECTED_DIGEST or namespace != EXPECTED_NAMESPACE or hashlib.sha256(image).hexdigest() != EXPECTED_PNG:
-        raise AssertionError("authoritative Shot 3 package or input changed")
-    admission = MovingShotAdmission(request, image)
-    validate_moving_shot_admission(admission)
-    return admission
+class SimulatedProcessDeath(BaseException):
+    """Terminate between durable provider evidence and the ledger callback."""
 
 
-class NoNetworkPreflight:
-    def __init__(self):
-        self.calls = 0
-
-    def run(self, spec):
-        self.calls += 1
-        return None
-
-
-class MovingShotRecoveryRuntimeTests(unittest.TestCase):
-    def make_runtime_root(self, root: Path) -> None:
-        for name in ("capabilities", "providers", "schemas"):
-            link = root / name
-            if not link.exists():
-                link.symlink_to(REPO / name, target_is_directory=True)
-
-    def controller(self, root: Path, transport, preflight=None) -> RuntimeController:
-        self.make_runtime_root(root)
-        return RuntimeController(
-            root=root,
-            external_execution_preflight=preflight or NoNetworkPreflight(),
-            moving_shot_provider_transport=transport,
-            moving_shot_secret_reader=lambda _name: "offline-test-token",
+class MovingShotRecoveryTests(MovingShotRecoveryHarness, unittest.TestCase):
+    def make_handler_context(self, admission, destination, provider, transport=None):
+        return SimpleNamespace(
+            environment="development",
+            admitted_request=admission,
+            safe_configuration={"artifact_root": str(destination)},
+            providers=ProviderAccess(video=provider, video_secret_reader=lambda _name: "offline-test-token",
+                                     video_transport=transport),
         )
 
-    def run_runtime(self, controller, admission, mode):
-        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        return controller.run(
-            "movie.moving-shot-generate", "development", {},
-            {"admission_id": admission.request_sha256, "mode": mode},
-            "offline-acceptance-recovery-test", now, 0.0, dry_run=False,
-            timeout_seconds=30, admitted_request=admission,
-        )
+    def operation_record(self, admission, operation=OPERATION):
+        return {
+            "operation_name": operation,
+            "endpoint": "https://us-central1-aiplatform.googleapis.com/v1/projects/vss-film-poc/locations/us-central1/publishers/google/models/veo-3.1-generate-001:predictLongRunning",
+            "method": "POST",
+            "request_sha256": admission.request_sha256,
+            "execution_namespace": (f"{admission.request['scope']['production_id']}/"
+                                     f"{admission.request['scope']['shot_id']}"),
+            "submission_accepted": True,
+            "polls": [],
+        }
 
-    def runtime_environment(self):
-        return patch.dict(os.environ, {
-            "VSS_VERTEX_AI_PROJECT_ID": "vss-film-poc",
-            "VSS_VERTEX_AI_LOCATION": "us-central1",
-            "VSS_VERTEX_AI_ACCESS_TOKEN": "offline-test-token",
-            "VSS_VERTEX_AI_READINESS_EVIDENCE_FILE": str(REPO / "docs/reviews/m11-0-vertex-readiness-evidence.json"),
-            "VSS_VERTEX_AI_QUOTA_EVIDENCE_FILE": str(REPO / ".local/config/m11-0-veo-quota-evidence.json"),
-        }, clear=False)
+    def test_operation_persisted_then_process_death_reconciles_and_recovers_same_operation(self):
+        admission = synthetic_admission()
+        namespace = f"{admission.request['scope']['production_id']}/{admission.request['scope']['shot_id']}"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = self.authorize(root, admission)
+            destination = root / ".local/movie/m11-0-moving-shot" / admission.request["scope"]["shot_id"] / "output" / admission.request_sha256
+            generation_submissions = []
+            recovery_polls = []
 
-    def authorize(self, root: Path, admission: MovingShotAdmission) -> Path:
-        state = root / ".local/movie/m11-0-moving-shot" / admission.request["scope"]["shot_id"]
-        record_existing_authorization(state / "authorization.json", admission.request_sha256)
-        return state
+            def offline_transport(url, body, _headers, _timeout, _maximum):
+                if url.endswith(":predictLongRunning"):
+                    generation_submissions.append(url)
+                    return 200, json.dumps({"name": OPERATION}).encode()
+                self.assertTrue(url.endswith(":fetchPredictOperation"))
+                self.assertEqual(json.loads(body)["operationName"], OPERATION)
+                record = json.loads((state / f"{admission.request_sha256}.attempt.json").read_text())
+                self.assertEqual(record["status"], "submitted")
+                self.assertEqual(record["attempts"], 1)
+                self.assertEqual(record["operation_name"], OPERATION)
+                self.assertEqual(record["execution_namespace"], namespace)
+                self.assertEqual(json.loads((state / "authorization.json").read_text())["status"], "consumed")
+                recovery_polls.append(url)
+                terminal = {"done": True, "response": {"videos": [{
+                    "bytesBase64Encoded": base64.b64encode(MP4).decode(), "mimeType": "video/mp4",
+                }]}}
+                return 200, json.dumps(terminal).encode()
 
-    def test_shot3_restart_recovery_reuses_accepted_operation_and_admits_terminal_media(self):
-        admission = shot3_admission()
+            provider_path = REPO / "providers/builtin/movie-image-to-video-vertex-veo/implementation.py"
+            provider_spec = importlib.util.spec_from_file_location("crash_window_vertex_provider", provider_path)
+            self.assertIsNotNone(provider_spec)
+            provider_module = importlib.util.module_from_spec(provider_spec)
+            sys.modules[provider_spec.name] = provider_module
+            provider_spec.loader.exec_module(provider_module)
+            provider = provider_module.create_provider()
+            context = self.make_handler_context(admission, destination, provider, offline_transport)
+            original_persist = provider_module._persist_operation
+
+            def persist_then_die(*args, **kwargs):
+                original_persist(*args, **kwargs)
+                raise SimulatedProcessDeath()
+
+            ledger_path = state / f"{admission.request_sha256}.attempt.json"
+            with self.runtime_environment(), patch.object(provider_module, "_persist_operation", persist_then_die):
+                with self.assertRaises(SimulatedProcessDeath):
+                    HANDLER.execute(context, {"admission_id": admission.request_sha256, "mode": "generate"}, False)
+
+            reserved = json.loads(ledger_path.read_text())
+            persisted_operation = json.loads((destination / "operation.json").read_text())
+            self.assertEqual(reserved["status"], "reserved")
+            self.assertEqual(reserved["attempts"], 0)
+            self.assertEqual(reserved["execution_namespace"], namespace)
+            self.assertEqual(json.loads((state / "authorization.json").read_text())["status"], "authorized")
+            self.assertEqual(persisted_operation["operation_name"], OPERATION)
+            self.assertEqual(persisted_operation["request_sha256"], admission.request_sha256)
+            self.assertEqual(persisted_operation["execution_namespace"], namespace)
+            self.assertEqual(len(generation_submissions), 1)
+
+            # A fresh provider instance simulates process restart. Recovery can
+            # only invoke fetchPredictOperation for the persisted identity.
+            context.providers = ProviderAccess(
+                video=provider_module.create_provider(),
+                video_secret_reader=lambda _name: "offline-test-token",
+                video_transport=offline_transport,
+            )
+            with self.runtime_environment():
+                recovered = HANDLER.execute(
+                    context, {"admission_id": admission.request_sha256, "mode": "recover"}, False)
+            self.assertEqual(recovered.output["status"], "recovered_quarantined")
+            self.assertEqual(recovered.output["provider_call_count"], 0)
+            self.assertTrue(Path(recovered.output["video"]).is_file())
+            self.assertTrue(Path(recovered.output["evidence"]).is_file())
+            consumed = json.loads(ledger_path.read_text())
+            self.assertEqual(consumed["status"], "completed")
+            self.assertEqual(consumed["attempts"], 1)
+            self.assertEqual(consumed["operation_name"], OPERATION)
+            self.assertEqual(consumed["execution_namespace"], namespace)
+            self.assertEqual(json.loads((state / "authorization.json").read_text())["status"], "consumed")
+            self.assertEqual(len(generation_submissions), 1)
+            self.assertEqual(len(recovery_polls), 1)
+
+            # Reconciliation and recovery are idempotent after restart.
+            with self.runtime_environment():
+                repeated = HANDLER.execute(
+                    context, {"admission_id": admission.request_sha256, "mode": "recover"}, False)
+            self.assertEqual(repeated.output["status"], "recovered_quarantined")
+            self.assertEqual(json.loads(ledger_path.read_text())["attempts"], 1)
+            self.assertEqual(len(generation_submissions), 1)
+            self.assertEqual(len(recovery_polls), 1)
+
+            with self.assertRaises(AttemptLedgerError):
+                HANDLER.execute(context, {"admission_id": admission.request_sha256, "mode": "generate"}, False)
+            self.assertEqual(len(generation_submissions), 1)
+
+    def test_normal_acceptance_consumes_before_polling_and_recovery_never_submits(self):
+        admission = synthetic_admission()
+        namespace = f"{admission.request['scope']['production_id']}/{admission.request['scope']['shot_id']}"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             state = self.authorize(root, admission)
             submissions = []
             polls = []
 
-            def interrupted_transport(url, body, headers, timeout, maximum):
+            def interrupted_transport(url, _body, _headers, _timeout, _maximum):
                 if url.endswith(":predictLongRunning"):
                     submissions.append(url)
                     return 200, json.dumps({"name": OPERATION}).encode()
-                observed = json.loads((state / f"{EXPECTED_DIGEST}.attempt.json").read_text())
-                self.assertEqual(observed["status"], "submitted")
-                self.assertEqual(observed["attempts"], 1)
-                self.assertEqual(observed["operation_name"], OPERATION)
+                self.assertTrue(url.endswith(":fetchPredictOperation"))
+                record = json.loads((state / f"{admission.request_sha256}.attempt.json").read_text())
+                self.assertEqual((record["status"], record["attempts"]), ("submitted", 1))
+                self.assertEqual(record["execution_namespace"], namespace)
                 self.assertEqual(json.loads((state / "authorization.json").read_text())["status"], "consumed")
-                raise urllib.error.URLError("simulated process interruption while polling")
+                polls.append(url)
+                raise urllib.error.URLError("simulated polling interruption")
 
             with self.runtime_environment():
                 _, failed_code = self.run_runtime(self.controller(root, interrupted_transport), admission, "generate")
             self.assertNotEqual(failed_code, 0)
-            ledger_path = state / f"{EXPECTED_DIGEST}.attempt.json"
-            ledger = json.loads(ledger_path.read_text())
-            authorization = json.loads((state / "authorization.json").read_text())
-            operation_evidence = json.loads((root / ".local/movie/m11-0-moving-shot" / admission.request["scope"]["shot_id"] / "output" / EXPECTED_DIGEST / "operation.json").read_text())
-            self.assertEqual(len(submissions), 1)
-            self.assertEqual(ledger["attempts"], 1)
-            self.assertEqual(ledger["status"], "failed")
-            self.assertEqual(ledger["operation_name"], OPERATION)
-            self.assertEqual(ledger["execution_namespace"], EXPECTED_NAMESPACE)
-            self.assertEqual(authorization["status"], "consumed")
-            self.assertEqual(operation_evidence["request_sha256"], EXPECTED_DIGEST)
-            self.assertEqual(operation_evidence["execution_namespace"], EXPECTED_NAMESPACE)
+            ledger_path = state / f"{admission.request_sha256}.attempt.json"
+            failed = json.loads(ledger_path.read_text())
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(failed["attempts"], 1)
+            self.assertEqual(failed["operation_name"], OPERATION)
 
-            def recovery_transport(url, body, headers, timeout, maximum):
+            def recovery_transport(url, body, _headers, _timeout, _maximum):
                 if url.endswith(":predictLongRunning"):
                     submissions.append(url)
                     return 200, json.dumps({"name": OPERATION}).encode()
@@ -131,88 +189,75 @@ class MovingShotRecoveryRuntimeTests(unittest.TestCase):
                     "bytesBase64Encoded": base64.b64encode(MP4).decode(), "mimeType": "video/mp4",
                 }]}}).encode()
 
-            # A second normal execution must fail before entering the provider transport.
             with self.runtime_environment():
                 _, duplicate_code = self.run_runtime(self.controller(root, recovery_transport), admission, "generate")
             self.assertNotEqual(duplicate_code, 0)
-            self.assertEqual(polls, [])
             self.assertEqual(len(submissions), 1)
-            recovery_preflight = NoNetworkPreflight()
+            self.assertEqual(polls, [polls[0]])
+            preflight = NoNetworkPreflight()
             with self.runtime_environment():
                 os.environ.pop("VSS_VERTEX_AI_QUOTA_EVIDENCE_FILE", None)
                 recovered, recovery_code = self.run_runtime(
-                    self.controller(root, recovery_transport, recovery_preflight), admission, "recover")
+                    self.controller(root, recovery_transport, preflight), admission, "recover")
             self.assertEqual(recovery_code, 0, recovered)
-            self.assertEqual(recovery_preflight.calls, 0)
+            self.assertEqual(preflight.calls, 0)
             self.assertEqual(len(submissions), 1)
-            self.assertEqual(len(polls), 1)
-            self.assertEqual(recovered["output"]["status"], "recovered_quarantined")
             self.assertEqual(recovered["output"]["provider_call_count"], 0)
-            self.assertTrue(Path(recovered["output"]["video"]).is_file())
-            final_ledger = json.loads(ledger_path.read_text())
-            self.assertEqual(final_ledger["attempts"], 1)
-            self.assertEqual(final_ledger["operation_name"], OPERATION)
-            # A lost local artifact can be rebuilt from the same completed
-            # operation without reopening or incrementing the submission.
-            Path(recovered["output"]["video"]).unlink()
-            with self.runtime_environment():
-                os.environ.pop("VSS_VERTEX_AI_QUOTA_EVIDENCE_FILE", None)
-                repeated, repeated_code = self.run_runtime(
-                    self.controller(root, recovery_transport), admission, "recover")
-            self.assertEqual(repeated_code, 0, repeated)
-            self.assertEqual(len(submissions), 1)
-            self.assertEqual(len(polls), 2)
-            self.assertTrue(Path(repeated["output"]["video"]).is_file())
             self.assertEqual(json.loads(ledger_path.read_text())["attempts"], 1)
 
-    def test_recovery_mode_rejects_missing_operation_and_identity_mismatches(self):
-        admission = shot3_admission()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            state = self.authorize(root, admission)
-            output = root / ".local/movie/m11-0-moving-shot" / admission.request["scope"]["shot_id"] / "output" / EXPECTED_DIGEST
-            ledger = AttemptLedger(state / f"{EXPECTED_DIGEST}.attempt.json", EXPECTED_DIGEST)
-            ledger.reserve_execution()
-            calls = []
-            context = type("Context", (), {
-                "environment": "development", "admitted_request": admission,
-                "safe_configuration": {"artifact_root": str(output)},
-                "providers": ProviderAccess(video=type("Provider", (), {
-                    "recover": lambda self, *args, **kwargs: calls.append("recover"),
-                    "generate": lambda self, *args, **kwargs: calls.append("generate"),
-                })(), video_secret_reader=lambda _name: "token"),
-            })()
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("acceptance_recovery_handler", REPO / "capabilities/movie-moving-shot/handler.py")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            with self.assertRaises(ValueError):
-                module.execute(context, {"admission_id": EXPECTED_DIGEST, "mode": "recover"}, False)
-            output.mkdir(parents=True)
+    def test_recovery_rejects_missing_malformed_mismatched_or_conflicting_evidence(self):
+        admission = synthetic_admission()
+        namespace = f"{admission.request['scope']['production_id']}/{admission.request['scope']['shot_id']}"
+        invalid_cases = ("missing", "malformed", "digest", "namespace", "operation", "reservation", "conflict", "bound_operation")
+        for case in invalid_cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                state = self.authorize(root, admission)
+                destination = root / ".local/movie/m11-0-moving-shot" / admission.request["scope"]["shot_id"] / "output" / admission.request_sha256
+                destination.mkdir(parents=True)
+                ledger_path = state / f"{admission.request_sha256}.attempt.json"
+                ledger = AttemptLedger(ledger_path, admission.request_sha256)
+                reservation_namespace = "wrong/identity" if case == "reservation" else namespace
+                ledger.reserve_execution(reservation_namespace)
+                evidence = self.operation_record(admission)
+                if case == "digest":
+                    evidence["request_sha256"] = "0" * 64
+                elif case == "namespace":
+                    evidence["execution_namespace"] = "wrong/identity"
+                elif case == "operation":
+                    evidence["operation_name"] = "not-a-vertex-operation"
+                elif case == "bound_operation":
+                    ledger.accept_operation(OPERATION + "-different", namespace)
+                    ledger.terminal("failed")
+                if case == "malformed":
+                    (destination / "operation.json").write_text("{", encoding="utf-8")
+                elif case != "missing":
+                    (destination / "operation.json").write_text(json.dumps(evidence), encoding="utf-8")
+                if case == "conflict":
+                    (destination / "operation-conflict.json").write_text(json.dumps(evidence), encoding="utf-8")
+                provider_calls = {"generate": 0, "recover": 0}
 
-            for evidence, ledger_operation, ledger_namespace in (
-                ({"operation_name": OPERATION, "request_sha256": "0" * 64, "execution_namespace": EXPECTED_NAMESPACE, "submission_accepted": True}, OPERATION, EXPECTED_NAMESPACE),
-                ({"operation_name": OPERATION, "request_sha256": EXPECTED_DIGEST, "execution_namespace": "wrong/namespace", "submission_accepted": True}, OPERATION, "wrong/namespace"),
-                ({"operation_name": OPERATION + "-other", "request_sha256": EXPECTED_DIGEST, "execution_namespace": EXPECTED_NAMESPACE, "submission_accepted": True}, OPERATION, EXPECTED_NAMESPACE),
-            ):
-                # Each malformed binding gets its own fresh ledger directory.
-                attempt_dir = Path(tempfile.mkdtemp(dir=directory))
-                state2 = attempt_dir / ".local/movie/m11-0-moving-shot" / admission.request["scope"]["shot_id"]
-                record_existing_authorization(state2 / "authorization.json", EXPECTED_DIGEST)
-                ledger2 = AttemptLedger(state2 / f"{EXPECTED_DIGEST}.attempt.json", EXPECTED_DIGEST)
-                ledger2.reserve_execution()
-                ledger2.accept_operation(ledger_operation, ledger_namespace)
-                ledger2.terminal("failed")
-                output2 = attempt_dir / ".local/movie/m11-0-moving-shot" / admission.request["scope"]["shot_id"] / "output" / EXPECTED_DIGEST
-                output2.mkdir(parents=True)
-                (output2 / "operation.json").write_text(json.dumps(evidence))
-                context.safe_configuration = {"artifact_root": str(output2)}
-                with self.assertRaises(ValueError):
-                    module.execute(context, {"admission_id": EXPECTED_DIGEST, "mode": "recover"}, False)
-            self.assertEqual(calls, [])
+                class NeverProvider:
+                    def generate(self, *_args, **_kwargs):
+                        provider_calls["generate"] += 1
+                        raise AssertionError("mismatched recovery must not generate")
 
-    def test_malformed_terminal_and_media_admission_failures_recover_same_operation(self):
-        admission = shot3_admission()
+                    def recover(self, *_args, **_kwargs):
+                        provider_calls["recover"] += 1
+                        raise AssertionError("invalid recovery must not poll")
+
+                context = self.make_handler_context(admission, destination, NeverProvider())
+                with self.assertRaises((ValueError, AttemptLedgerError)):
+                    HANDLER.execute(context, {"admission_id": admission.request_sha256, "mode": "recover"}, False)
+                self.assertEqual(provider_calls, {"generate": 0, "recover": 0})
+                current = json.loads(ledger_path.read_text())
+                if case != "bound_operation":
+                    self.assertEqual(current["attempts"], 0)
+                    self.assertEqual(current["status"], "reserved")
+                    self.assertEqual(json.loads((state / "authorization.json").read_text())["status"], "authorized")
+
+    def test_malformed_terminal_and_media_admission_failures_never_resubmit(self):
+        admission = synthetic_admission()
         for failure_kind in ("malformed_terminal", "invalid_media"):
             with self.subTest(failure_kind=failure_kind), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -220,7 +265,7 @@ class MovingShotRecoveryRuntimeTests(unittest.TestCase):
                 submissions = []
                 polls = []
 
-                def transport(url, body, headers, timeout, maximum):
+                def transport(url, body, _headers, _timeout, _maximum):
                     if url.endswith(":predictLongRunning"):
                         submissions.append(url)
                         return 200, json.dumps({"name": OPERATION}).encode()
@@ -232,34 +277,28 @@ class MovingShotRecoveryRuntimeTests(unittest.TestCase):
                     elif len(polls) == 1:
                         terminal = {"done": True, "response": {"videos": [{
                             "bytesBase64Encoded": base64.b64encode(b"invalid media").decode(),
-                            "mimeType": "video/mp4",
                         }]}}
                     else:
                         terminal = {"done": True, "response": {"videos": [{
                             "bytesBase64Encoded": base64.b64encode(MP4).decode(),
-                            "mimeType": "video/mp4",
                         }]}}
                     return 200, json.dumps(terminal).encode()
 
                 with self.runtime_environment():
                     _, initial_code = self.run_runtime(self.controller(root, transport), admission, "generate")
                 self.assertNotEqual(initial_code, 0)
-                ledger_path = state / f"{EXPECTED_DIGEST}.attempt.json"
-                failed_ledger = json.loads(ledger_path.read_text())
-                self.assertEqual(failed_ledger["attempts"], 1)
-                self.assertEqual(failed_ledger["operation_name"], OPERATION)
+                ledger_path = state / f"{admission.request_sha256}.attempt.json"
+                failed = json.loads(ledger_path.read_text())
+                self.assertEqual(failed["attempts"], 1)
+                self.assertEqual(failed["operation_name"], OPERATION)
                 self.assertEqual(json.loads((state / "authorization.json").read_text())["status"], "consumed")
-
                 with self.runtime_environment():
                     recovered, recovery_code = self.run_runtime(self.controller(root, transport), admission, "recover")
                 self.assertEqual(recovery_code, 0, recovered)
                 self.assertEqual(len(submissions), 1)
                 self.assertEqual(len(polls), 2)
-                self.assertEqual(recovered["output"]["provider_call_count"], 0)
                 self.assertEqual(json.loads(ledger_path.read_text())["attempts"], 1)
                 self.assertEqual(json.loads(ledger_path.read_text())["status"], "completed")
-
-
 
 
 if __name__ == "__main__":

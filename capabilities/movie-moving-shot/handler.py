@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import re
 
 from vss_capabilities import CapabilityResult, SDK_API_VERSION
-from vss_movie_moving_shot import AttemptLedger, IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECONDS, MovingShotAdmission, validate_moving_shot_admission
+from vss_movie_moving_shot import AttemptLedger, IMAGE_MIME_TYPE, IMAGE_TO_VIDEO_DURATION_SECONDS, MODEL_SNAPSHOT, MovingShotAdmission, validate_moving_shot_admission
 from vss_providers import ImageToVideoRequest
 
 AUTHORITY = {"production": False, "publication": False, "retry": False, "fallback": False, "workflow_activation": False}
+_OPERATION_NAME = re.compile(
+    rf"^projects/[A-Za-z0-9][A-Za-z0-9-]{{0,127}}/locations/us-central1/"
+    rf"publishers/google/models/{re.escape(MODEL_SNAPSHOT)}/operations/[A-Za-z0-9._-]{{1,512}}$"
+)
 
 
 def _provider_acceptance_evidenced(exc, evidence_path) -> bool:
@@ -17,6 +22,33 @@ def _provider_acceptance_evidenced(exc, evidence_path) -> bool:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         evidence = None
     return provider_acceptance_evidenced(diagnostic, evidence)
+
+
+def _load_accepted_operation(destination, request_sha256, execution_namespace):
+    try:
+        records = [path for path in destination.iterdir()
+                   if (path.name.lower() == "operation.json"
+                       or (path.name.lower().startswith("operation")
+                           and (".json" in path.name.lower()
+                                or path.name.lower().endswith(".tmp"))))]
+    except OSError as exc:
+        raise ValueError("accepted operation evidence is unavailable") from exc
+    if len(records) != 1 or records[0].name != "operation.json":
+        raise ValueError("operation evidence is missing or conflicting")
+    try:
+        evidence = json.loads(records[0].read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("accepted operation evidence is malformed") from exc
+    operation_name = evidence.get("operation_name") if isinstance(evidence, dict) else None
+    if (not isinstance(evidence, dict)
+            or evidence.get("submission_accepted") is not True
+            or evidence.get("request_sha256") != request_sha256
+            or evidence.get("execution_namespace") != execution_namespace
+            or not isinstance(operation_name, str)
+            or len(operation_name) > 512
+            or _OPERATION_NAME.fullmatch(operation_name) is None):
+        raise ValueError("accepted operation evidence does not match recovery")
+    return evidence, operation_name
 
 
 def _admit_terminal_media(result, admission, destination, ledger):
@@ -72,18 +104,14 @@ def execute(context, input_data, dry_run):
         admission.request_sha256,
     )
     if mode == "recover":
-        try:
-            evidence = json.loads((destination / "operation.json").read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError("accepted operation evidence is unavailable") from exc
-        operation_name = evidence.get("operation_name") if isinstance(evidence, dict) else None
+        evidence, operation_name = _load_accepted_operation(
+            destination, admission.request_sha256, execution_namespace)
         if not same_operation_recovery_required(accepted=provider_acceptance_evidenced(evidence=evidence)):
             raise ValueError("accepted operation evidence is unavailable")
-        record = ledger.assert_operation(operation_name, execution_namespace)
-        if (evidence.get("request_sha256") != admission.request_sha256
-                or evidence.get("execution_namespace") != execution_namespace
-                or record.get("request_sha256") != admission.request_sha256):
-            raise ValueError("accepted operation evidence does not match recovery")
+        # The operation file is durably written immediately after Vertex
+        # acceptance. Reconcile only a reserved attempt for this exact digest
+        # and namespace; an already-bound identical operation is idempotent.
+        record = ledger.reconcile_accepted_operation(operation_name, execution_namespace)
         if record["status"] == "completed" and (destination / "shot.mp4").is_file() and (destination / "evidence.json").is_file():
             return CapabilityResult.success({**common, "status": "recovered_quarantined", "provider_call_count": 0,
                                              "attempt_reserved": True, "artifact_root": str(destination),
@@ -94,26 +122,22 @@ def execute(context, input_data, dry_run):
             duration_seconds=IMAGE_TO_VIDEO_DURATION_SECONDS, resolution="720p", generate_audio=False,
             image_mime_type=IMAGE_MIME_TYPE, operation_evidence_path=destination / "operation.json",
             execution_namespace=execution_namespace), operation_name)
+        if result.provider_request_id != operation_name:
+            raise ValueError("recovery returned a different provider operation")
         video, evidence_path = _admit_terminal_media(result, admission, destination, ledger)
         return CapabilityResult.success({**common, "status": "recovered_quarantined", "provider_call_count": 0,
                                          "attempt_reserved": True, "artifact_root": str(destination),
                                          "video": str(video), "evidence": str(evidence_path)})
     # The Runtime boundary has completed closed readiness and is now entering
     # the one execution slot. Reservation is not provider consumption.
-    ledger.reserve_execution()
+    ledger.reserve_execution(execution_namespace)
     accepted = False
 
     def record_acceptance(operation_name):
         nonlocal accepted
-        try:
-            evidence_value = json.loads((destination / "operation.json").read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError("accepted provider operation evidence is unavailable") from exc
-        if (not isinstance(evidence_value, dict)
-                or evidence_value.get("operation_name") != operation_name
-                or evidence_value.get("request_sha256") != admission.request_sha256
-                or evidence_value.get("execution_namespace") != execution_namespace
-                or not provider_acceptance_evidenced(evidence=evidence_value)):
+        evidence_value, persisted_operation = _load_accepted_operation(
+            destination, admission.request_sha256, execution_namespace)
+        if persisted_operation != operation_name:
             raise ValueError("accepted provider operation identity does not match this execution")
         ledger.accept_operation(operation_name, execution_namespace)
         accepted = True
