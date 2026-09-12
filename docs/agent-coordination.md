@@ -232,11 +232,13 @@ Validation receipts bind the governed change identity, residue-provenance digest
 evidence subject HEAD, harness map, and controller policy. A legacy receipt without
 that binding remains in history but is quarantined before new validation can advance
 the milestone. CI is admitted only through the controller's read-only API refresh for
-the exact committed HEAD on the pinned `.github/workflows/ci.yml` blob and the complete
-required job set (`Scan for secrets`, `Validate`, `Test`). CI cannot change source
-identity or clear `CONFLICT`; every identity rebound clears CI and requires a fresh
-exact-HEAD observation. The API refresh and local history append cannot be atomic with
-Git ref movement, so any movement during admission fails closed and requires recovery.
+the exact committed HEAD and bound branch, on the pinned `.github/workflows/ci.yml` blob,
+using the `pull_request` workflow event and complete required job set (`Scan for secrets`,
+`Validate`, `Test`). The event filter excludes a same-commit `push` run from making the
+pull-request observation ambiguous. CI cannot change source identity or clear `CONFLICT`;
+every identity rebound clears CI and requires a fresh exact-HEAD observation. The API
+refresh and local history append cannot be atomic with Git ref movement, so any movement
+during admission fails closed and requires recovery.
 
 `vss dev milestone next --packet` emits a strict, deterministic
 `vss.dev-milestone-execution-packet` for reset-session handoff. The packet binds the exact

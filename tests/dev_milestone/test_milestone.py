@@ -798,6 +798,13 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(after_ci["ci"]["head_sha"], new_head)
         self.assertEqual(after_ci["status"], "CANONICAL_VALIDATION_REQUIRED")
         self.assertTrue(all(value is False for value in after_ci["authority"].values()))
+        (self.root / "README.md").write_text("post-recovery governed change\n", encoding="utf-8")
+        current_repository = self.controller._repository(
+            self.base, self.controller._residue_from_events(self.controller._read_events(
+                "review-ready-source-identity-recovery")))
+        self.assertNotEqual(current_repository["change_identity"], rebound["repository"]["change_identity"])
+        self.assertIsNone(self.controller._validation_current(
+            self.controller._read_events("review-ready-source-identity-recovery"), current_repository))
 
     def test_issue160_recovery_rejects_unregistered_mixed_and_dirty_content(self) -> None:
         ready = self.issue160_review_ready()
@@ -1217,6 +1224,59 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertTrue(security_state["next"]["human_boundary"])
         self.assertEqual(security_state["routing"]["model"], "gpt-5.6-sol-high")
 
+    def test_ci_fetch_selects_pull_request_run_when_push_run_shares_exact_head(self) -> None:
+        state = self.initialize()
+        branch = "feature/dev-wf-1"
+        self.git("switch", "-c", branch)
+        state = self.controller.transition_branch("dev-wf-1", "main", branch, "Bind feature branch.",
+                                                  state["generation"])
+        head = state["repository"]["head_sha"]
+        workflow_id = 320539740
+        runs = [
+            {"id": 34723298598, "run_attempt": 1, "workflow_id": workflow_id,
+             "path": ".github/workflows/ci.yml", "event": "push", "head_branch": branch,
+             "head_sha": head, "status": "completed", "conclusion": "success"},
+            {"id": 34723670807, "run_attempt": 1, "workflow_id": workflow_id,
+             "path": ".github/workflows/ci.yml", "event": "pull_request", "head_branch": branch,
+             "head_sha": head, "status": "completed", "conclusion": "success"},
+        ]
+        jobs = [{"name": name, "status": "completed", "conclusion": "success", "head_sha": head}
+                for name in ("Validate", "Scan for secrets", "Test")]
+        run_endpoint = (f"repos/example/vss/actions/workflows/{workflow_id}/runs?head_sha={head}"
+                        f"&branch={branch}&event=pull_request&per_page=100")
+        responses = {
+            "repos/example/vss/actions/workflows/ci.yml": {
+                "id": workflow_id, "path": ".github/workflows/ci.yml", "state": "active"},
+            run_endpoint: {"total_count": len(runs), "workflow_runs": runs},
+            "repos/example/vss/actions/runs/34723670807/jobs?filter=latest&per_page=100": {
+                "total_count": len(jobs), "jobs": jobs},
+        }
+        calls: list[str] = []
+
+        def api(endpoint: str) -> dict:
+            calls.append(endpoint)
+            return responses[endpoint]
+
+        with patch.object(self.controller, "_ci_api", side_effect=api):
+            observation = self.controller._fetch_ci_observation(state)
+
+        self.assertEqual(observation["run_id"], 34723670807)
+        self.assertEqual(observation["head_sha"], head)
+        self.assertEqual(observation["jobs"], jobs)
+        self.assertEqual(calls[1], run_endpoint)
+        self.assertEqual(calls[2],
+                         "repos/example/vss/actions/runs/34723670807/jobs?filter=latest&per_page=100")
+
+    def test_ci_fetch_rejects_truncated_workflow_run_pages(self) -> None:
+        state = self.initialize()
+        responses = [
+            {"id": 41, "path": ".github/workflows/ci.yml", "state": "active"},
+            {"total_count": 101, "workflow_runs": []},
+        ]
+        with patch.object(self.controller, "_ci_api", side_effect=responses):
+            with self.assertRaisesRegex(MilestoneFailure, "inventory is malformed or incomplete"):
+                self.controller._fetch_ci_observation(state)
+
     def test_repair_budget_and_malformed_ci_are_closed(self) -> None:
         self.initialize()
         for attempt in range(3):
@@ -1289,6 +1349,45 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(first["status"], "passed")
         self.assertEqual(second["status"], "reused")
         self.assertEqual(first["evidence_sha256"], second["evidence_sha256"])
+
+    def test_validation_after_same_identity_rebind_does_not_reuse_receipt_for_changed_identity(self) -> None:
+        initialized = self.initialize()
+        self.git("switch", "-c", "feature/dev-wf-1")
+        transitioned = self.controller.transition_branch(
+            "dev-wf-1", "main", "feature/dev-wf-1", "Bind feature branch.", initialized["generation"])
+
+        source = self.root / "README.md"
+        source.write_text("governed identity A\n", encoding="utf-8")
+        validation_a = self.controller.validate("canonical", "dev-wf-1")
+        identity_a = self.controller.load("dev-wf-1")["repository"]["change_identity"]
+        event_a = [event for event in self.controller._read_events("dev-wf-1")
+                   if event["event_type"] == "validation_completed"][-1]
+        self.assertEqual(event_a["data"]["governed_change_identity"], identity_a)
+
+        self.git("add", "README.md")
+        self.git("commit", "-qm", "commit governed identity A")
+        rebound = self.controller.rebind_committed_head(
+            "dev-wf-1", "Bind committed identity A.", validation_a.get("generation", transitioned["generation"] + 1))
+        self.assertEqual(rebound["repository"]["change_identity"], identity_a)
+        self.assertEqual(rebound["validation"]["evidence_sha256"], validation_a["evidence_sha256"])
+        same_identity = self.controller.validate("canonical", "dev-wf-1")
+        self.assertEqual(same_identity["status"], "reused")
+        self.assertEqual(same_identity["evidence_sha256"], validation_a["evidence_sha256"])
+
+        source.write_text("governed identity B\n", encoding="utf-8")
+        identity_b = self.controller._repository(self.base)["change_identity"]
+        self.assertNotEqual(identity_b, identity_a)
+        validation_b = self.controller.validate("canonical", "dev-wf-1")
+        self.assertEqual(validation_b["status"], "passed")
+        self.assertNotEqual(validation_b["evidence_sha256"], validation_a["evidence_sha256"])
+
+        events = self.controller._read_events("dev-wf-1")
+        latest_validation = [event for event in events if event["event_type"] == "validation_completed"][-1]
+        self.assertEqual(latest_validation["data"]["governed_change_identity"], identity_b)
+        state = self.controller.load("dev-wf-1")
+        repository = self.controller._repository(self.base, self.controller._residue_from_events(events))
+        self.assertEqual(state, self.controller._project(events, repository))
+        self.assertEqual(state, self.controller.load("dev-wf-1"))
 
     def test_issue161_preexisting_baseline_residue_is_provenanced_and_excluded_narrowly(self) -> None:
         baseline_path = self.root / ".secrets.baseline"

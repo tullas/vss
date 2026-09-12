@@ -1917,9 +1917,11 @@ class MilestoneController:
                 if (rebound.get("recovery_kind") == "review_ready_checkpoint_artifacts"
                         and rebound.get("old_change_identity") == identity
                         and rebound.get("residue_provenance_sha256", data["residue_provenance_sha256"])
-                        == data["residue_provenance_sha256"]):
+                        == data["residue_provenance_sha256"]
+                        and rebound.get("change_identity") == repository["change_identity"]):
                     equivalent = True
-                elif rebound.get("change_identity") == identity:
+                elif (rebound.get("change_identity") == identity
+                      and identity == repository["change_identity"]):
                     equivalent = True
                 else:
                     return None
@@ -2128,12 +2130,16 @@ class MilestoneController:
                 or workflow.get("path") != CI_WORKFLOW_PATH or workflow.get("state") != "active"):
             raise MilestoneFailure("GitHub CI workflow identity is unavailable or ambiguous")
         runs_value = self._ci_api(
-            f"repos/{repository['name_with_owner']}/actions/workflows/{workflow_id}/runs?head_sha={head}&per_page=100")
+            f"repos/{repository['name_with_owner']}/actions/workflows/{workflow_id}/runs?head_sha={head}"
+            f"&branch={repository['branch']}&event=pull_request&per_page=100")
         runs = runs_value.get("workflow_runs")
-        if type(runs) is not list:
-            raise MilestoneFailure("GitHub CI workflow runs are malformed")
+        if (type(runs) is not list or type(runs_value.get("total_count")) is not int
+                or runs_value["total_count"] != len(runs)):
+            raise MilestoneFailure("GitHub CI workflow run inventory is malformed or incomplete")
         matching = [run for run in runs if type(run) is dict and run.get("head_sha") == head
-                    and run.get("workflow_id") == workflow_id]
+                    and run.get("workflow_id") == workflow_id
+                    and run.get("head_branch") == repository["branch"]
+                    and run.get("event") == "pull_request"]
         if len(matching) != 1:
             raise MilestoneFailure("GitHub CI run for exact HEAD is missing or ambiguous")
         run = matching[0]
