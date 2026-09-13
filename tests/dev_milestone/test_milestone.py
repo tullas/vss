@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import hashlib
+import io
 import shutil
 import subprocess
 import tempfile
 import unittest
+from contextlib import chdir, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -79,6 +81,24 @@ class MilestoneControllerTests(unittest.TestCase):
 
     def git(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=True)
+
+    def cli(self, *args: str) -> tuple[int, dict]:
+        from vss_commands.cli import main
+
+        output = io.StringIO()
+        with chdir(self.root), redirect_stdout(output):
+            result = main(list(args))
+        try:
+            value = json.loads(output.getvalue())
+        except json.JSONDecodeError:
+            value = {"raw": output.getvalue()}
+        return result, value
+
+    def cli_success(self, *args: str) -> dict:
+        code, value = self.cli(*args)
+        self.assertEqual(code, 0, value)
+        self.assertNotIn("error", value)
+        return value
 
     def initialize(self) -> dict:
         return self.controller.initialize("dev-wf-1", self.base, 114, ["agent-coordination"], ["src/demo"], "Approved bounded development milestone.", mission_evidence())
@@ -1814,6 +1834,237 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertEqual(ready["status"], "REVIEW_READY")
         self.assertEqual(ready["next"], {"action": "request_merge", "human_boundary": True})
         self.assertTrue(all(value is False for value in ready["authority"].values()))
+
+    def test_cli_modern_lifecycle_is_reachable_replay_stable_and_pull_request_bound(self) -> None:
+        from vss_dev import MilestoneController as ControllerType
+
+        identifier = "cli-modern-lifecycle"
+        branch = f"feature/{identifier}"
+        mission = self.root / ".vss/mission-input.json"
+        mission.parent.mkdir(parents=True, exist_ok=True)
+        mission.write_text(json.dumps(mission_evidence()), encoding="utf-8")
+        initialized = self.cli_success(
+            "dev", "milestone", "init", "--milestone-id", identifier,
+            "--base", self.base, "--issue", "171", "--domain", "dev-milestone",
+            "--path", "README.md", "--summary", "Exercise the complete modern CLI lifecycle.",
+            "--mission-input", str(mission))
+        self.assertEqual(initialized["next"], {"action": "start_bounded_work", "human_boundary": False})
+        self.assertEqual(initialized["repository"]["branch"], "main")
+        self.git("switch", "-c", branch)
+        transitioned = self.cli_success(
+            "dev", "milestone", "transition-branch", "--milestone-id", identifier,
+            "--from-branch", "main", "--to-branch", branch,
+            "--summary", "Bind the exact feature branch.", "--expected-generation", "0")
+        self.assertEqual(transitioned["repository"]["branch"], branch)
+
+        residue = self.root / ".local/secrets/development.auto.tfvars.example"
+        residue_before = residue.read_bytes()
+        (self.root / "README.md").write_text("governed CLI lifecycle change\n", encoding="utf-8")
+        working = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(working["next"], {"action": "run_affected_validation", "human_boundary": False})
+        self.assertNotIn(".local/secrets/development.auto.tfvars.example", working["scope"]["paths"])
+        self.cli_success("dev", "milestone", "validate", "--milestone-id", identifier,
+                         "--tier", "canonical")
+        precommit = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(precommit["next"], {"action": "request_pr", "human_boundary": True})
+        self.assertEqual(precommit["validation"]["level"], "L3")
+        self.git("add", "README.md")
+        self.git("commit", "-qm", "Commit governed CLI lifecycle change")
+        conflict = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(conflict["next"], {"action": "recover_state", "human_boundary": True})
+        rebound = self.cli_success(
+            "dev", "milestone", "rebind-committed-head", "--milestone-id", identifier,
+            "--summary", "Bind the exact committed source.",
+            "--expected-generation", str(precommit["generation"]))
+        self.assertEqual(rebound["next"], {"action": "run_affected_validation", "human_boundary": False})
+        self.assertEqual(rebound["validation"], {"evidence_sha256": None, "level": "none"})
+        self.assertEqual(rebound["ci"]["status"], "not_observed")
+        self.cli_success("dev", "milestone", "validate", "--milestone-id", identifier,
+                         "--tier", "canonical")
+        waiting_pr = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(waiting_pr["next"], {"action": "request_pr", "human_boundary": True})
+        exact = waiting_pr["repository"]
+        pull = {"number": 171, "state": "open",
+                "head": {"ref": branch, "sha": exact["head_sha"],
+                         "repo": {"full_name": exact["name_with_owner"]}},
+                "base": {"ref": "main", "sha": exact["base_sha"],
+                         "repo": {"full_name": exact["name_with_owner"]}}}
+        with patch.object(ControllerType, "_pr_api", autospec=True,
+                          side_effect=lambda _controller, _endpoint: [pull]):
+            observed = self.cli_success("dev", "milestone", "pr", "--milestone-id", identifier, "--refresh")
+        self.assertEqual(observed["next"], {"action": "ingest_ci", "human_boundary": False})
+        self.assertEqual(observed["pull_request_number"], 171)
+
+        workflow_id, run_id = 551, 9002
+        jobs = [{"name": name, "status": "completed", "conclusion": "success",
+                 "head_sha": exact["head_sha"]}
+                for name in ("Scan for secrets", "Validate", "Test")]
+        runs = [
+            {"id": run_id - 1, "run_attempt": 1, "workflow_id": workflow_id,
+             "path": ".github/workflows/ci.yml", "event": "push", "head_branch": branch,
+             "head_sha": exact["head_sha"], "status": "completed", "conclusion": "success"},
+            {"id": run_id, "run_attempt": 1, "workflow_id": workflow_id,
+             "path": ".github/workflows/ci.yml", "event": "pull_request", "head_branch": branch,
+             "head_sha": exact["head_sha"], "status": "completed", "conclusion": "success"},
+        ]
+        run_endpoint = (f"repos/{exact['name_with_owner']}/actions/workflows/{workflow_id}/runs?head_sha={exact['head_sha']}"
+                        f"&branch={branch}&event=pull_request&per_page=100")
+        responses = {
+            f"repos/{exact['name_with_owner']}/actions/workflows/ci.yml": {
+                "id": workflow_id, "path": ".github/workflows/ci.yml", "state": "active"},
+            run_endpoint: {"total_count": len(runs), "workflow_runs": runs},
+            f"repos/{exact['name_with_owner']}/actions/runs/{run_id}/jobs?filter=latest&per_page=100": {
+                "total_count": len(jobs), "jobs": jobs},
+        }
+        with patch.object(ControllerType, "_ci_api", autospec=True,
+                          side_effect=lambda _controller, endpoint: responses[endpoint]) as api:
+            ci = self.cli_success("dev", "milestone", "ci", "--milestone-id", identifier, "--refresh")
+        self.assertEqual(ci["status"], "passed")
+        self.assertEqual(api.call_args_list[1].args[1], run_endpoint)
+        waiting_validation = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(waiting_validation["next"],
+                         {"action": "run_canonical_validation", "human_boundary": False})
+        self.cli_success("dev", "milestone", "validate", "--milestone-id", identifier,
+                         "--tier", "canonical")
+        ready = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(ready["status"], "REVIEW_READY")
+        self.assertEqual(ready["next"], {"action": "request_merge", "human_boundary": True})
+        self.assertEqual(residue.read_bytes(), residue_before)
+        self.assertTrue(all(value is False for value in ready["authority"].values()))
+
+        history_path = self.root / ".vss/milestones" / identifier / "history.ndjson"
+        history_before = history_path.read_bytes()
+        events = [json.loads(line) for line in history_before.splitlines()]
+        self.assertEqual([event["sequence"] for event in events], list(range(1, len(events) + 1)))
+        for prior, event in zip(events, events[1:]):
+            self.assertEqual(event["prior_event_sha256"], prior["event_sha256"])
+        self.assertEqual([event["event_type"] for event in events[-5:]], [
+            "identity_rebound", "validation_completed", "pr_observed", "ci_observed", "validation_completed"])
+        self.assertTrue(all(all(value is False for value in event["authority"].values()) for event in events))
+        self.assertEqual(self.cli_success("dev", "milestone", "status", "--milestone-id", identifier), ready)
+        self.assertEqual(self.cli_success("dev", "milestone", "status", "--milestone-id", identifier), ready)
+        reused = self.cli_success("dev", "milestone", "validate", "--milestone-id", identifier,
+                                  "--tier", "canonical")
+        self.assertEqual(reused["status"], "reused")
+        self.assertEqual(history_path.read_bytes(), history_before)
+        self.assertEqual(residue.read_bytes(), residue_before)
+
+    def test_cli_checkpoint_artifact_recovery_is_bounded_append_only_and_clears_old_ci(self) -> None:
+        from vss_dev import MilestoneController as ControllerType
+
+        ready = self.issue160_review_ready()
+        identifier = "review-ready-source-identity-recovery"
+        old_head = ready["repository"]["head_sha"]
+        envelope = self.issue160_envelope(ready)
+        bundle = self.root.parent / (self.root.name + "-m11p-cli-checkpoint-bundle.json")
+        bundle.write_text(json.dumps([envelope], sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        registered = self.cli_success(
+            "dev", "milestone", "register-checkpoint-artifacts", "--milestone-id", identifier,
+            "--input", str(bundle), "--summary", "Register exact checkpoint artifacts through CLI.",
+            "--expected-generation", str(ready["generation"]),
+            "--human-disposition", "I reviewed these exact issue 160 artifacts.",
+            "--reviewer", "test-reviewer")
+        manifest_digest = registered["manifest_sha256"]
+        history_path = self.root / ".vss/milestones" / identifier / "history.ndjson"
+        history_before = history_path.read_bytes()
+        new_head = self.commit_issue160_manifest(registered["manifest"])
+        recovered = self.cli_success(
+            "dev", "milestone", "rebind-committed-head", "--milestone-id", identifier,
+            "--summary", "Recover only the registered committed review artifacts.",
+            "--expected-generation", str(registered["state"]["generation"]),
+            "--checkpoint-manifest-sha256", manifest_digest,
+            "--human-disposition", "I authorize this exact registered recovery.",
+            "--reviewer", "test-reviewer")
+        self.assertEqual(recovered["repository"]["head_sha"], new_head)
+        self.assertEqual(recovered["status"], "CI_PENDING")
+        self.assertEqual(recovered["next"], {"action": "ingest_ci", "human_boundary": False})
+        self.assertEqual(recovered["ci"], {"head_sha": None, "status": "not_observed", "classification": "none"})
+        self.assertEqual(recovered["validation"], ready["validation"])
+        self.assertTrue(history_path.read_bytes().startswith(history_before))
+        recovery_event = self.controller._read_events(identifier)[-1]
+        self.assertEqual(recovery_event["event_type"], "identity_rebound")
+        self.assertEqual(recovery_event["data"]["recovery_kind"], "review_ready_checkpoint_artifacts")
+        self.assertEqual(recovery_event["data"]["rebound_from_head"], old_head)
+        self.assertEqual(recovery_event["data"]["new_head"], new_head)
+        self.assertTrue(all(value is False for value in recovery_event["authority"].values()))
+
+        stale = self.ci_observation(recovered, head_sha=old_head)
+        history_after_recovery = history_path.read_bytes()
+        with patch.object(ControllerType, "_fetch_ci_observation", autospec=True,
+                          return_value=stale):
+            code, rejected = self.cli("dev", "milestone", "ci", "--milestone-id", identifier, "--refresh")
+        self.assertNotEqual(code, 0)
+        self.assertIn("exact admitted source", rejected["error"])
+        self.assertEqual(history_path.read_bytes(), history_after_recovery)
+        fresh = self.ci_observation(recovered)
+        with patch.object(ControllerType, "_fetch_ci_observation", autospec=True,
+                          return_value=fresh):
+            ci = self.cli_success("dev", "milestone", "ci", "--milestone-id", identifier, "--refresh")
+        self.assertEqual(ci["status"], "passed")
+        after_ci = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(after_ci["next"],
+                         {"action": "run_canonical_validation", "human_boundary": False})
+        self.assertEqual(self.cli_success("dev", "milestone", "status", "--milestone-id", identifier), after_ci)
+
+    def test_cli_modern_base_recovery_invalidates_then_reenters_pr_ci_path(self) -> None:
+        from vss_dev import MilestoneController as ControllerType
+
+        identifier, ready, history_before, old_head, new_base = self.modern_base_advance_fixture(
+            with_ci=True, identifier="cli-base-recovery")
+        self.assertEqual(ready["status"], "REVIEW_READY")
+        self.assertEqual(ready["ci"]["status"], "passed")
+
+        waiting = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(waiting["status"], "CONFLICT")
+        self.assertEqual(waiting["next"], {"action": "recover_state", "human_boundary": True})
+        recovered = self.cli_success(
+            "dev", "milestone", "recover-base-advancement", "--milestone-id", identifier,
+            "--summary", "Recover the exact controller-changing main merge.",
+            "--expected-generation", str(waiting["generation"]))
+        merge_head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(recovered["repository"]["head_sha"], merge_head)
+        self.assertEqual(recovered["repository"]["base_sha"], new_base)
+        self.assertEqual(recovered["status"], "CANONICAL_VALIDATION_REQUIRED")
+        self.assertEqual(recovered["next"],
+                         {"action": "run_canonical_validation", "human_boundary": False})
+        self.assertEqual(recovered["validation"], {"evidence_sha256": None, "level": "none"})
+        self.assertEqual(recovered["ci"], {"head_sha": None, "status": "not_observed", "classification": "none"})
+        history_path = self.root / ".vss/milestones" / identifier / "history.ndjson"
+        self.assertEqual(history_path.read_bytes().splitlines()[:-1], history_before.splitlines())
+        recovery_event = self.controller._read_events(identifier)[-1]
+        self.assertEqual(recovery_event["event_type"], "base_advanced_recovery")
+        self.assertEqual(recovery_event["data"]["prior_head_sha"], old_head)
+        self.assertEqual(recovery_event["data"]["new_base_sha"], new_base)
+        self.assertTrue(recovery_event["data"]["validation_invalidated"])
+        self.assertTrue(recovery_event["data"]["ci_invalidated"])
+        self.assertTrue(all(value is False for value in recovery_event["authority"].values()))
+        self.cli_success("dev", "milestone", "validate", "--milestone-id", identifier,
+                         "--tier", "canonical")
+        request_pr = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(request_pr["next"], {"action": "request_pr", "human_boundary": True})
+        pr = self.pr_observation(request_pr)
+        with patch.object(ControllerType, "_fetch_pr_observation", autospec=True,
+                          return_value=pr):
+            observed = self.cli_success("dev", "milestone", "pr", "--milestone-id", identifier, "--refresh")
+        self.assertEqual(observed["next"], {"action": "ingest_ci", "human_boundary": False})
+        ci_observation = self.ci_observation(self.controller.load(identifier))
+        with patch.object(ControllerType, "_fetch_ci_observation", autospec=True,
+                          return_value=ci_observation):
+            ci = self.cli_success("dev", "milestone", "ci", "--milestone-id", identifier, "--refresh")
+        self.assertEqual(ci["status"], "passed")
+        waiting_validation = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(waiting_validation["next"],
+                         {"action": "run_canonical_validation", "human_boundary": False})
+        self.cli_success("dev", "milestone", "validate", "--milestone-id", identifier,
+                         "--tier", "canonical")
+        ready = self.cli_success("dev", "milestone", "status", "--milestone-id", identifier)
+        self.assertEqual(ready["next"], {"action": "request_merge", "human_boundary": True})
+        events = self.controller._read_events(identifier)
+        self.assertEqual([event["event_type"] for event in events[-5:]], [
+            "base_advanced_recovery", "validation_completed", "pr_observed", "ci_observed",
+            "validation_completed"])
+        self.assertEqual(self.cli_success("dev", "milestone", "status", "--milestone-id", identifier), ready)
+        self.assertTrue(all(all(value is False for value in event["authority"].values()) for event in events))
 
     def test_resealed_pull_request_substitution_does_not_change_bound_source(self) -> None:
         self.initialize()
