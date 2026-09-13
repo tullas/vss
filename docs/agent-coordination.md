@@ -295,6 +295,12 @@ every identity rebound clears CI and requires a fresh exact-HEAD observation. Th
 refresh and local history append cannot be atomic with Git ref movement, so any movement
 during admission fails closed and requires recovery.
 
+The immutable `initial_branch` records the checkout at initialization and remains relevant
+to source-branch transition replay. It is distinct from `integration_branch`, which is
+explicitly `main`: the governed milestone feature branch is the PR head, while `main` is
+the PR base. Observation requires the exact bound feature branch and HEAD plus the exact
+authoritative base SHA; it never derives the PR target from `initial_branch`.
+
 `vss dev milestone next --packet` emits a strict, deterministic
 `vss.dev-milestone-execution-packet` for reset-session handoff. The packet binds the exact
 milestone generation and history tail, base and HEAD SHAs, worktree change identity, issue,

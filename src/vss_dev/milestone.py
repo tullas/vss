@@ -28,6 +28,7 @@ MILESTONE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 PROTECTED_RESIDUE = ".local/secrets/development.auto.tfvars.example"
 BASELINE_RESIDUE = ".secrets.baseline"
+INTEGRATION_BRANCH = "main"
 CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
 CI_WORKFLOW_BLOB = "854774e24c3e7bc79838a20f9296dbf14d12891a"  # pragma: allowlist secret -- public workflow Git blob identity
 CI_REQUIRED_CHECKS = ("Scan for secrets", "Validate", "Test")
@@ -1141,13 +1142,18 @@ class MilestoneController:
         first = events[0]
         scope = first["data"]
         initial_branch = scope.get("initial_branch", repository["branch"])
+        integration_branch = scope.get("integration_branch", INTEGRATION_BRANCH)
         if (first["event_type"] != "initialized"
                 or (set(scope) - {"mission"}) not in ({"issue", "domains", "paths"},
                                       {"issue", "domains", "paths", "initial_branch", "base_sha",
                                        "change_identity"},
                                       {"issue", "domains", "paths", "initial_branch", "base_sha",
                                        "change_identity", "residue_provenance",
-                                       "residue_provenance_sha256"})
+                                       "residue_provenance_sha256"},
+                                      {"issue", "domains", "paths", "initial_branch", "base_sha",
+                                       "change_identity", "residue_provenance",
+                                       "residue_provenance_sha256", "integration_branch"})
+                or integration_branch != INTEGRATION_BRANCH
                 or type(scope["issue"]) is not int or scope["issue"] < 1
                 or type(scope["domains"]) is not list or type(scope["paths"]) is not list):
             raise MilestoneFailure("milestone initialization history is malformed")
@@ -1288,7 +1294,7 @@ class MilestoneController:
                         or evidence.get("state") != "open"
                         or evidence.get("head_branch") != bound_branch
                         or evidence.get("head_sha") != bound_head
-                        or evidence.get("base_branch") != initial_branch
+                        or evidence.get("base_branch") != integration_branch
                         or evidence.get("base_sha") != bound_base
                         or data.get("governed_change_identity") != bound_change_identity
                         or data.get("residue_provenance_sha256") != residue_digest
@@ -1383,6 +1389,7 @@ class MilestoneController:
             if state_path.exists() or history.exists(): raise MilestoneFailure("milestone already exists")
             data = {"issue": issue, "domains": sorted(set(domains)), "paths": sorted(set(paths)),
                     "initial_branch": repository["branch"], "base_sha": repository["base_sha"],
+                    "integration_branch": INTEGRATION_BRANCH,
                     "change_identity": repository["change_identity"],
                     "residue_provenance": residue_provenance,
                     "residue_provenance_sha256": self._residue_digest(residue_provenance)}
@@ -2674,9 +2681,10 @@ class MilestoneController:
     def _fetch_pr_observation(self, state: dict[str, Any]) -> dict[str, Any]:
         repository = state["repository"]
         owner = repository["name_with_owner"].split("/", 1)[0]
-        initial_branch = self._read_events(state["milestone_id"])[0]["data"].get("initial_branch", "main")
+        integration_branch = self._read_events(state["milestone_id"])[0]["data"].get(
+            "integration_branch", INTEGRATION_BRANCH)
         endpoint = (f"repos/{repository['name_with_owner']}/pulls?state=open"
-                    f"&head={owner}:{repository['branch']}&base={initial_branch}&per_page=100")
+                    f"&head={owner}:{repository['branch']}&base={integration_branch}&per_page=100")
         pulls = self._pr_api(endpoint)
         if len(pulls) != 1:
             raise MilestoneFailure("GitHub pull request for exact HEAD is missing or ambiguous")
@@ -2693,7 +2701,7 @@ class MilestoneController:
                 or base_repo.get("full_name") != repository["name_with_owner"]
                 or head.get("ref") != repository["branch"]
                 or head.get("sha") != repository["head_sha"]
-                or base.get("ref") != initial_branch
+                or base.get("ref") != integration_branch
                 or base.get("sha") != repository["base_sha"]):
             raise MilestoneFailure("GitHub pull request is not bound to the exact admitted source")
         return {"repository": repository["name_with_owner"], "number": number, "state": "open",

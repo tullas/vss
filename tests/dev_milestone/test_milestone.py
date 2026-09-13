@@ -1716,6 +1716,105 @@ class MilestoneControllerTests(unittest.TestCase):
             with self.assertRaisesRegex(MilestoneFailure, "not bound to the exact admitted source"):
                 self.controller._fetch_pr_observation(state)
 
+    def test_feature_initialized_pr_to_main_lifecycle_and_adverse_observations(self) -> None:
+        identifier = "feature-base-pr-lifecycle"
+        branch = f"feature/{identifier}"
+        self.git("switch", "-c", branch)
+        initialized = self.controller.initialize(
+            identifier, self.base, 168, ["dev-milestone"], ["README.md"],
+            "Exercise the exact feature-to-main PR lifecycle.", mission_evidence())
+        init_event = self.controller._read_events(identifier)[0]
+        self.assertEqual(init_event["data"]["initial_branch"], branch)
+        self.assertEqual(init_event["data"]["integration_branch"], "main")
+        self.assertEqual(initialized["repository"]["branch"], branch)
+
+        (self.root / "README.md").write_text("feature branch PR lifecycle\n", encoding="utf-8")
+        self.controller.validate("canonical", identifier)
+        precommit = self.controller.load(identifier)
+        self.assertEqual(precommit["next"], {"action": "request_pr", "human_boundary": True})
+        self.git("add", "README.md"); self.git("commit", "-qm", "Commit feature PR lifecycle change")
+        rebound = self.controller.rebind_committed_head(
+            identifier, "Bind exact committed feature HEAD.", precommit["generation"])
+        self.assertEqual(rebound["status"], "LOCAL_VALIDATION_REQUIRED")
+        self.assertEqual(rebound["validation"]["level"], "none")
+        self.controller.validate("canonical", identifier)
+        waiting = self.controller.load(identifier)
+        self.assertEqual(waiting["next"], {"action": "request_pr", "human_boundary": True})
+        head = waiting["repository"]
+
+        def api_pr(number: int, head_branch: str, head_sha: str,
+                   base_branch: str, base_sha: str) -> dict:
+            return {"number": number, "state": "open",
+                    "head": {"ref": head_branch, "sha": head_sha,
+                             "repo": {"full_name": head["name_with_owner"]}},
+                    "base": {"ref": base_branch, "sha": base_sha,
+                             "repo": {"full_name": head["name_with_owner"]}}}
+
+        valid = api_pr(168, branch, head["head_sha"], "main", head["base_sha"])
+        adverse = {
+            "reversed base/head": api_pr(201, "main", head["base_sha"], branch, head["head_sha"]),
+            "targets feature branch": api_pr(202, branch, head["head_sha"], branch, head["base_sha"]),
+            "wrong head branch": api_pr(203, "feature/other", head["head_sha"], "main", head["base_sha"]),
+            "wrong head SHA": api_pr(204, branch, "f" * 40, "main", head["base_sha"]),
+            "wrong base branch": api_pr(205, branch, head["head_sha"], "develop", head["base_sha"]),
+            "stale base SHA": api_pr(206, branch, head["head_sha"], "main", "e" * 40),
+            "unrelated PR": api_pr(207, "feature/unrelated", "d" * 40, "main", head["base_sha"]),
+        }
+        for label, pull in adverse.items():
+            with self.subTest(pr_case=label):
+                with patch.object(self.controller, "_pr_api", return_value=[pull]):
+                    with self.assertRaisesRegex(MilestoneFailure, "not bound to the exact admitted source"):
+                        self.controller._fetch_pr_observation(waiting)
+                self.assertEqual(self.controller.load(identifier), waiting)
+
+        endpoint = (f"repos/{head['name_with_owner']}/pulls?state=open&head={head['name_with_owner'].split('/')[0]}:{branch}"
+                    "&base=main&per_page=100")
+        with patch.object(self.controller, "_pr_api", return_value=[valid]) as api:
+            observation = self.controller._fetch_pr_observation(waiting)
+        api.assert_called_once_with(endpoint)
+        self.assertEqual(observation["head_branch"], branch)
+        self.assertEqual(observation["base_branch"], "main")
+        with patch.object(self.controller, "_pr_api", return_value=[valid]):
+            observed = self.controller.pr_refresh(identifier)
+        self.assertEqual(observed["pull_request_number"], 168)
+        pending = self.controller.load(identifier)
+        self.assertEqual(pending["status"], "CI_PENDING")
+
+        workflow_id = 551
+        run_id = 9001
+        jobs = [{"name": name, "status": "completed", "conclusion": "success",
+                 "head_sha": head["head_sha"]}
+                for name in ("Validate", "Scan for secrets", "Test")]
+        runs = [
+            {"id": run_id - 1, "run_attempt": 1, "workflow_id": workflow_id,
+             "path": ".github/workflows/ci.yml", "event": "push", "head_branch": branch,
+             "head_sha": head["head_sha"], "status": "completed", "conclusion": "success"},
+            {"id": run_id, "run_attempt": 1, "workflow_id": workflow_id,
+             "path": ".github/workflows/ci.yml", "event": "pull_request", "head_branch": branch,
+             "head_sha": head["head_sha"], "status": "completed", "conclusion": "success"},
+        ]
+        run_endpoint = (f"repos/{head['name_with_owner']}/actions/workflows/{workflow_id}/runs?head_sha={head['head_sha']}"
+                        f"&branch={branch}&event=pull_request&per_page=100")
+        responses = {
+            "repos/example/vss/actions/workflows/ci.yml": {
+                "id": workflow_id, "path": ".github/workflows/ci.yml", "state": "active"},
+            run_endpoint: {"total_count": len(runs), "workflow_runs": runs},
+            f"repos/example/vss/actions/runs/{run_id}/jobs?filter=latest&per_page=100": {
+                "total_count": len(jobs), "jobs": jobs},
+        }
+        with patch.object(self.controller, "_ci_api", side_effect=lambda path: responses[path]):
+            ci = self.controller.ci_refresh(identifier)
+        self.assertEqual(ci["status"], "passed")
+        self.assertEqual(ci["head_sha"], head["head_sha"])
+        waiting_validation = self.controller.load(identifier)
+        self.assertEqual(waiting_validation["next"],
+                         {"action": "run_canonical_validation", "human_boundary": False})
+        self.controller.validate("canonical", identifier)
+        ready = self.controller.load(identifier)
+        self.assertEqual(ready["status"], "REVIEW_READY")
+        self.assertEqual(ready["next"], {"action": "request_merge", "human_boundary": True})
+        self.assertTrue(all(value is False for value in ready["authority"].values()))
+
     def test_resealed_pull_request_substitution_does_not_change_bound_source(self) -> None:
         self.initialize()
         self.controller.validate("canonical", "dev-wf-1")
