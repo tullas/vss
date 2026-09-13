@@ -36,8 +36,8 @@
     "paths": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
     "level": {"enum": ["L0", "L1", "L2", "L3"]},
     "current_level": {"enum": ["none", "L0", "L1", "L2", "L3"]},
-    "status": {"enum": ["DESIGN_REVIEW_REQUIRED", "READY_FOR_IMPLEMENTATION", "WORKING", "LOCAL_VALIDATION_REQUIRED", "CI_PENDING", "REPAIRING", "CANONICAL_VALIDATION_REQUIRED", "REVIEW_READY", "BLOCKED", "COMPLETE"]},
-    "action": {"enum": ["request_design_review", "start_bounded_work", "run_affected_validation", "run_subsystem_validation", "ingest_ci", "repair_code", "repair_fixture", "reproduce_flaky", "run_canonical_validation", "request_architecture_review", "request_security_review", "request_merge", "recover_state", "resolve_conflict", "none"]},
+    "status": {"enum": ["DESIGN_REVIEW_REQUIRED", "READY_FOR_IMPLEMENTATION", "WORKING", "LOCAL_VALIDATION_REQUIRED", "CI_PENDING", "REPAIRING", "CANONICAL_VALIDATION_REQUIRED", "REVIEW_READY", "BLOCKED", "COMPLETE", "PR_CREATION_REQUIRED"]},
+    "action": {"enum": ["request_design_review", "start_bounded_work", "run_affected_validation", "run_subsystem_validation", "ingest_ci", "repair_code", "repair_fixture", "reproduce_flaky", "run_canonical_validation", "request_architecture_review", "request_security_review", "request_merge", "recover_state", "resolve_conflict", "none", "request_pr"]},
     "authority": {"type": "object", "additionalProperties": false, "required": ["runtime_execution", "provider_execution", "production", "publication", "workflow_activation", "security_exception", "product_authority", "merge", "push"], "properties": {"runtime_execution": {"const": false}, "provider_execution": {"const": false}, "production": {"const": false}, "publication": {"const": false}, "workflow_activation": {"const": false}, "security_exception": {"const": false}, "product_authority": {"const": false}, "merge": {"const": false}, "push": {"const": false}}}
   }
 }
