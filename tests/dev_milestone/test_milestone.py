@@ -83,6 +83,77 @@ class MilestoneControllerTests(unittest.TestCase):
     def initialize(self) -> dict:
         return self.controller.initialize("dev-wf-1", self.base, 114, ["agent-coordination"], ["src/demo"], "Approved bounded development milestone.", mission_evidence())
 
+    def modern_base_advance_fixture(self, *, legacy_materialization: bool = False,
+                                    with_ci: bool = False,
+                                    identifier: str = "modern-base-recovery-e2e") -> tuple[str, dict, bytes, str, str]:
+        initialized = self.controller.initialize(
+            identifier, self.base, 168, ["agent-coordination"], ["README.md"],
+            "Reproduce modern base advancement recovery.", mission_evidence())
+        branch = f"feature/{identifier}"
+        self.git("switch", "-c", branch)
+        transition_repository = self.controller._repository(initialized["repository"]["base_sha"])
+        self.assertEqual(transition_repository["branch"], branch)
+        self.assertEqual(transition_repository["head_sha"], initialized["repository"]["head_sha"])
+        self.assertEqual(self.git("rev-parse", f"refs/heads/{initialized['repository']['branch']}").stdout.strip(),
+                         transition_repository["head_sha"])
+        self.controller.transition_branch(identifier, initialized["repository"]["branch"], branch,
+                                          "Bind the issue branch.",
+                                          initialized["generation"])
+        (self.root / "README.md").write_text("governed source change\n", encoding="utf-8")
+        self.controller.validate("canonical", identifier)
+        pending = self.controller.load(identifier)
+        self.git("add", "README.md"); self.git("commit", "-qm", "Commit governed source change")
+        rebound = self.controller.rebind_committed_head(
+            identifier, "Bind the validated committed source.", pending["generation"])
+        if legacy_materialization:
+            # Recreate the historical #165 record written by the old rebind
+            # semantics: it retained pre-commit L3 across an unchanged diff.
+            events = self.controller._read_events(identifier)
+            events[-1]["data"]["validation_invalidated"] = False
+            events[-1]["event_sha256"] = milestone_module._digest(
+                {key: value for key, value in events[-1].items() if key != "event_sha256"})
+            history_path = self.root / ".vss/milestones" / identifier / "history.ndjson"
+            history_path.write_bytes(b"\n".join(milestone_module._canonical(event) for event in events) + b"\n")
+            rebound = self.controller._project(events, rebound["repository"])
+            self.controller._atomic_json(self.root / ".vss/milestones" / identifier / "state.json", rebound)
+            self.controller._write_pointer(rebound)
+        else:
+            self.assertEqual(rebound["status"], "LOCAL_VALIDATION_REQUIRED")
+            self.assertEqual(rebound["validation"], {"evidence_sha256": None, "level": "none"})
+            self.controller.validate("canonical", identifier)
+            rebound = self.controller.load(identifier)
+        if with_ci:
+            self.refresh_ci(identifier)
+            self.controller.validate("canonical", identifier)
+            rebound = self.controller.load(identifier)
+            self.assertEqual(rebound["status"], "REVIEW_READY")
+        elif legacy_materialization:
+            # This is the exact pre-#166 persisted route from #165: the modern
+            # validation and identity events are real; only the materialized
+            # route still says CI_PENDING/ingest_ci.
+            persisted = dict(rebound)
+            persisted["status"] = "CI_PENDING"
+            persisted["next"] = {"action": "ingest_ci", "human_boundary": False}
+            persisted["routing"] = {"model": self.controller.policy["model_routing"]["maintenance"],
+                                    "advisory": True}
+            self.controller._atomic_json(self.root / ".vss/milestones" / identifier / "state.json", persisted)
+            self.controller._write_pointer(persisted)
+            blocked = self.controller.load(identifier)
+            self.assertEqual(blocked["status"], "BLOCKED")
+            self.assertEqual(blocked["next"]["action"], "request_architecture_review")
+        old_history = (self.root / ".vss/milestones" / identifier / "history.ndjson").read_bytes()
+        old_head = rebound["repository"]["head_sha"]
+        old_base = rebound["repository"]["base_sha"]
+        self.git("switch", "main")
+        controller_path = self.root / "src/vss_dev/milestone.py"
+        controller_path.parent.mkdir(parents=True, exist_ok=True)
+        controller_path.write_text("controller base advancement\n", encoding="utf-8")
+        self.git("add", "src/vss_dev/milestone.py"); self.git("commit", "-qm", "Advance controller on main")
+        new_base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("switch", branch)
+        self.git("merge", "--no-ff", "main", "-qm", "Merge controller advancement")
+        return identifier, rebound, old_history, old_head, new_base
+
     def ci_observation(self, state: dict, *, run_status: str = "completed",
                        run_conclusion: str = "success", failed_job: str | None = None,
                        job_status: str | None = None, head_sha: str | None = None) -> dict:
@@ -100,9 +171,24 @@ class MilestoneControllerTests(unittest.TestCase):
 
     def refresh_ci(self, identifier: str = "dev-wf-1", observation: dict | None = None) -> dict:
         state = self.controller.load(identifier)
+        if state["status"] == "PR_CREATION_REQUIRED":
+            with patch.object(self.controller, "_fetch_pr_observation", return_value=self.pr_observation(state)):
+                self.controller.pr_refresh(identifier)
         prepared = observation or self.ci_observation(state)
         with patch.object(self.controller, "_fetch_ci_observation", return_value=prepared):
             return self.controller.ci_refresh(identifier)
+
+    def pr_observation(self, state: dict) -> dict:
+        return {"repository": state["repository"]["name_with_owner"], "number": 166,
+                "state": "open", "head_branch": state["repository"]["branch"],
+                "head_sha": state["repository"]["head_sha"], "base_branch": "main",
+                "base_sha": state["repository"]["base_sha"]}
+
+    def refresh_pr(self, identifier: str = "dev-wf-1", observation: dict | None = None) -> dict:
+        state = self.controller.load(identifier)
+        prepared = observation or self.pr_observation(state)
+        with patch.object(self.controller, "_fetch_pr_observation", return_value=prepared):
+            return self.controller.pr_refresh(identifier)
 
     def moving_shot_reconciliation_fixture(self, *, merge: bool = True) -> tuple[dict, str, str]:
         state = self.controller.initialize("m11-0-veo-shot", self.base, 132, ["movie"], ["src", "tests"], "Moving-shot reconciliation fixture.", mission_evidence())
@@ -113,6 +199,7 @@ class MilestoneControllerTests(unittest.TestCase):
         pending = self.controller.load("m11-0-veo-shot")
         self.git("add", "README.md"); self.git("commit", "-qm", "reviewed PR")
         self.controller.rebind_committed_head("m11-0-veo-shot", "Bind reviewed descendant.", pending["generation"])
+        self.controller.validate("canonical", "m11-0-veo-shot")
         self.refresh_ci("m11-0-veo-shot")
         self.controller.validate("canonical", "m11-0-veo-shot")
         state = self.controller.load("m11-0-veo-shot")
@@ -261,7 +348,7 @@ class MilestoneControllerTests(unittest.TestCase):
                 validated = self.controller.validate("canonical", "review-ready-source-identity-recovery")
                 self.assertEqual(validated["status"], "passed")
                 current = self.controller.load("review-ready-source-identity-recovery")
-                self.assertEqual(current["status"], "CI_PENDING")
+                self.assertEqual(current["status"], "PR_CREATION_REQUIRED")
                 self.assertEqual(current["validation"]["level"], "L3")
                 self.assertNotEqual(current["validation"]["evidence_sha256"],
                                     old_state["validation"]["evidence_sha256"])
@@ -304,7 +391,7 @@ class MilestoneControllerTests(unittest.TestCase):
         _, evidence, historical = self.moving_shot_reconciliation_fixture()
         result = self.reconcile(evidence, historical)
         self.assertEqual(result["status"], "CI_PENDING")
-        self.assertEqual(result["generation"], 6)
+        self.assertEqual(result["generation"], 8)
         self.assertTrue(all(value is False for value in result["authority"].values()))
 
     def test_post_repair_authorization_is_registered_without_authority_escalation(self) -> None:
@@ -904,16 +991,165 @@ class MilestoneControllerTests(unittest.TestCase):
             "dev-wf-1", "Bind accepted committed implementation.", pending["generation"])
         self.assertEqual(rebound["generation"], pending["generation"] + 1)
         self.assertEqual(rebound["repository"]["head_sha"], committed_head)
-        self.assertEqual(rebound["status"], "CI_PENDING")
-        self.assertEqual(rebound["next"], {"action": "ingest_ci", "human_boundary": False})
-        self.assertEqual(rebound["validation"], pending["validation"])
+        self.assertEqual(rebound["status"], "LOCAL_VALIDATION_REQUIRED")
+        self.assertEqual(rebound["next"], {"action": "run_affected_validation", "human_boundary": False})
+        self.assertEqual(rebound["validation"], {"evidence_sha256": None, "level": "none"})
         self.assertEqual(rebound["ci"], {"head_sha": None, "status": "not_observed", "classification": "none"})
         history = (self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes()
         self.assertTrue(history.startswith(history_before))
         event = json.loads(history.splitlines()[-1])
         self.assertEqual(event["event_type"], "identity_rebound")
         self.assertEqual(event["data"]["rebound_from_head"], pending["repository"]["head_sha"])
+        self.assertTrue(event["data"]["validation_invalidated"])
         self.assertTrue(all(value is False for value in event["authority"].values()))
+
+    def test_issue165_after_167_modern_recovery_revalidates_and_keeps_pr_boundary(self) -> None:
+        identifier, prior, history_before, old_head, new_base = self.modern_base_advance_fixture(
+            legacy_materialization=True)
+        waiting = self.controller.load(identifier)
+        self.assertEqual(waiting["status"], "CONFLICT")
+        self.assertEqual(waiting["next"], {"action": "recover_state", "human_boundary": True})
+        self.assertEqual(waiting["validation"], {"evidence_sha256": None, "level": "none"})
+        self.assertEqual(waiting["ci"], {"head_sha": None, "status": "not_observed", "classification": "none"})
+        history_path = self.root / ".vss/milestones" / identifier / "history.ndjson"
+        with self.assertRaisesRegex(MilestoneFailure, "writer conflict"):
+            self.controller.recover_modern_base_advance(
+                identifier, "Reject stale generation.", waiting["generation"] - 1)
+        self.assertEqual(history_path.read_bytes(), history_before)
+
+        recovered = self.controller.recover_modern_base_advance(
+            identifier, "Record verified #166 controller base advancement.", waiting["generation"])
+        merge_head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(recovered["status"], "CANONICAL_VALIDATION_REQUIRED")
+        self.assertEqual(recovered["next"], {"action": "run_canonical_validation", "human_boundary": False})
+        self.assertEqual(recovered["repository"]["base_sha"], new_base)
+        self.assertEqual(recovered["repository"]["head_sha"], merge_head)
+        self.assertNotEqual(recovered["repository"]["change_identity"], prior["repository"]["change_identity"])
+        self.assertEqual(recovered["validation"], {"evidence_sha256": None, "level": "none"})
+        self.assertEqual(recovered["ci"], {"head_sha": None, "status": "not_observed", "classification": "none"})
+        events = [json.loads(line) for line in history_path.read_text().splitlines()]
+        self.assertEqual(history_path.read_bytes().splitlines()[:-1], history_before.splitlines())
+        recovery = events[-1]
+        self.assertEqual(recovery["event_type"], "base_advanced_recovery")
+        self.assertEqual(recovery["data"]["prior_head_sha"], old_head)
+        self.assertEqual(recovery["data"]["new_base_sha"], new_base)
+        self.assertEqual(recovery["data"]["validation_invalidated"], True)
+        self.assertEqual(recovery["data"]["ci_invalidated"], True)
+        prior_validation = next(event for event in reversed(events[:-1])
+                                if event["event_type"] == "validation_completed")
+        self.assertEqual(recovery["data"]["prior_validation_event_sha256"], prior_validation["event_sha256"])
+        self.assertTrue(all(value is False for value in recovery["authority"].values()))
+        with self.assertRaisesRegex(MilestoneFailure, "not projected"):
+            self.controller.recover_modern_base_advance(
+                identifier, "Reject recovery replay.", recovered["generation"])
+
+        validated = self.controller.validate("canonical", identifier)
+        waiting_pr = self.controller.load(identifier)
+        self.assertEqual(waiting_pr["status"], "PR_CREATION_REQUIRED")
+        self.assertEqual(waiting_pr["next"], {"action": "request_pr", "human_boundary": True})
+        validation_event = next(event for event in reversed(
+            [json.loads(line) for line in history_path.read_text().splitlines()])
+            if event["event_type"] == "validation_completed")
+        self.assertEqual(validation_event["subject_head_sha"], merge_head)
+        self.assertEqual(validation_event["data"]["validation_subject_head_sha"], merge_head)
+        self.assertEqual(validation_event["data"]["change_identity"], waiting_pr["repository"]["change_identity"])
+        self.assertEqual(validated["level"], "L3")
+        observed_pr = self.refresh_pr(identifier)
+        self.assertEqual(observed_pr["status"], "CI_PENDING")
+        passed_ci = self.refresh_ci(identifier)
+        self.assertEqual(passed_ci["status"], "passed")
+        self.controller.validate("canonical", identifier)
+        ready = self.controller.load(identifier)
+        self.assertEqual(ready["status"], "REVIEW_READY")
+        self.assertEqual(ready["next"], {"action": "request_merge", "human_boundary": True})
+        self.assertTrue(all(value is False for value in ready["authority"].values()))
+
+    def test_modern_base_recovery_invalidates_exact_head_ci_without_erasing_receipts(self) -> None:
+        identifier, prior, history_before, old_head, new_base = self.modern_base_advance_fixture(with_ci=True)
+        self.assertEqual(prior["status"], "REVIEW_READY")
+        self.assertEqual(prior["ci"]["status"], "passed")
+        history_path = self.root / ".vss/milestones" / identifier / "history.ndjson"
+        waiting = self.controller.load(identifier)
+        self.assertEqual(waiting["next"], {"action": "recover_state", "human_boundary": True})
+        recovered = self.controller.recover_modern_base_advance(
+            identifier, "Invalidate exact-head CI after verified base advance.", waiting["generation"])
+        self.assertEqual(recovered["status"], "CANONICAL_VALIDATION_REQUIRED")
+        self.assertEqual(recovered["validation"]["level"], "none")
+        self.assertEqual(recovered["ci"]["status"], "not_observed")
+        history = [json.loads(line) for line in history_path.read_text().splitlines()]
+        self.assertEqual(history_path.read_bytes().splitlines()[:-1], history_before.splitlines())
+        ci_event = next(event for event in reversed(history[:-1]) if event["event_type"] == "ci_observed")
+        self.assertEqual(history[-1]["data"]["prior_ci_event_sha256"], ci_event["event_sha256"])
+        self.assertEqual(history[-1]["data"]["prior_head_sha"], old_head)
+        self.assertEqual(history[-1]["data"]["new_base_sha"], new_base)
+        self.assertEqual(self.controller.load(identifier), recovered)
+
+    def test_modern_base_recovery_rejects_substituted_merge_tree_and_projects_blocked(self) -> None:
+        identifier, _, history_before, old_head, new_base = self.modern_base_advance_fixture(
+            legacy_materialization=True)
+        (self.root / "README.md").write_text("unauthorized merge-tree substitution\n", encoding="utf-8")
+        self.git("add", "README.md")
+        substituted_tree = self.git("write-tree").stdout.strip()
+        substituted_head = self.git("commit-tree", substituted_tree, "-p", old_head,
+                                    "-p", new_base, "-m", "Substitute merged source tree").stdout.strip()
+        self.git("reset", "--hard", substituted_head)
+        blocked = self.controller.load(identifier)
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertEqual(blocked["next"], {"action": "request_architecture_review", "human_boundary": True})
+        history_path = self.root / ".vss/milestones" / identifier / "history.ndjson"
+        with self.assertRaisesRegex(MilestoneFailure, "not projected"):
+            self.controller.recover_modern_base_advance(
+                identifier, "Reject substituted merge tree.", blocked["generation"])
+        self.assertEqual(history_path.read_bytes(), history_before)
+
+    def test_modern_base_recovery_rejects_wrong_parent_order_and_base(self) -> None:
+        identifier, _, history_before, old_head, new_base = self.modern_base_advance_fixture(
+            legacy_materialization=True)
+        merge_head = self.git("rev-parse", "HEAD").stdout.strip()
+        merge_tree = self.git("show", "-s", "--format=%T", merge_head).stdout.strip()
+        wrong_order = self.git("commit-tree", merge_tree, "-p", new_base, "-p", old_head,
+                               "-m", "Wrong parent order").stdout.strip()
+        self.git("reset", "--hard", wrong_order)
+        blocked = self.controller.load(identifier)
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertEqual(blocked["next"]["action"], "request_architecture_review")
+        with self.assertRaisesRegex(MilestoneFailure, "not projected"):
+            self.controller.recover_modern_base_advance(identifier, "Reject wrong ancestry.", blocked["generation"])
+        self.assertEqual((self.root / ".vss/milestones" / identifier / "history.ndjson").read_bytes(), history_before)
+
+        self.git("switch", "main")
+        self.git("reset", "--hard", self.base)
+        identifier, _, history_before, _, _ = self.modern_base_advance_fixture(
+            legacy_materialization=True, identifier="modern-base-recovery-wrong-base")
+        self.git("branch", "-f", "main", self.base)
+        blocked = self.controller.load(identifier)
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertEqual(blocked["next"], {"action": "request_architecture_review", "human_boundary": True})
+        with self.assertRaisesRegex(MilestoneFailure, "not projected"):
+            self.controller.recover_modern_base_advance(identifier, "Reject wrong base.", blocked["generation"])
+        self.assertEqual((self.root / ".vss/milestones" / identifier / "history.ndjson").read_bytes(), history_before)
+
+    def test_modern_base_recovery_rejects_unrelated_post_merge_commit_and_wrong_branch(self) -> None:
+        identifier, _, history_before, _, _ = self.modern_base_advance_fixture(
+            legacy_materialization=True, identifier="modern-base-recovery-wrong-branch")
+        (self.root / "README.md").write_text("unrelated post-merge edit\n", encoding="utf-8")
+        self.git("add", "README.md"); self.git("commit", "-qm", "Unrelated post-merge commit")
+        blocked = self.controller.load(identifier)
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertEqual(blocked["next"]["action"], "request_architecture_review")
+        self.assertEqual((self.root / ".vss/milestones" / identifier / "history.ndjson").read_bytes(), history_before)
+
+        self.git("switch", "main")
+        self.git("reset", "--hard", self.base)
+        identifier, _, history_before, _, _ = self.modern_base_advance_fixture(
+            legacy_materialization=True, identifier="modern-base-recovery-branch-switch")
+        self.git("switch", "main")
+        blocked = self.controller.load(identifier)
+        self.assertEqual(blocked["status"], "BLOCKED")
+        self.assertEqual(blocked["next"]["action"], "request_architecture_review")
+        with self.assertRaisesRegex(MilestoneFailure, "not projected"):
+            self.controller.recover_modern_base_advance(identifier, "Reject wrong branch.", blocked["generation"])
+        self.assertEqual((self.root / ".vss/milestones" / identifier / "history.ndjson").read_bytes(), history_before)
 
     def test_issue160_review_ready_checkpoint_recovery_binds_descendant_and_requires_fresh_ci(self) -> None:
         ready = self.issue160_review_ready()
@@ -1224,6 +1460,28 @@ class MilestoneControllerTests(unittest.TestCase):
             self.controller.rebind_committed_head("dev-wf-1", "Reject changed identity.", pending["generation"])
         self.assertEqual((self.root / ".vss/milestones/dev-wf-1/history.ndjson").read_bytes(), history_before)
 
+    def test_modern_post_commit_rebind_invalidates_precommit_l3_until_exact_head_validation(self) -> None:
+        pending, committed_head, _ = self.committed_pending_milestone()
+        old_validation = pending["validation"]["evidence_sha256"]
+        rebound = self.controller.rebind_committed_head(
+            "dev-wf-1", "Bind the committed source and invalidate pre-commit validation.",
+            pending["generation"])
+        self.assertEqual(rebound["repository"]["head_sha"], committed_head)
+        self.assertEqual(rebound["status"], "LOCAL_VALIDATION_REQUIRED")
+        self.assertEqual(rebound["validation"], {"evidence_sha256": None, "level": "none"})
+        events = self.controller._read_events("dev-wf-1")
+        self.assertTrue(events[-1]["data"]["validation_invalidated"])
+        self.assertIsNone(self.controller._validation_current(events, rebound["repository"]))
+
+        result = self.controller.validate("canonical", "dev-wf-1")
+        self.assertEqual(result["status"], "passed")
+        validated = self.controller.load("dev-wf-1")
+        self.assertEqual(validated["status"], "PR_CREATION_REQUIRED")
+        self.assertNotEqual(validated["validation"]["evidence_sha256"], old_validation)
+        validation = self.controller._read_events("dev-wf-1")[-1]
+        self.assertEqual(validation["data"]["validation_subject_head_sha"], committed_head)
+        self.assertEqual(validation["subject_head_sha"], committed_head)
+
 
     def test_modern_post_commit_rebind_rejects_dirty_worktree(self) -> None:
         pending, _, history_before = self.committed_pending_milestone()
@@ -1392,6 +1650,183 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertTrue(security_state["next"]["human_boundary"])
         self.assertEqual(security_state["routing"]["model"], "gpt-5.6-sol-high")
 
+    def test_validated_head_requires_pr_boundary_before_exact_pull_request_ci(self) -> None:
+        self.initialize()
+        self.controller.validate("canonical", "dev-wf-1")
+        waiting = self.controller.load("dev-wf-1")
+        self.assertEqual(waiting["status"], "PR_CREATION_REQUIRED")
+        self.assertEqual(waiting["next"], {"action": "request_pr", "human_boundary": True})
+        self.assertTrue(all(value is False for value in waiting["authority"].values()))
+        with self.assertRaisesRegex(MilestoneFailure, "not legal"):
+            self.controller.ci_refresh("dev-wf-1")
+        with patch.object(self.controller, "_fetch_pr_observation",
+                          side_effect=MilestoneFailure("GitHub pull request for exact HEAD is missing or ambiguous")):
+            with self.assertRaisesRegex(MilestoneFailure, "missing or ambiguous"):
+                self.controller.pr_refresh("dev-wf-1")
+        self.assertEqual(self.controller.load("dev-wf-1"), waiting)
+
+        boundary = self.refresh_pr("dev-wf-1")
+        self.assertEqual(boundary["pull_request_number"], 166)
+        pending = self.controller.load("dev-wf-1")
+        self.assertEqual(pending["status"], "CI_PENDING")
+        self.assertEqual(pending["next"], {"action": "ingest_ci", "human_boundary": False})
+        passed = self.refresh_ci("dev-wf-1")
+        self.assertEqual(passed["status"], "passed")
+        self.assertEqual(self.controller.load("dev-wf-1")["status"], "CANONICAL_VALIDATION_REQUIRED")
+        self.controller.validate("canonical", "dev-wf-1")
+        ready = self.controller.load("dev-wf-1")
+        self.assertEqual(ready["status"], "REVIEW_READY")
+        self.assertEqual(ready["next"], {"action": "request_merge", "human_boundary": True})
+        self.assertTrue(all(value is False for value in ready["authority"].values()))
+
+    def test_pull_request_observer_rejects_wrong_head_or_base(self) -> None:
+        self.initialize()
+        self.controller.validate("canonical", "dev-wf-1")
+        state = self.controller.load("dev-wf-1")
+        for key, wrong in (("head_sha", "f" * 40), ("base_sha", "e" * 40),
+                           ("head_branch", "feature/other")):
+            observation = self.pr_observation(state)
+            observation[key] = wrong
+            with patch.object(self.controller, "_fetch_pr_observation", return_value=observation):
+                with self.assertRaisesRegex(MilestoneFailure, "not bound to current source identity"):
+                    self.controller.pr_refresh("dev-wf-1")
+            self.assertEqual(self.controller.load("dev-wf-1"), state)
+
+    def test_pull_request_fetch_binds_one_open_pr_to_exact_head_and_base(self) -> None:
+        self.initialize()
+        state = self.controller.load("dev-wf-1")
+        head = state["repository"]
+        pull = {"number": 166, "state": "open",
+                "head": {"ref": head["branch"], "sha": head["head_sha"],
+                         "repo": {"full_name": head["name_with_owner"]}},
+                "base": {"ref": "main", "sha": head["base_sha"],
+                         "repo": {"full_name": head["name_with_owner"]}}}
+        endpoint = ("repos/example/vss/pulls?state=open&head=example:main"
+                    "&base=main&per_page=100")
+        with patch.object(self.controller, "_pr_api", return_value=[pull]) as api:
+            observation = self.controller._fetch_pr_observation(state)
+        api.assert_called_once_with(endpoint)
+        self.assertEqual(observation["head_sha"], head["head_sha"])
+        self.assertEqual(observation["base_sha"], head["base_sha"])
+        with patch.object(self.controller, "_pr_api", return_value=[]):
+            with self.assertRaisesRegex(MilestoneFailure, "missing or ambiguous"):
+                self.controller._fetch_pr_observation(state)
+        wrong = json.loads(json.dumps(pull)); wrong["head"]["sha"] = "f" * 40
+        with patch.object(self.controller, "_pr_api", return_value=[wrong]):
+            with self.assertRaisesRegex(MilestoneFailure, "not bound to the exact admitted source"):
+                self.controller._fetch_pr_observation(state)
+
+    def test_feature_initialized_pr_to_main_lifecycle_and_adverse_observations(self) -> None:
+        identifier = "feature-base-pr-lifecycle"
+        branch = f"feature/{identifier}"
+        self.git("switch", "-c", branch)
+        initialized = self.controller.initialize(
+            identifier, self.base, 168, ["dev-milestone"], ["README.md"],
+            "Exercise the exact feature-to-main PR lifecycle.", mission_evidence())
+        init_event = self.controller._read_events(identifier)[0]
+        self.assertEqual(init_event["data"]["initial_branch"], branch)
+        self.assertEqual(init_event["data"]["integration_branch"], "main")
+        self.assertEqual(initialized["repository"]["branch"], branch)
+
+        (self.root / "README.md").write_text("feature branch PR lifecycle\n", encoding="utf-8")
+        self.controller.validate("canonical", identifier)
+        precommit = self.controller.load(identifier)
+        self.assertEqual(precommit["next"], {"action": "request_pr", "human_boundary": True})
+        self.git("add", "README.md"); self.git("commit", "-qm", "Commit feature PR lifecycle change")
+        rebound = self.controller.rebind_committed_head(
+            identifier, "Bind exact committed feature HEAD.", precommit["generation"])
+        self.assertEqual(rebound["status"], "LOCAL_VALIDATION_REQUIRED")
+        self.assertEqual(rebound["validation"]["level"], "none")
+        self.controller.validate("canonical", identifier)
+        waiting = self.controller.load(identifier)
+        self.assertEqual(waiting["next"], {"action": "request_pr", "human_boundary": True})
+        head = waiting["repository"]
+
+        def api_pr(number: int, head_branch: str, head_sha: str,
+                   base_branch: str, base_sha: str) -> dict:
+            return {"number": number, "state": "open",
+                    "head": {"ref": head_branch, "sha": head_sha,
+                             "repo": {"full_name": head["name_with_owner"]}},
+                    "base": {"ref": base_branch, "sha": base_sha,
+                             "repo": {"full_name": head["name_with_owner"]}}}
+
+        valid = api_pr(168, branch, head["head_sha"], "main", head["base_sha"])
+        adverse = {
+            "reversed base/head": api_pr(201, "main", head["base_sha"], branch, head["head_sha"]),
+            "targets feature branch": api_pr(202, branch, head["head_sha"], branch, head["base_sha"]),
+            "wrong head branch": api_pr(203, "feature/other", head["head_sha"], "main", head["base_sha"]),
+            "wrong head SHA": api_pr(204, branch, "f" * 40, "main", head["base_sha"]),
+            "wrong base branch": api_pr(205, branch, head["head_sha"], "develop", head["base_sha"]),
+            "stale base SHA": api_pr(206, branch, head["head_sha"], "main", "e" * 40),
+            "unrelated PR": api_pr(207, "feature/unrelated", "d" * 40, "main", head["base_sha"]),
+        }
+        for label, pull in adverse.items():
+            with self.subTest(pr_case=label):
+                with patch.object(self.controller, "_pr_api", return_value=[pull]):
+                    with self.assertRaisesRegex(MilestoneFailure, "not bound to the exact admitted source"):
+                        self.controller._fetch_pr_observation(waiting)
+                self.assertEqual(self.controller.load(identifier), waiting)
+
+        endpoint = (f"repos/{head['name_with_owner']}/pulls?state=open&head={head['name_with_owner'].split('/')[0]}:{branch}"
+                    "&base=main&per_page=100")
+        with patch.object(self.controller, "_pr_api", return_value=[valid]) as api:
+            observation = self.controller._fetch_pr_observation(waiting)
+        api.assert_called_once_with(endpoint)
+        self.assertEqual(observation["head_branch"], branch)
+        self.assertEqual(observation["base_branch"], "main")
+        with patch.object(self.controller, "_pr_api", return_value=[valid]):
+            observed = self.controller.pr_refresh(identifier)
+        self.assertEqual(observed["pull_request_number"], 168)
+        pending = self.controller.load(identifier)
+        self.assertEqual(pending["status"], "CI_PENDING")
+
+        workflow_id = 551
+        run_id = 9001
+        jobs = [{"name": name, "status": "completed", "conclusion": "success",
+                 "head_sha": head["head_sha"]}
+                for name in ("Validate", "Scan for secrets", "Test")]
+        runs = [
+            {"id": run_id - 1, "run_attempt": 1, "workflow_id": workflow_id,
+             "path": ".github/workflows/ci.yml", "event": "push", "head_branch": branch,
+             "head_sha": head["head_sha"], "status": "completed", "conclusion": "success"},
+            {"id": run_id, "run_attempt": 1, "workflow_id": workflow_id,
+             "path": ".github/workflows/ci.yml", "event": "pull_request", "head_branch": branch,
+             "head_sha": head["head_sha"], "status": "completed", "conclusion": "success"},
+        ]
+        run_endpoint = (f"repos/{head['name_with_owner']}/actions/workflows/{workflow_id}/runs?head_sha={head['head_sha']}"
+                        f"&branch={branch}&event=pull_request&per_page=100")
+        responses = {
+            "repos/example/vss/actions/workflows/ci.yml": {
+                "id": workflow_id, "path": ".github/workflows/ci.yml", "state": "active"},
+            run_endpoint: {"total_count": len(runs), "workflow_runs": runs},
+            f"repos/example/vss/actions/runs/{run_id}/jobs?filter=latest&per_page=100": {
+                "total_count": len(jobs), "jobs": jobs},
+        }
+        with patch.object(self.controller, "_ci_api", side_effect=lambda path: responses[path]):
+            ci = self.controller.ci_refresh(identifier)
+        self.assertEqual(ci["status"], "passed")
+        self.assertEqual(ci["head_sha"], head["head_sha"])
+        waiting_validation = self.controller.load(identifier)
+        self.assertEqual(waiting_validation["next"],
+                         {"action": "run_canonical_validation", "human_boundary": False})
+        self.controller.validate("canonical", identifier)
+        ready = self.controller.load(identifier)
+        self.assertEqual(ready["status"], "REVIEW_READY")
+        self.assertEqual(ready["next"], {"action": "request_merge", "human_boundary": True})
+        self.assertTrue(all(value is False for value in ready["authority"].values()))
+
+    def test_resealed_pull_request_substitution_does_not_change_bound_source(self) -> None:
+        self.initialize()
+        self.controller.validate("canonical", "dev-wf-1")
+        self.refresh_pr("dev-wf-1")
+        state = self.controller.load("dev-wf-1")
+        events = self.controller._read_events("dev-wf-1")
+        events[-1]["data"]["pr_evidence"]["head_sha"] = "f" * 40
+        event = dict(events[-1]); event.pop("event_sha256")
+        events[-1]["event_sha256"] = milestone_module._digest(event)
+        with self.assertRaisesRegex(MilestoneFailure, "not bound to current source identity"):
+            self.controller._project(events, state["repository"])
+
     def test_ci_fetch_selects_pull_request_run_when_push_run_shares_exact_head(self) -> None:
         state = self.initialize()
         branch = "feature/dev-wf-1"
@@ -1444,6 +1879,24 @@ class MilestoneControllerTests(unittest.TestCase):
         with patch.object(self.controller, "_ci_api", side_effect=responses):
             with self.assertRaisesRegex(MilestoneFailure, "inventory is malformed or incomplete"):
                 self.controller._fetch_ci_observation(state)
+
+    def test_ci_fetch_rejects_push_only_exact_head_run(self) -> None:
+        state = self.initialize()
+        head = state["repository"]["head_sha"]
+        workflow_id = 41
+        endpoint = (f"repos/example/vss/actions/workflows/{workflow_id}/runs?head_sha={head}"
+                    "&branch=main&event=pull_request&per_page=100")
+        push_run = {"id": 1001, "run_attempt": 1, "workflow_id": workflow_id,
+                    "path": ".github/workflows/ci.yml", "event": "push", "head_branch": "main",
+                    "head_sha": head, "status": "completed", "conclusion": "success"}
+        responses = [
+            {"id": workflow_id, "path": ".github/workflows/ci.yml", "state": "active"},
+            {"total_count": 1, "workflow_runs": [push_run]},
+        ]
+        with patch.object(self.controller, "_ci_api", side_effect=responses) as api:
+            with self.assertRaisesRegex(MilestoneFailure, "run for exact HEAD is missing or ambiguous"):
+                self.controller._fetch_ci_observation(state)
+        self.assertEqual(api.call_args_list[1].args[0], endpoint)
 
     def test_repair_budget_and_malformed_ci_are_closed(self) -> None:
         self.initialize()
@@ -1537,10 +1990,13 @@ class MilestoneControllerTests(unittest.TestCase):
         rebound = self.controller.rebind_committed_head(
             "dev-wf-1", "Bind committed identity A.", validation_a.get("generation", transitioned["generation"] + 1))
         self.assertEqual(rebound["repository"]["change_identity"], identity_a)
-        self.assertEqual(rebound["validation"]["evidence_sha256"], validation_a["evidence_sha256"])
+        self.assertEqual(rebound["validation"], {"evidence_sha256": None, "level": "none"})
         same_identity = self.controller.validate("canonical", "dev-wf-1")
-        self.assertEqual(same_identity["status"], "reused")
-        self.assertEqual(same_identity["evidence_sha256"], validation_a["evidence_sha256"])
+        self.assertEqual(same_identity["status"], "passed")
+        self.assertNotEqual(same_identity["evidence_sha256"], validation_a["evidence_sha256"])
+        validated_a = [event for event in self.controller._read_events("dev-wf-1")
+                       if event["event_type"] == "validation_completed"][-1]
+        self.assertEqual(validated_a["data"]["validation_subject_head_sha"], rebound["repository"]["head_sha"])
 
         source.write_text("governed identity B\n", encoding="utf-8")
         identity_b = self.controller._repository(self.base)["change_identity"]
@@ -1655,6 +2111,7 @@ class MilestoneControllerTests(unittest.TestCase):
     def test_issue162_empty_wrong_or_partial_ci_cannot_mutate_identity_or_clear_conflict(self) -> None:
         self.initialize()
         self.controller.validate("canonical", "dev-wf-1")
+        self.refresh_pr("dev-wf-1")
         pending = self.controller.load("dev-wf-1")
         history_path = self.root / ".vss/milestones/dev-wf-1/history.ndjson"
         before = history_path.read_bytes()
@@ -1685,7 +2142,7 @@ class MilestoneControllerTests(unittest.TestCase):
         self.assertIsNone(self.controller._validation_current(
             self.controller._read_events("dev-wf-1"), conflict["repository"]))
         events = self.controller._read_events("dev-wf-1")
-        self.assertEqual(len(events), 2)  # initialize, validation, no injected CI transition
+        self.assertEqual(len(events), 3)  # initialize, validation, exact PR observation; no injected CI transition
         self.assertTrue(all(value is False for value in conflict["authority"].values()))
 
     def test_unbound_legacy_validation_is_explicitly_quarantined_before_new_validation(self) -> None:

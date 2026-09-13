@@ -218,6 +218,34 @@ vss dev milestone recover-issue160-legacy-state --expected-generation 10 \
 The dedicated event keeps the exceptional admission rule out of normal identity-rebind and
 validation paths, minimizing future attack surface while retaining the old events unchanged.
 
+Modern recovery after controller/base advancement uses a separate
+`recover-base-advancement` transition. It is available only for an in-flight
+modern, L3-validated milestone on `feature/<milestone-id>` whose current HEAD
+is exactly a two-parent merge of the prior bound HEAD followed by current
+`main`. The prior base must be an ancestor of `main`, the advancement must
+change `src/vss_dev/milestone.py`, and a clean temporary Git object database
+must reproduce the target tree with `git merge-tree --write-tree`. The
+controller rechecks the branch, main ref, history tail, generation, worktree,
+and exact base/HEAD/change identities before appending. Unsupported ancestry or
+tree changes route to `BLOCKED / request_architecture_review` rather than an
+unexecutable `recover_state` action.
+
+The typed `base_advanced_recovery` event records old and new base, HEAD, and
+change identities, the deterministic merge tree and controller-change digest,
+the previous materialized-state digest, and the most recent validation and CI
+event digests. It preserves all earlier records, clears validation, CI, and PR
+observation state, and routes to `run_canonical_validation`. Only fresh
+validation bound to the new base, exact merged HEAD, current policy, and
+recomputed change identity can return to `request_pr`. This does not broaden
+`recover-state-identity` or authorize PR creation, merge, push, or execution.
+
+The invocation is:
+
+```text
+vss dev milestone recover-base-advancement --milestone-id <id> \
+  --summary "Record the verified main advancement." --expected-generation <N>
+```
+
 The one-time `vss dev milestone bootstrap-controller-upgrade` transition is narrower: it is
 available only for `dev-wf-2-engineering-observability`, requires explicit base, old, reviewed,
 and target heads plus the expected generation, and accepts only the registered controller-repair
@@ -254,7 +282,11 @@ checks still apply to every non-protected path.
 Validation receipts bind the governed change identity, residue-provenance digest,
 evidence subject HEAD, harness map, and controller policy. A legacy receipt without
 that binding remains in history but is quarantined before new validation can advance
-the milestone. CI is admitted only through the controller's read-only API refresh for
+the milestone. A modern validated HEAD routes to `PR_CREATION_REQUIRED / request_pr`
+at a human boundary. After the human creates the PR, `vss dev milestone pr --refresh`
+records only one open PR whose head and base identities exactly match the controller,
+then routes to `CI_PENDING / ingest_ci`. PR observation grants no merge or execution
+authority. CI is admitted only through the controller's read-only API refresh for
 the exact committed HEAD and bound branch, on the pinned `.github/workflows/ci.yml` blob,
 using the `pull_request` workflow event and complete required job set (`Scan for secrets`,
 `Validate`, `Test`). The event filter excludes a same-commit `push` run from making the
@@ -262,6 +294,12 @@ pull-request observation ambiguous. CI cannot change source identity or clear `C
 every identity rebound clears CI and requires a fresh exact-HEAD observation. The API
 refresh and local history append cannot be atomic with Git ref movement, so any movement
 during admission fails closed and requires recovery.
+
+The immutable `initial_branch` records the checkout at initialization and remains relevant
+to source-branch transition replay. It is distinct from `integration_branch`, which is
+explicitly `main`: the governed milestone feature branch is the PR head, while `main` is
+the PR base. Observation requires the exact bound feature branch and HEAD plus the exact
+authoritative base SHA; it never derives the PR target from `initial_branch`.
 
 `vss dev milestone next --packet` emits a strict, deterministic
 `vss.dev-milestone-execution-packet` for reset-session handoff. The packet binds the exact

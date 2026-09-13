@@ -89,6 +89,10 @@ def _parser() -> argparse.ArgumentParser:
     milestone_identity.add_argument("--milestone-id", required=True)
     milestone_identity.add_argument("--summary", required=True)
     milestone_identity.add_argument("--expected-generation", required=True, type=int)
+    milestone_base_recovery = milestone_actions.add_parser("recover-base-advancement")
+    milestone_base_recovery.add_argument("--milestone-id", required=True)
+    milestone_base_recovery.add_argument("--summary", required=True)
+    milestone_base_recovery.add_argument("--expected-generation", required=True, type=int)
     milestone_rebind = milestone_actions.add_parser("rebind-committed-head")
     milestone_rebind.add_argument("--milestone-id", required=True)
     milestone_rebind.add_argument("--summary", required=True)
@@ -149,6 +153,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone_backlog_report.add_argument("--milestone-id")
     milestone_pr = milestone_actions.add_parser("pr")
     milestone_pr.add_argument("--milestone-id")
+    milestone_pr.add_argument("--refresh", action="store_true")
     reasoning = subparsers.add_parser("reasoning")
     reasoning_actions = reasoning.add_subparsers(dest="reasoning_action", required=True)
     generate_options = reasoning_actions.add_parser("generate-options")
@@ -463,6 +468,9 @@ def main(argv: list[str] | None = None) -> int:
             elif args.milestone_action == "recover-state-identity":
                 value = controller.recover_state_identity(
                     args.milestone_id, args.summary, args.expected_generation)
+            elif args.milestone_action == "recover-base-advancement":
+                value = controller.recover_modern_base_advance(
+                    args.milestone_id, args.summary, args.expected_generation)
             elif args.milestone_action == "rebind-committed-head":
                 value = controller.rebind_committed_head(
                     args.milestone_id, args.summary, args.expected_generation,
@@ -518,6 +526,8 @@ def main(argv: list[str] | None = None) -> int:
                 value = controller.backlog_admit(args.milestone_id, _read_json(args.input, 8192))
             elif args.milestone_action == "backlog-report":
                 value = controller.backlog_report(args.milestone_id)
+            elif args.milestone_action == "pr" and args.refresh:
+                value = controller.pr_refresh(args.milestone_id)
             else:
                 state = controller.load(args.milestone_id)
                 value = {"milestone_id": state["milestone_id"], "status": state["status"], "pr_action": "status_only", "next": state["next"], "authority": state["authority"]}
