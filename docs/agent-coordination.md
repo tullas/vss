@@ -254,7 +254,11 @@ checks still apply to every non-protected path.
 Validation receipts bind the governed change identity, residue-provenance digest,
 evidence subject HEAD, harness map, and controller policy. A legacy receipt without
 that binding remains in history but is quarantined before new validation can advance
-the milestone. CI is admitted only through the controller's read-only API refresh for
+the milestone. A modern validated HEAD routes to `PR_CREATION_REQUIRED / request_pr`
+at a human boundary. After the human creates the PR, `vss dev milestone pr --refresh`
+records only one open PR whose head and base identities exactly match the controller,
+then routes to `CI_PENDING / ingest_ci`. PR observation grants no merge or execution
+authority. CI is admitted only through the controller's read-only API refresh for
 the exact committed HEAD and bound branch, on the pinned `.github/workflows/ci.yml` blob,
 using the `pull_request` workflow event and complete required job set (`Scan for secrets`,
 `Validate`, `Test`). The event filter excludes a same-commit `push` run from making the

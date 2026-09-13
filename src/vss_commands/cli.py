@@ -149,6 +149,7 @@ def _parser() -> argparse.ArgumentParser:
     milestone_backlog_report.add_argument("--milestone-id")
     milestone_pr = milestone_actions.add_parser("pr")
     milestone_pr.add_argument("--milestone-id")
+    milestone_pr.add_argument("--refresh", action="store_true")
     reasoning = subparsers.add_parser("reasoning")
     reasoning_actions = reasoning.add_subparsers(dest="reasoning_action", required=True)
     generate_options = reasoning_actions.add_parser("generate-options")
@@ -518,6 +519,8 @@ def main(argv: list[str] | None = None) -> int:
                 value = controller.backlog_admit(args.milestone_id, _read_json(args.input, 8192))
             elif args.milestone_action == "backlog-report":
                 value = controller.backlog_report(args.milestone_id)
+            elif args.milestone_action == "pr" and args.refresh:
+                value = controller.pr_refresh(args.milestone_id)
             else:
                 state = controller.load(args.milestone_id)
                 value = {"milestone_id": state["milestone_id"], "status": state["status"], "pr_action": "status_only", "next": state["next"], "authority": state["authority"]}

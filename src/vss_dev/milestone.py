@@ -1052,6 +1052,7 @@ class MilestoneController:
                  legacy: bool = False) -> dict[str, Any]:
         first = events[0]
         scope = first["data"]
+        initial_branch = scope.get("initial_branch", repository["branch"])
         if (first["event_type"] != "initialized"
                 or (set(scope) - {"mission"}) not in ({"issue", "domains", "paths"},
                                       {"issue", "domains", "paths", "initial_branch", "base_sha",
@@ -1067,7 +1068,9 @@ class MilestoneController:
         ci_subject_head: str | None = None
         ci_change_identity: str | None = None
         ci_evidence_version: int | None = None
+        pr_evidence: dict[str, Any] | None = None
         bound_head = first["subject_head_sha"]
+        bound_branch = initial_branch
         bound_change_identity = scope.get("change_identity", repository["change_identity"])
         residue_digest = scope.get("residue_provenance_sha256", self._residue_digest(None))
         modern_binding = "residue_provenance_sha256" in scope
@@ -1075,7 +1078,9 @@ class MilestoneController:
         status = "READY_FOR_IMPLEMENTATION"; action = "start_bounded_work"; human = False
         for event in events[1:]:
             data = event["data"]
-            if event["event_type"] == "validation_completed":
+            if event["event_type"] == "branch_transitioned":
+                bound_branch = data["to_branch"]
+            elif event["event_type"] == "validation_completed":
                 if data.get("evidence_binding_version") == 1:
                     if (type(data.get("governed_change_identity")) is not str
                             or not SHA256.fullmatch(data["governed_change_identity"])
@@ -1097,8 +1102,18 @@ class MilestoneController:
                         and ci_subject_head == event["subject_head_sha"]
                         and ci_change_identity == data.get("change_identity")):
                     status, action, human = "REVIEW_READY", "request_merge", True
+                elif legacy or data.get("evidence_binding_version") != 1:
+                    status, action, human = "CI_PENDING", "ingest_ci", False
                 else:
-                    status, action = "CI_PENDING", "ingest_ci"
+                    current_pr = pr_evidence
+                    if (current_pr is not None
+                            and current_pr.get("head_sha") == event["subject_head_sha"]
+                            and current_pr.get("head_branch") == bound_branch
+                            and current_pr.get("base_sha") == repository["base_sha"]
+                            and current_pr.get("repository") == repository["name_with_owner"]):
+                        status, action = "CI_PENDING", "ingest_ci"
+                    else:
+                        status, action, human = "PR_CREATION_REQUIRED", "request_pr", True
             elif event["event_type"] == "ci_observed":
                 if data.get("ci_evidence_version") == 1:
                     evidence = data.get("ci_evidence")
@@ -1171,6 +1186,27 @@ class MilestoneController:
                     repair["stop_reason"] = None if not human else ci["classification"]
                 elif ci["status"] == "passed": status, action, human = "CANONICAL_VALIDATION_REQUIRED", "run_canonical_validation", False
                 elif ci["status"] == "stale": status, action, human = "CONFLICT", "recover_state", True
+            elif event["event_type"] == "pr_observed":
+                evidence = data.get("pr_evidence")
+                if (set(data) != {"pr_evidence", "governed_change_identity", "residue_provenance_sha256"}
+                        or type(evidence) is not dict
+                        or status != "PR_CREATION_REQUIRED"
+                        or action != "request_pr"
+                        or not human
+                        or set(evidence) != {"repository", "number", "state", "head_branch", "head_sha", "base_branch", "base_sha"}
+                        or evidence.get("repository") != repository["name_with_owner"]
+                        or type(evidence.get("number")) is not int or evidence["number"] < 1
+                        or evidence.get("state") != "open"
+                        or evidence.get("head_branch") != bound_branch
+                        or evidence.get("head_sha") != bound_head
+                        or evidence.get("base_branch") != initial_branch
+                        or evidence.get("base_sha") != repository["base_sha"]
+                        or data.get("governed_change_identity") != bound_change_identity
+                        or data.get("residue_provenance_sha256") != residue_digest
+                        or event["subject_head_sha"] != bound_head):
+                    raise MilestoneFailure("pull request observation is not bound to current source identity")
+                pr_evidence = evidence
+                status, action, human = "CI_PENDING", "ingest_ci", False
             elif event["event_type"] == "repair_started":
                 repair["attempts"] = data.get("repair_attempts", repair["attempts"] + 1)
                 status, action = "LOCAL_VALIDATION_REQUIRED", "run_affected_validation"
@@ -1192,6 +1228,8 @@ class MilestoneController:
                 if data.get("validation_invalidated"):
                     validation = {"evidence_sha256": None, "level": "none"}
                     status, action, human = "LOCAL_VALIDATION_REQUIRED", "run_affected_validation", False
+                elif status == "PR_CREATION_REQUIRED":
+                    status, action, human = "PR_CREATION_REQUIRED", "request_pr", True
                 else:
                     status, action, human = "CI_PENDING", "ingest_ci", False
                 bound_head = event["subject_head_sha"]
@@ -1203,6 +1241,7 @@ class MilestoneController:
                 status, action, human = "CI_PENDING", "ingest_ci", False
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
+                bound_branch = repository["branch"]
             elif event["event_type"] == "controller_bootstrap":
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 ci_subject_head = None; ci_change_identity = None
@@ -1895,8 +1934,8 @@ class MilestoneController:
                 state = self._project(events + [event], current_repository)
                 self._atomic_json(state_path, state); self._write_pointer(state)
                 return self.load(milestone_id)
-            if (stored["status"] != "CI_PENDING"
-                    or stored["next"]["action"] != "ingest_ci"
+            if ((stored["status"], stored["next"]["action"]) not in {
+                    ("CI_PENDING", "ingest_ci"), ("PR_CREATION_REQUIRED", "request_pr")}
                     or repository["branch"] != stored["repository"]["branch"]
                     or repository["base_sha"] != stored["repository"]["base_sha"]
                     or repository["head_sha"] == stored["repository"]["head_sha"]):
@@ -1987,8 +2026,10 @@ class MilestoneController:
                 raise MilestoneFailure("milestone writer conflict")
             if any(event["event_type"] == "controller_bootstrap" for event in events):
                 raise MilestoneFailure("controller bootstrap already recorded")
-            if stored["repository"]["base_sha"] != base_head or stored["repository"]["head_sha"] != old_head or stored["status"] != "CI_PENDING" \
-                    or stored["next"]["action"] != "ingest_ci":
+            if (stored["repository"]["base_sha"] != base_head
+                    or stored["repository"]["head_sha"] != old_head
+                    or (stored["status"], stored["next"]["action"]) not in {
+                        ("CI_PENDING", "ingest_ci"), ("PR_CREATION_REQUIRED", "request_pr")}):
                 raise MilestoneFailure("controller bootstrap is unauthorized")
             try:
                 repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
@@ -2327,6 +2368,87 @@ class MilestoneController:
 
     def _ci_api(self, endpoint: str) -> dict[str, Any]:
         return _read_external_json(self._run(["gh", "api", endpoint], 1_048_576))
+
+    def _pr_api(self, endpoint: str) -> list[dict[str, Any]]:
+        try:
+            value = json.loads(self._run(["gh", "api", endpoint], 1_048_576))
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise MilestoneFailure("GitHub pull request response is malformed") from exc
+        if type(value) is not list or any(type(item) is not dict for item in value):
+            raise MilestoneFailure("GitHub pull request inventory is malformed")
+        return value
+
+    def _fetch_pr_observation(self, state: dict[str, Any]) -> dict[str, Any]:
+        repository = state["repository"]
+        owner = repository["name_with_owner"].split("/", 1)[0]
+        initial_branch = self._read_events(state["milestone_id"])[0]["data"].get("initial_branch", "main")
+        endpoint = (f"repos/{repository['name_with_owner']}/pulls?state=open"
+                    f"&head={owner}:{repository['branch']}&base={initial_branch}&per_page=100")
+        pulls = self._pr_api(endpoint)
+        if len(pulls) != 1:
+            raise MilestoneFailure("GitHub pull request for exact HEAD is missing or ambiguous")
+        pull = pulls[0]
+        head = pull.get("head")
+        base = pull.get("base")
+        head_repo = head.get("repo") if type(head) is dict else None
+        base_repo = base.get("repo") if type(base) is dict else None
+        number = pull.get("number")
+        if (type(number) is not int or number < 1 or pull.get("state") != "open"
+                or type(head) is not dict or type(base) is not dict
+                or type(head_repo) is not dict or type(base_repo) is not dict
+                or head_repo.get("full_name") != repository["name_with_owner"]
+                or base_repo.get("full_name") != repository["name_with_owner"]
+                or head.get("ref") != repository["branch"]
+                or head.get("sha") != repository["head_sha"]
+                or base.get("ref") != initial_branch
+                or base.get("sha") != repository["base_sha"]):
+            raise MilestoneFailure("GitHub pull request is not bound to the exact admitted source")
+        return {"repository": repository["name_with_owner"], "number": number, "state": "open",
+                "head_branch": head["ref"], "head_sha": head["sha"],
+                "base_branch": base["ref"], "base_sha": base["sha"]}
+
+    def pr_refresh(self, milestone_id: str | None = None) -> dict[str, Any]:
+        state = self.load(milestone_id)
+        if (state["status"] != "PR_CREATION_REQUIRED"
+                or state["next"] != {"action": "request_pr", "human_boundary": True}):
+            raise MilestoneFailure("pull request observation is not legal in the current milestone state")
+        self._require_clean_worktree("pull request observation")
+        current = self._repository(state["repository"]["base_sha"],
+                                   self._residue_from_events(self._read_events(state["milestone_id"])))
+        if current != state["repository"]:
+            raise MilestoneFailure("pull request observation requires exact bound HEAD and change identity")
+        observation = self._fetch_pr_observation(state)
+        directory, state_path, history = self._paths(state["milestone_id"])
+        with self._locked(directory):
+            events = self._read_events(state["milestone_id"])
+            stored = _read_json(state_path); self._validate(stored)
+            if state["generation"] != stored["generation"]:
+                raise MilestoneFailure("milestone writer conflict")
+            self._require_clean_worktree("pull request observation")
+            repository = self._repository(stored["repository"]["base_sha"], self._residue_from_events(events))
+            if (stored["status"] != "PR_CREATION_REQUIRED"
+                    or stored["next"] != {"action": "request_pr", "human_boundary": True}
+                    or repository != stored["repository"]):
+                raise MilestoneFailure("pull request observation source identity changed")
+            data = {"pr_evidence": observation,
+                    "governed_change_identity": repository["change_identity"],
+                    "residue_provenance_sha256": self._residue_digest(self._residue_from_events(events))}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": state["milestone_id"], "sequence": len(events) + 1,
+                     "event_type": "pr_observed", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"],
+                     "summary": "Exact-head pull request observed after the PR creation boundary.",
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event); self._validate(event)
+            if (len(events) >= self.policy["limits"]["max_events"]
+                    or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]):
+                raise MilestoneFailure("pull request observation event exceeded its bound")
+            projected = self._project(events + [event], repository)
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            self._atomic_json(state_path, projected); self._write_pointer(projected)
+        return {"status": projected["status"], "next": projected["next"],
+                "pull_request_number": observation["number"]}
 
     def _fetch_ci_observation(self, state: dict[str, Any]) -> dict[str, Any]:
         repository = state["repository"]
