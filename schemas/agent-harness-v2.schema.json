@@ -38,8 +38,8 @@
       ]}}
     },
     "rule": {
-      "type": "object", "additionalProperties": false, "required": ["pattern", "domain", "minimum_level", "risk", "profiles"],
-      "properties": {"pattern": {"type": "string", "minLength": 1, "maxLength": 243}, "domain": {"$ref": "#/$defs/id"}, "minimum_level": {"$ref": "#/$defs/level"}, "risk": {"$ref": "#/$defs/risk"}, "profiles": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}
+      "type": "object", "additionalProperties": false, "required": ["pattern", "domain", "minimum_level", "risk", "profiles", "obligations", "effect_scope"],
+      "properties": {"pattern": {"type": "string", "minLength": 1, "maxLength": 243}, "domain": {"$ref": "#/$defs/id"}, "minimum_level": {"$ref": "#/$defs/level"}, "risk": {"$ref": "#/$defs/risk"}, "profiles": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}, "obligations": {"type": "array", "minItems": 5, "maxItems": 16, "uniqueItems": true, "items": {"enum": ["repo.impact_union", "milestone.validation", "mission.alignment", "mission.review_receipts", "ci.exact_head", "resource.canon_decisions", "resource.rights_eligibility", "schema.consumer_closure", "dependency.subject_enumeration", "security.l3_review", "policy.controller_self_change", "workflow.exact_ci"]}}, "effect_scope": {"enum": ["exact_registered_subject", "all_affected_subjects"]}}
     }
   }
 }

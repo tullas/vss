@@ -25,6 +25,12 @@ HARNESS_MAP = Path("config/agent-harness-v2.json")
 LEVELS = {"L0": 0, "L1": 1, "L2": 2, "L3": 3}
 RISKS = {"docs": 0, "isolated": 1, "shared": 2, "external-effect": 3, "paid-authority": 4}
 HARNESS_AUTHORITY = {"runtime_execution": False, "provider_execution": False, "merge": False, "push": False}
+ASSURANCE_OBLIGATIONS = {
+    "repo.impact_union", "milestone.validation", "mission.alignment", "mission.review_receipts",
+    "ci.exact_head", "resource.canon_decisions", "resource.rights_eligibility",
+    "schema.consumer_closure", "dependency.subject_enumeration", "security.l3_review",
+    "policy.controller_self_change", "workflow.exact_ci",
+}
 MAX_CHANGE_BYTES = 16 * 1024 * 1024
 CHECKPOINT_TYPES = {"design", "implementation", "review", "blocked", "complete", "approval_record"}
 CHECK_STATUSES = {"passed", "failed", "not_run"}
@@ -248,10 +254,13 @@ def fixed_profile_argv(value: Any) -> bool:
             and repository_path(value[5]) == value[5] and value[6:] == ["-p", "test_*.py"])
 
 
-def harness_map() -> tuple[dict[str, Any], str]:
+def harness_map(revision: str | None = None) -> tuple[dict[str, Any], str]:
+    if revision is not None and SHA1.fullmatch(revision) is None:
+        fail("harness map revision is invalid")
     try:
-        raw = HARNESS_MAP.read_bytes()
-    except OSError as exc:
+        raw = (HARNESS_MAP.read_bytes() if revision is None
+               else git("show", f"{revision}:{HARNESS_MAP.as_posix()}"))
+    except (OSError, AgentFailure) as exc:
         raise AgentFailure("harness map is unavailable") from exc
     if len(raw) > 262_144:
         fail("harness map exceeded its bound")
@@ -298,7 +307,12 @@ def harness_map() -> tuple[dict[str, Any], str]:
         fail("impact rules are malformed")
     patterns: list[str] = []
     for rule in rules:
-        item = exact_keys(rule, {"pattern", "domain", "minimum_level", "risk", "profiles"}, "impact rule")
+        if type(rule) is not dict:
+            fail("impact rule is invalid")
+        keys = {"pattern", "domain", "minimum_level", "risk", "profiles"}
+        if set(rule) != keys:
+            keys |= {"obligations", "effect_scope"}
+        item = exact_keys(rule, keys, "impact rule")
         pattern = repository_path(item["pattern"], pattern=True)
         patterns.append(pattern)
         selected_profiles = sorted_strings(item["profiles"], maximum=16, name="impact profiles")
@@ -306,6 +320,15 @@ def harness_map() -> tuple[dict[str, Any], str]:
                 or item["risk"] not in RISKS or not selected_profiles
                 or any(profile not in profile_ids for profile in selected_profiles)):
             fail("impact rule is invalid")
+        if "obligations" in item:
+            obligations = item["obligations"]
+            if (type(obligations) is not list or not 5 <= len(obligations) <= 16
+                    or obligations != sorted(set(obligations))
+                    or any(value not in ASSURANCE_OBLIGATIONS for value in obligations)
+                    or item["effect_scope"] not in {"exact_registered_subject", "all_affected_subjects"}):
+                fail("impact assurance coverage is invalid")
+        elif revision is None:
+            fail("impact assurance coverage is missing")
     if patterns != sorted(set(patterns)):
         fail("impact rules are not uniquely sorted")
     encoded = canonical(root)
@@ -342,6 +365,10 @@ def impact_plan(base: str, mapping: dict[str, Any]) -> dict[str, Any]:
     unknown: list[str] = []
     level = "L0"
     risk = "docs"
+    obligations: set[str] = set()
+    effect_scopes: set[str] = set()
+    covered_rules: set[str] = set()
+    missing_coverage: list[str] = []
     for path in paths:
         matched = [rule for rule in mapping["impact_rules"] if rule_matches(rule["pattern"], path)]
         if not matched:
@@ -351,6 +378,12 @@ def impact_plan(base: str, mapping: dict[str, Any]) -> dict[str, Any]:
             profiles.add("canonical")
             continue
         for rule in matched:
+            covered_rules.add(rule["pattern"])
+            if "obligations" not in rule:
+                missing_coverage.append(rule["pattern"])
+            else:
+                obligations.update(rule["obligations"])
+                effect_scopes.add(rule["effect_scope"])
             domains.add(rule["domain"])
             profiles.update(rule["profiles"])
             if LEVELS[rule["minimum_level"]] > LEVELS[level]:
@@ -367,6 +400,13 @@ def impact_plan(base: str, mapping: dict[str, Any]) -> dict[str, Any]:
         "profiles": sorted(profiles),
         "human_gate_required": risk in {"external-effect", "paid-authority"},
         "unknown_paths": unknown,
+        "coverage": {
+            "rule_patterns": sorted(covered_rules),
+            "obligations": sorted(obligations),
+            "effect_scope": ("all_affected_subjects" if "all_affected_subjects" in effect_scopes
+                             else "exact_registered_subject" if effect_scopes else "incomplete_fail_closed"),
+            "missing_rules": sorted(set(missing_coverage)),
+        },
         "authority": dict(HARNESS_AUTHORITY),
     }
 
@@ -771,6 +811,8 @@ def parser() -> argparse.ArgumentParser:
     context_parser.add_argument("--domain", action="append", required=True)
     impact_parser = commands.add_parser("impact")
     impact_parser.add_argument("--base", required=True)
+    impact_parser.add_argument("--map-revision")
+    impact_parser.add_argument("--include-assurance-coverage", action="store_true")
     validation_parser = commands.add_parser("validate-change")
     validation_parser.add_argument("--base", required=True)
     validation_parser.add_argument("--level", required=True, choices=sorted(LEVELS))
@@ -834,8 +876,10 @@ def main(arguments: list[str] | None = None) -> int:
         print(json.dumps({"schema_version": "2", "map_sha256": digest, "domains": requested, "paths": routes}, sort_keys=True, separators=(",", ":")))
         return 0
     if args.command == "impact":
-        mapping, digest = harness_map()
+        mapping, digest = harness_map(args.map_revision)
         plan = impact_plan(args.base, mapping)
+        if not args.include_assurance_coverage:
+            plan.pop("coverage", None)
         print(json.dumps({"schema_version": "2", "map_sha256": digest, **plan}, sort_keys=True, separators=(",", ":")))
         return 0
     if args.command == "validate-change":
