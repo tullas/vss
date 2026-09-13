@@ -218,6 +218,34 @@ vss dev milestone recover-issue160-legacy-state --expected-generation 10 \
 The dedicated event keeps the exceptional admission rule out of normal identity-rebind and
 validation paths, minimizing future attack surface while retaining the old events unchanged.
 
+Modern recovery after controller/base advancement uses a separate
+`recover-base-advancement` transition. It is available only for an in-flight
+modern, L3-validated milestone on `feature/<milestone-id>` whose current HEAD
+is exactly a two-parent merge of the prior bound HEAD followed by current
+`main`. The prior base must be an ancestor of `main`, the advancement must
+change `src/vss_dev/milestone.py`, and a clean temporary Git object database
+must reproduce the target tree with `git merge-tree --write-tree`. The
+controller rechecks the branch, main ref, history tail, generation, worktree,
+and exact base/HEAD/change identities before appending. Unsupported ancestry or
+tree changes route to `BLOCKED / request_architecture_review` rather than an
+unexecutable `recover_state` action.
+
+The typed `base_advanced_recovery` event records old and new base, HEAD, and
+change identities, the deterministic merge tree and controller-change digest,
+the previous materialized-state digest, and the most recent validation and CI
+event digests. It preserves all earlier records, clears validation, CI, and PR
+observation state, and routes to `run_canonical_validation`. Only fresh
+validation bound to the new base, exact merged HEAD, current policy, and
+recomputed change identity can return to `request_pr`. This does not broaden
+`recover-state-identity` or authorize PR creation, merge, push, or execution.
+
+The invocation is:
+
+```text
+vss dev milestone recover-base-advancement --milestone-id <id> \
+  --summary "Record the verified main advancement." --expected-generation <N>
+```
+
 The one-time `vss dev milestone bootstrap-controller-upgrade` transition is narrower: it is
 available only for `dev-wf-2-engineering-observability`, requires explicit base, old, reviewed,
 and target heads plus the expected generation, and accepts only the registered controller-repair

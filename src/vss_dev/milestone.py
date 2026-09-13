@@ -354,6 +354,94 @@ class MilestoneController:
                              "sha256": hashlib.sha256(content).hexdigest()})
         return _digest({"base": base, "paths": paths, "snapshot": snapshot})
 
+    def _deterministic_merge_tree(self, first_parent: str, second_parent: str) -> str:
+        """Compute Git's merge tree without writing objects into the repository."""
+        with tempfile.TemporaryDirectory(prefix="vss-milestone-merge-") as temporary:
+            temporary_repository = Path(temporary) / "repo.git"
+            common_dir = Path(self._line(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]))
+            environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+            environment["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = str(common_dir / "objects")
+            environment["GIT_CONFIG_NOSYSTEM"] = "1"
+            environment["GIT_CONFIG_GLOBAL"] = os.devnull
+            environment["GIT_ATTR_NOSYSTEM"] = "1"
+            try:
+                initialized = subprocess.run(["git", "init", "--bare", "--quiet", str(temporary_repository)],
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                             check=False, env=environment)
+                if initialized.returncode != 0:
+                    raise MilestoneFailure("deterministic base merge proof is unavailable")
+                result = subprocess.run(["git", f"--git-dir={temporary_repository}", "merge-tree",
+                                         "--write-tree", first_parent, second_parent],
+                                        cwd=temporary_repository.parent, stdout=subprocess.PIPE,
+                                        stderr=subprocess.DEVNULL,
+                                        check=False, env=environment)
+            except OSError as exc:
+                raise MilestoneFailure("deterministic base merge proof is unavailable") from exc
+            output = result.stdout.decode("ascii", errors="strict").splitlines()
+            if result.returncode != 0 or not output or not SHA1.fullmatch(output[0]):
+                raise MilestoneFailure("base advancement is not a clean deterministic merge")
+            return output[0]
+
+    def _base_advance_proof(self, milestone_id: str, old_base: str,
+                            old_head: str) -> dict[str, str]:
+        """Admit only the exact two-parent merge of the bound head and current main."""
+        branch = self._line(["git", "symbolic-ref", "--quiet", "--short", "HEAD"])
+        head = self._line(["git", "rev-parse", "HEAD"])
+        new_base = self._line(["git", "rev-parse", "--verify", "refs/heads/main^{commit}"])
+        if branch != f"feature/{milestone_id}" or not SHA1.fullmatch(head) or not SHA1.fullmatch(new_base):
+            raise MilestoneFailure("modern base recovery branch or refs are unauthorized")
+        parents = self._line(["git", "show", "-s", "--format=%P", head]).split()
+        if parents != [old_head, new_base] or old_base == new_base:
+            raise MilestoneFailure("modern base recovery ancestry is unauthorized")
+        if subprocess.run(["git", "merge-base", "--is-ancestor", old_base, new_base], cwd=self.root,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0:
+            raise MilestoneFailure("modern base recovery does not advance the pinned base")
+        controller_delta = self._run(["git", "diff", "--binary", old_base, new_base, "--",
+                                      "src/vss_dev/milestone.py"], 16 * 1024 * 1024)
+        if not controller_delta:
+            raise MilestoneFailure("modern base recovery does not advance the controller")
+        expected_tree = self._deterministic_merge_tree(old_head, new_base)
+        target_tree = self._line(["git", "show", "-s", "--format=%T", head])
+        if expected_tree != target_tree:
+            raise MilestoneFailure("modern base recovery merge tree was substituted")
+        return {"branch": branch, "head_sha": head, "new_base_sha": new_base,
+                "merge_tree_sha": expected_tree,
+                "controller_change_sha256": hashlib.sha256(controller_delta).hexdigest()}
+
+    def _legacy_pre_pr_projection(self, state: dict[str, Any],
+                                  events: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Recognize only the old CI_PENDING materialization superseded by #166."""
+        if (state.get("status") != "PR_CREATION_REQUIRED"
+                or state.get("next") != {"action": "request_pr", "human_boundary": True}
+                or not events or events[-1]["event_type"] != "identity_rebound"
+                or events[-1]["data"].get("validation_invalidated") is not False):
+            return None
+        previous = dict(state)
+        previous["status"] = "CI_PENDING"
+        previous["next"] = {"action": "ingest_ci", "human_boundary": False}
+        previous["routing"] = {"model": self.policy["model_routing"]["maintenance"], "advisory": True}
+        return previous
+
+    def _modern_recovery_candidate(self, milestone_id: str, state: dict[str, Any],
+                                   residue: dict[str, Any] | None) -> tuple[dict[str, str], dict[str, str]] | None:
+        try:
+            old_repository = state["repository"]
+            if self._committed_change_identity(old_repository["base_sha"], old_repository["head_sha"]) != old_repository["change_identity"]:
+                return None
+            proof = self._base_advance_proof(milestone_id, old_repository["base_sha"],
+                                             old_repository["head_sha"])
+            self._verify_residue(proof["new_base_sha"], residue)
+            self._require_clean_worktree("modern base recovery")
+            repository = self._repository(proof["new_base_sha"], residue)
+            expected_identity = self._committed_change_identity(proof["new_base_sha"], proof["head_sha"])
+            if (repository["branch"] != old_repository["branch"]
+                    or repository["head_sha"] != proof["head_sha"]
+                    or repository["change_identity"] != expected_identity):
+                return None
+            return proof, repository
+        except MilestoneFailure:
+            return None
+
     def _tree_entries(self, commit: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
         """Return exact Git path bytes mapped to mode, type, and object ID."""
         raw = self._run(["git", "ls-tree", "-rz", "--full-tree", commit], 16 * 1024 * 1024)
@@ -1071,6 +1159,7 @@ class MilestoneController:
         pr_evidence: dict[str, Any] | None = None
         bound_head = first["subject_head_sha"]
         bound_branch = initial_branch
+        bound_base = scope.get("base_sha", repository["base_sha"])
         bound_change_identity = scope.get("change_identity", repository["change_identity"])
         residue_digest = scope.get("residue_provenance_sha256", self._residue_digest(None))
         modern_binding = "residue_provenance_sha256" in scope
@@ -1200,7 +1289,7 @@ class MilestoneController:
                         or evidence.get("head_branch") != bound_branch
                         or evidence.get("head_sha") != bound_head
                         or evidence.get("base_branch") != initial_branch
-                        or evidence.get("base_sha") != repository["base_sha"]
+                        or evidence.get("base_sha") != bound_base
                         or data.get("governed_change_identity") != bound_change_identity
                         or data.get("residue_provenance_sha256") != residue_digest
                         or event["subject_head_sha"] != bound_head):
@@ -1220,6 +1309,17 @@ class MilestoneController:
                 ci_subject_head = None; ci_change_identity = None; ci_evidence_version = None
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
+                modern_binding = True
+                status, action, human = "CANONICAL_VALIDATION_REQUIRED", "run_canonical_validation", False
+            elif event["event_type"] == "base_advanced_recovery":
+                validation = {"evidence_sha256": None, "level": "none"}
+                ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
+                ci_subject_head = None; ci_change_identity = None; ci_evidence_version = None
+                pr_evidence = None
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
+                bound_branch = data["branch"]
+                bound_base = data["new_base_sha"]
                 modern_binding = True
                 status, action, human = "CANONICAL_VALIDATION_REQUIRED", "run_canonical_validation", False
             elif event["event_type"] == "identity_rebound":
@@ -1317,6 +1417,7 @@ class MilestoneController:
         initial_branch = initialization.get(
             "initial_branch", transition_data.get("from_branch", stored["repository"]["branch"]))
         base_sha = initialization.get("base_sha", first["subject_head_sha"])
+        active_base_sha = base_sha
         modern_protocol = "residue_provenance_sha256" in initialization
         residue_digest = initialization.get("residue_provenance_sha256", self._residue_digest(None))
         baseline_change_identity = initialization.get(
@@ -1355,6 +1456,16 @@ class MilestoneController:
                     raise MilestoneFailure("milestone state identity recovery conflict")
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
+            elif event["event_type"] == "base_advanced_recovery":
+                self._verify_base_advanced_recovery(events, index, active_base_sha,
+                                                    bound_head, bound_change_identity,
+                                                    bound_branch, repository["name_with_owner"],
+                                                    residue_digest, data)
+                active_base_sha = data["new_base_sha"]
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
+                bound_branch = data["branch"]
+                modern_protocol = True
             if event["event_type"] == "identity_rebound":
                 if (data.get("rebound_from_head") != bound_head
                         or event["subject_head_sha"] == bound_head):
@@ -1424,7 +1535,7 @@ class MilestoneController:
                         bound_branch = repository["branch"]
         historical_repository = {
             "name_with_owner": repository["name_with_owner"], "branch": bound_branch,
-            "base_sha": base_sha, "head_sha": bound_head,
+            "base_sha": active_base_sha, "head_sha": bound_head,
             "change_identity": bound_change_identity,
         }
         expected = self._project(events, historical_repository)
@@ -1433,14 +1544,17 @@ class MilestoneController:
                 event["event_type"].startswith("mission_") for event in events):
             legacy_ungated = self._project(events, historical_repository, legacy=True)
         legacy_cycle_state = None
+        legacy_pre_pr_state = None
         cycle_source = legacy_ungated or expected
         if cycle_source["status"] == "REVIEW_READY" and cycle_source["next"] == {"action": "request_merge", "human_boundary": True}:
             legacy_cycle_state = {**cycle_source, "status": "CI_PENDING",
                                   "routing": {"model": self.policy["model_routing"]["maintenance"], "advisory": True},
                                   "next": {"action": "ingest_ci", "human_boundary": False}}
+        legacy_pre_pr_state = self._legacy_pre_pr_projection(expected, events)
         if ((_digest(stored) != _digest(expected)
              and (legacy_ungated is None or _digest(stored) != _digest(legacy_ungated))
-             and (legacy_cycle_state is None or _digest(stored) != _digest(legacy_cycle_state)))
+             and (legacy_cycle_state is None or _digest(stored) != _digest(legacy_cycle_state))
+             and (legacy_pre_pr_state is None or _digest(stored) != _digest(legacy_pre_pr_state)))
                 or stored["policy_sha256"] != self.policy_digest
                 or stored["repository"]["name_with_owner"] != repository["name_with_owner"]):
             raise MilestoneFailure("milestone state conflict")
@@ -1457,11 +1571,16 @@ class MilestoneController:
                            for key in ("state_sha256", "history_tail_sha256"))):
                 raise MilestoneFailure("milestone pointer is malformed")
         events = self._read_events(milestone_id)
-        repository = self._repository(events[0]["subject_head_sha"], self._residue_from_events(events))
+        residue = self._residue_from_events(events)
+        repository = self._repository(events[0]["subject_head_sha"], residue)
+        persisted = _read_json(self._paths(milestone_id)[1])
         stored = self._materialized(milestone_id, events, repository)
+        legacy_pre_pr_state = self._legacy_pre_pr_projection(stored, events)
+        legacy_pre_pr_materialization = (legacy_pre_pr_state is not None
+                                         and _digest(persisted) == _digest(legacy_pre_pr_state))
+        repository = self._repository(stored["repository"]["base_sha"], residue)
         if used_current_pointer:
             pointer = _read_json(self.state_root / "current.json", 2048)
-            persisted = _read_json(self._paths(milestone_id)[1])
             if (pointer["state_sha256"] not in {_digest(stored), _digest(persisted)}
                     or pointer["history_tail_sha256"] != stored["history_tail"]["sha256"]):
                 raise MilestoneFailure("milestone pointer conflict")
@@ -1478,7 +1597,17 @@ class MilestoneController:
             if (conflict["ci"].get("head_sha") != repository["head_sha"]
                     or ci_change_identity != repository["change_identity"]):
                 conflict["ci"] = {"head_sha": None, "status": "not_observed", "classification": "none"}
-            conflict["status"] = "CONFLICT"; conflict["next"] = {"action": "recover_state", "human_boundary": True}
+            if legacy_pre_pr_materialization:
+                candidate = self._modern_recovery_candidate(milestone_id, stored, residue)
+                if candidate is None:
+                    conflict["status"] = "BLOCKED"
+                    conflict["next"] = {"action": "request_architecture_review", "human_boundary": True}
+                else:
+                    conflict["status"] = "CONFLICT"
+                    conflict["next"] = {"action": "recover_state", "human_boundary": True}
+            else:
+                conflict["status"] = "CONFLICT"
+                conflict["next"] = {"action": "recover_state", "human_boundary": True}
             return conflict
         if repository["change_identity"] != stored["repository"]["change_identity"]:
             partial = self._project(events, repository)
@@ -1488,6 +1617,13 @@ class MilestoneController:
                 partial["ci"] = {"head_sha": None, "status": "not_observed", "classification": "none"}
             partial["status"] = "WORKING"; partial["next"] = {"action": "run_affected_validation", "human_boundary": False}
             return self._apply_mission_gate(partial)
+        if legacy_pre_pr_materialization:
+            blocked = dict(stored)
+            blocked["status"] = "BLOCKED"
+            blocked["next"] = {"action": "request_architecture_review", "human_boundary": True}
+            blocked["routing"] = {"model": self.policy["model_routing"]["architecture_security"],
+                                  "advisory": True}
+            return blocked
         return stored
 
     def transition_branch(self, milestone_id: str, from_branch: str, to_branch: str,
@@ -1630,6 +1766,72 @@ class MilestoneController:
                 != data["change_identity"]):
             raise MilestoneFailure("issue 160 legacy recovery source identity is invalid")
 
+    def _verify_base_advanced_recovery(self, events: list[dict[str, Any]], index: int,
+                                       old_base: str, old_head: str, old_identity: str,
+                                       branch: str, repository_name: str, residue_digest: str,
+                                       data: dict[str, Any]) -> None:
+        required = {
+            "base_recovery_kind", "prior_base_sha", "new_base_sha", "prior_head_sha", "new_head_sha",
+            "prior_change_identity", "change_identity", "branch", "main_ref", "merge_tree_sha",
+            "controller_change_sha256", "controller_policy_sha256",
+            "prior_history_tail_sha256", "expected_generation", "prior_materialized_state_sha256",
+            "prior_validation_event_sha256", "prior_ci_event_sha256",
+            "residue_provenance_sha256", "validation_invalidated", "ci_invalidated",
+        }
+        prefix = events[:index]
+        latest_validation = next((event for event in reversed(prefix)
+                                  if event["event_type"] == "validation_completed"), None)
+        latest_ci = next((event for event in reversed(prefix)
+                          if event["event_type"] == "ci_observed"), None)
+        event = events[index]
+        if (set(data) != required or data.get("base_recovery_kind") != "verified_main_merge"
+                or data.get("prior_base_sha") != old_base
+                or data.get("prior_head_sha") != old_head
+                or data.get("new_head_sha") != event["subject_head_sha"]
+                or data.get("prior_change_identity") != old_identity
+                or data.get("branch") != branch
+                or data.get("main_ref") != "refs/heads/main"
+                or data.get("prior_history_tail_sha256") != prefix[-1]["event_sha256"]
+                or data.get("expected_generation") != index - 1
+                or not SHA256.fullmatch(data.get("prior_materialized_state_sha256", ""))
+                or data.get("prior_validation_event_sha256") != (
+                    latest_validation["event_sha256"] if latest_validation else None)
+                or data.get("prior_ci_event_sha256") != (latest_ci["event_sha256"] if latest_ci else None)
+                or data.get("residue_provenance_sha256") != residue_digest
+                or data.get("controller_policy_sha256") != self.policy_digest
+                or data.get("validation_invalidated") is not True
+                or data.get("ci_invalidated") is not True):
+            raise MilestoneFailure("modern base recovery event is malformed")
+        prior_repository = {"name_with_owner": repository_name,
+                            "branch": branch, "base_sha": old_base, "head_sha": old_head,
+                            "change_identity": old_identity}
+        projected = self._project(prefix, prior_repository)
+        supported_prior_states = {
+            ("PR_CREATION_REQUIRED", "request_pr"),
+            ("CI_PENDING", "ingest_ci"),
+            ("CANONICAL_VALIDATION_REQUIRED", "run_canonical_validation"),
+            ("REVIEW_READY", "request_merge"),
+        }
+        if ((projected["status"], projected["next"]["action"]) not in supported_prior_states
+                or projected["validation"]["level"] != "L3"
+                or self._validation_current(prefix, prior_repository) is None):
+            raise MilestoneFailure("modern base recovery is outside the registered source state")
+        new_base = data["new_base_sha"]
+        new_head = event["subject_head_sha"]
+        parents = self._line(["git", "show", "-s", "--format=%P", new_head]).split()
+        if (parents != [old_head, new_base]
+                or subprocess.run(["git", "merge-base", "--is-ancestor", old_base, new_base], cwd=self.root,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode != 0
+                or data["merge_tree_sha"] != self._deterministic_merge_tree(old_head, new_base)
+                or data["merge_tree_sha"] != self._line(["git", "show", "-s", "--format=%T", new_head])):
+            raise MilestoneFailure("modern base recovery ancestry or tree proof failed")
+        controller_delta = self._run(["git", "diff", "--binary", old_base, new_base, "--",
+                                      "src/vss_dev/milestone.py"], 16 * 1024 * 1024)
+        if (not controller_delta
+                or hashlib.sha256(controller_delta).hexdigest() != data["controller_change_sha256"]
+                or self._committed_change_identity(old_base, old_head) != old_identity
+                or self._committed_change_identity(new_base, new_head) != data["change_identity"]):
+            raise MilestoneFailure("modern base recovery source identity proof failed")
     def recover_issue160_legacy_state(self, expected_generation: int,
                                       human_disposition: str) -> dict[str, Any]:
         """Append the one registered recovery for the pre-#161/#162 issue #160 history."""
@@ -1843,6 +2045,90 @@ class MilestoneController:
             self._atomic_json(state_path, state); self._write_pointer(state)
         return self.load(milestone_id)
 
+    def recover_modern_base_advance(self, milestone_id: str, summary: str,
+                                    expected_generation: int) -> dict[str, Any]:
+        """Rebase one modern pre-PR projection over an exact current-main merge."""
+        if (MILESTONE.fullmatch(milestone_id) is None or not summary or len(summary) > 512
+                or type(expected_generation) is not int):
+            raise MilestoneFailure("modern base recovery invocation is invalid")
+        state = self.load(milestone_id)
+        if (state["status"] != "CONFLICT"
+                or state["next"] != {"action": "recover_state", "human_boundary": True}):
+            raise MilestoneFailure("modern base recovery is not projected for the current state")
+        if expected_generation != state["generation"]:
+            raise MilestoneFailure("milestone writer conflict")
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id)
+            residue = self._residue_from_events(events)
+            persisted = _read_json(state_path)
+            historical_repository = self._repository(persisted["repository"]["base_sha"], residue)
+            projected = self._materialized(milestone_id, events, historical_repository)
+            legacy_projection = self._legacy_pre_pr_projection(projected, events)
+            if (expected_generation != projected["generation"]
+                    or persisted["generation"] != expected_generation
+                    or (legacy_projection is None
+                        and _digest(persisted) != _digest(projected))
+                    or (legacy_projection is not None
+                        and _digest(persisted) not in {_digest(projected), _digest(legacy_projection)})):
+                raise MilestoneFailure("modern base recovery is unauthorized for this history")
+            candidate = self._modern_recovery_candidate(milestone_id, projected, residue)
+            if candidate is None:
+                raise MilestoneFailure("modern base recovery proof failed")
+            proof, repository = candidate
+            old_base = projected["repository"]["base_sha"]
+            old_head = projected["repository"]["head_sha"]
+            old_identity = projected["repository"]["change_identity"]
+            validation_events = [event for event in events if event["event_type"] == "validation_completed"]
+            ci_events = [event for event in events if event["event_type"] == "ci_observed"]
+            data = {
+                "base_recovery_kind": "verified_main_merge",
+                "prior_base_sha": old_base, "new_base_sha": proof["new_base_sha"],
+                "prior_head_sha": old_head, "new_head_sha": proof["head_sha"],
+                "prior_change_identity": old_identity, "change_identity": repository["change_identity"],
+                "branch": proof["branch"], "main_ref": "refs/heads/main",
+                "merge_tree_sha": proof["merge_tree_sha"],
+                "controller_change_sha256": proof["controller_change_sha256"],
+                "controller_policy_sha256": self.policy_digest,
+                "prior_history_tail_sha256": events[-1]["event_sha256"],
+                "expected_generation": expected_generation,
+                "prior_materialized_state_sha256": _digest(persisted),
+                "prior_validation_event_sha256": validation_events[-1]["event_sha256"] if validation_events else None,
+                "prior_ci_event_sha256": ci_events[-1]["event_sha256"] if ci_events else None,
+                "residue_provenance_sha256": self._residue_digest(residue),
+                "validation_invalidated": True, "ci_invalidated": True,
+            }
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": milestone_id, "sequence": len(events) + 1,
+                     "event_type": "base_advanced_recovery", "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": proof["head_sha"], "summary": summary,
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event)
+            self._validate(event)
+            self._verify_base_advanced_recovery(events + [event], len(events), old_base, old_head,
+                                                old_identity, proof["branch"],
+                                                repository["name_with_owner"],
+                                                self._residue_digest(residue), data)
+            if (len(events) >= self.policy["limits"]["max_events"]
+                    or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]):
+                raise MilestoneFailure(f"modern base recovery exceeds history bounds ({len(_canonical(event))} bytes)")
+            current_events = self._read_events(milestone_id)
+            current_repository = self._repository(proof["new_base_sha"], residue)
+            current_state = _read_json(state_path)
+            self._require_clean_worktree("modern base recovery")
+            if (len(current_events) != len(events)
+                    or current_events[-1]["event_sha256"] != events[-1]["event_sha256"]
+                    or _digest(current_state) != _digest(persisted)
+                    or current_repository != repository
+                    or self._line(["git", "rev-parse", "--verify", "refs/heads/main^{commit}"])
+                    != proof["new_base_sha"]):
+                raise MilestoneFailure("modern base recovery identity changed during verification")
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n"); stream.flush(); os.fsync(stream.fileno())
+            recovered = self._project(events + [event], current_repository)
+            self._atomic_json(state_path, recovered); self._write_pointer(recovered)
+        return self.load(milestone_id)
+
     def rebind_committed_head(self, milestone_id: str, summary: str,
                               expected_generation: int, reviewed_head: str | None = None,
                               validation_evidence: Path | None = None,
@@ -1993,7 +2279,10 @@ class MilestoneController:
                 raise MilestoneFailure("milestone head rebind is unauthorized")
             data = {"rebound_from_head": stored["repository"]["head_sha"],
                     "change_identity": repository["change_identity"],
-                    "validation_invalidated": not identity_matches}
+                    # Validation receipts bind an exact subject HEAD. An
+                    # unchanged governed patch does not make old evidence
+                    # fresh for the newly created commit.
+                    "validation_invalidated": True}
             event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
                      "milestone_id": milestone_id, "sequence": len(events) + 1,
                      "event_type": "identity_rebound", "prior_event_sha256": events[-1]["event_sha256"],
@@ -2161,8 +2450,12 @@ class MilestoneController:
         for later in events[index + 1:]:
             if later["event_type"] == "validation_invalidated":
                 return None
+            if later["event_type"] == "base_advanced_recovery":
+                return None
             if later["event_type"] == "identity_rebound":
                 rebound = later["data"]
+                if rebound.get("validation_invalidated") is True:
+                    return None
                 if (rebound.get("recovery_kind") == "review_ready_checkpoint_artifacts"
                         and rebound.get("old_change_identity") == identity
                         and rebound.get("residue_provenance_sha256", data["residue_provenance_sha256"])
