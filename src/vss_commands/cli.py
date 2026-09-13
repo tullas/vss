@@ -89,6 +89,10 @@ def _parser() -> argparse.ArgumentParser:
     milestone_identity.add_argument("--milestone-id", required=True)
     milestone_identity.add_argument("--summary", required=True)
     milestone_identity.add_argument("--expected-generation", required=True, type=int)
+    milestone_base_recovery = milestone_actions.add_parser("recover-base-advancement")
+    milestone_base_recovery.add_argument("--milestone-id", required=True)
+    milestone_base_recovery.add_argument("--summary", required=True)
+    milestone_base_recovery.add_argument("--expected-generation", required=True, type=int)
     milestone_rebind = milestone_actions.add_parser("rebind-committed-head")
     milestone_rebind.add_argument("--milestone-id", required=True)
     milestone_rebind.add_argument("--summary", required=True)
@@ -463,6 +467,9 @@ def main(argv: list[str] | None = None) -> int:
                     args.summary, args.expected_generation)
             elif args.milestone_action == "recover-state-identity":
                 value = controller.recover_state_identity(
+                    args.milestone_id, args.summary, args.expected_generation)
+            elif args.milestone_action == "recover-base-advancement":
+                value = controller.recover_modern_base_advance(
                     args.milestone_id, args.summary, args.expected_generation)
             elif args.milestone_action == "rebind-committed-head":
                 value = controller.rebind_committed_head(
