@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/assurance-assessment-request-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol", "task_identity", "result_identity"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "protocol": {"const": "vss.assurance-assessment-request"},
+    "task_identity": {"const": "create_scene_shot_plan_draft/1"},
+    "result_identity": {"const": "scene_shot_plan_draft/1"}
+  }
+}

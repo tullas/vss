@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vss.local/schemas/assurance-assessment-result-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "protocol", "request_sha256", "repository", "changed_paths", "policy", "coverage", "assurance_fitness", "change_impact", "reason_codes", "evidence", "limitations", "authority"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "protocol": {"const": "vss.assurance-assessment-result"},
+    "request_sha256": {"$ref": "#/$defs/digest"},
+    "repository": {"$ref": "#/$defs/repository"},
+    "changed_paths": {"type": "array", "maxItems": 1024, "uniqueItems": true, "items": {"$ref": "#/$defs/path"}},
+    "policy": {"type": "object", "additionalProperties": false, "required": ["base_harness_sha256", "candidate_harness_sha256", "controller_policy_sha256", "active_decision_index_sha256", "assessment_sha256", "resource_registry_sha256", "movie_registry_sha256"], "properties": {"base_harness_sha256": {"$ref": "#/$defs/digest"}, "candidate_harness_sha256": {"$ref": "#/$defs/digest"}, "controller_policy_sha256": {"$ref": "#/$defs/digest"}, "active_decision_index_sha256": {"$ref": "#/$defs/digest"}, "assessment_sha256": {"$ref": "#/$defs/digest"}, "resource_registry_sha256": {"$ref": "#/$defs/digest"}, "movie_registry_sha256": {"$ref": "#/$defs/digest"}}},
+    "coverage": {"type": "object", "additionalProperties": false, "required": ["rule_patterns", "obligations", "effect_scope"], "properties": {"rule_patterns": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/path"}}, "obligations": {"type": "array", "maxItems": 12, "uniqueItems": true, "items": {"$ref": "#/$defs/obligation"}}, "effect_scope": {"enum": ["exact_registered_subject", "all_affected_subjects", "incomplete_fail_closed"]}}},
+    "assurance_fitness": {"enum": ["fit", "additional_assurance_required", "incomplete_fail_closed"]},
+    "change_impact": {"enum": ["unaffected", "affected_reassessment_required", "not_applicable_by_registered_contract", "incomplete_fail_closed"]},
+    "reason_codes": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"enum": ["exact_identity_and_required_evidence_fresh", "assurance_obligation_missing", "validation_level_insufficient", "review_required", "ci_required", "evidence_stale", "unknown_path", "coverage_rule_missing", "identity_conflict", "policy_or_controller_change", "authority_alignment_unresolved", "unsupported_authority_transition", "evidence_incomplete", "exact_dependencies_unchanged", "selected_dependency_changed", "authoritative_chain_incomplete", "dependency_identity_ambiguous", "scope_mismatch", "candidate_rights_unknown", "candidate_rights_conflicting"]}},
+    "evidence": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/evidence"}},
+    "limitations": {"type": "array", "const": ["inert_assessment", "no_historical_invalidation", "no_autonomous_remediation", "no_runtime_or_provider_execution", "no_workflow_or_merge_authority", "no_production_or_publication_authority"]},
+    "authority": {"type": "object", "additionalProperties": false, "required": ["runtime_execution", "provider_execution", "workflow_activation", "merge", "publication", "production", "security_exception"], "properties": {"runtime_execution": {"const": false}, "provider_execution": {"const": false}, "workflow_activation": {"const": false}, "merge": {"const": false}, "publication": {"const": false}, "production": {"const": false}, "security_exception": {"const": false}}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\x00-\\x1f\\x7f]+$"},
+    "repository": {"type": "object", "additionalProperties": false, "required": ["name_with_owner", "base_sha", "head_sha", "branch", "change_identity"], "properties": {"name_with_owner": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}, "base_sha": {"$ref": "#/$defs/sha1"}, "head_sha": {"$ref": "#/$defs/sha1"}, "branch": {"type": "string", "minLength": 1, "maxLength": 200}, "change_identity": {"$ref": "#/$defs/digest"}}},
+    "obligation": {"enum": ["repo.impact_union", "milestone.validation", "mission.alignment", "mission.review_receipts", "ci.exact_head", "resource.canon_decisions", "resource.rights_eligibility", "schema.consumer_closure", "dependency.subject_enumeration", "security.l3_review", "policy.controller_self_change", "workflow.exact_ci"]},
+    "evidence": {"type": "object", "additionalProperties": false, "required": ["kind", "identity"], "properties": {"kind": {"enum": ["validation", "controller", "ci", "dependency", "rights", "operation"]}, "identity": {"$ref": "#/$defs/digest"}}}
+  }
+}
