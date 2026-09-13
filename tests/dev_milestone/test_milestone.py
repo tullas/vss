@@ -12,6 +12,7 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from vss_dev import ImprovementBacklog, ImprovementBacklogFailure, MilestoneController, MilestoneFailure
+import vss_dev.milestone as milestone_module
 from vss_dev.milestone import AUTHORITY, BOOTSTRAP_REPAIR_PATHS, POST_MERGE_RECONCILIATION_AUTHORIZATION, POST_REPAIR_RECONCILIATION_AUTHORIZATION, RECONCILIATION_AUTHORIZATION
 
 
@@ -131,6 +132,173 @@ class MilestoneControllerTests(unittest.TestCase):
     def reconcile(self, evidence: Path, historical: str, authorization: str = POST_MERGE_RECONCILIATION_AUTHORIZATION) -> dict:
         generation = json.loads((self.root / ".vss/milestones/m11-0-veo-shot/state.json").read_text())["generation"]
         return self.controller.reconcile_source_identity("m11-0-veo-shot", "reconcile", "bounded test", authorization, evidence, historical, generation)
+
+    def issue160_recovery_constants(self) -> dict[str, str]:
+        empty_identity = self.controller._committed_change_identity(self.base, self.base)
+        return {
+            "ISSUE160_LEGACY_BASE_HEAD": self.base,
+            "ISSUE160_RECOVERY_ANCHOR_HEAD": self.base,
+            "ISSUE160_RECOVERY_ANCHOR_IDENTITY": empty_identity,
+            "ISSUE160_LEGACY_HISTORY_TAIL": "0" * 64,
+            "ISSUE160_LEGACY_ASSESSMENT_EVENT": "0" * 64,
+            "ISSUE160_REPOSITORY_NAME": "tullas/vss",
+        }
+
+    def _issue160_legacy_event(self, events: list[dict], event_type: str,
+                               subject_head: str, data: dict, summary: str) -> dict:
+        from vss_dev.milestone import _digest
+        event = {"schema_version": "1", "protocol": "vss.dev-milestone", "record_kind": "event",
+                 "milestone_id": "review-ready-source-identity-recovery", "sequence": len(events) + 1,
+                 "event_type": event_type,
+                 "prior_event_sha256": events[-1]["event_sha256"] if events else "0" * 64,
+                 "subject_head_sha": subject_head, "summary": summary,
+                 "data": data, "authority": dict(AUTHORITY)}
+        event["event_sha256"] = _digest(event)
+        self.controller._validate(event)
+        events.append(event)
+        return event
+
+    def _reseal_issue160_history(self, events: list[dict]) -> None:
+        from vss_dev.milestone import _digest, _canonical
+        prior = "0" * 64
+        for sequence, event in enumerate(events, 1):
+            event["sequence"] = sequence
+            event["prior_event_sha256"] = prior
+            event.pop("event_sha256", None)
+            event["event_sha256"] = _digest(event)
+            prior = event["event_sha256"]
+        history = self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson"
+        history.write_bytes(b"\n".join(_canonical(event) for event in events) + b"\n")
+
+    def install_issue160_legacy_history(self) -> tuple[dict, list[dict]]:
+        from vss_dev.milestone import _canonical, _digest
+        self.git("remote", "set-url", "origin", "https://github.com/tullas/vss.git")
+        initial_identity = _digest({"base": self.base, "paths": [], "snapshot": []})
+        events: list[dict] = []
+        self._issue160_legacy_event(events, "initialized", self.base, {
+            "issue": 160, "domains": ["agent-coordination", "dev-milestone"],
+            "paths": ["docs/agent-coordination.md", "docs/reviews/review-ready-source-identity-recovery-design.md",
+                      "schemas/dev-milestone-record-v1.schema.json", "src/vss_commands/cli.py",
+                      "src/vss_dev/milestone.py", "tests/dev_milestone/test_milestone.py"],
+            "initial_branch": "main", "base_sha": self.base,
+            "change_identity": initial_identity}, "Initialize legacy issue 160 milestone.")
+        self._issue160_legacy_event(events, "branch_transitioned", self.base, {
+            "from_branch": "main", "to_branch": "feature/review-ready-source-identity-recovery",
+            "base_sha": self.base, "change_identity": initial_identity}, "Bind issue 160 branch.")
+        mission = mission_evidence()
+        mission["triggers"] = ["architecture_boundary"]
+        assessment = self._issue160_legacy_event(events, "mission_assessed", self.base,
+            {"mission": mission, "change_identity": initial_identity}, "Record issue 160 mission assessment.")
+        dispositions = [("constitutional", "REVISE"), ("unknown_unknown", "REVISE"),
+                        ("constitutional", "REVISE"), ("unknown_unknown", "REVISE"),
+                        ("constitutional", "ACCEPT"), ("unknown_unknown", "ACCEPT")]
+        review_identity = "c" * 64
+        for mechanism, disposition in dispositions:
+            self._issue160_legacy_event(events, "mission_reviewed", self.base, {
+                "assessment_sha256": assessment["event_sha256"],
+                "review": {"mechanism": mechanism, "disposition": disposition,
+                           "owner": "test-reviewer", "evidence": f"docs/reviews/{mechanism}.md"},
+                "change_identity": review_identity}, "Record legacy issue 160 review.")
+        legacy_identity = "d" * 64
+        for evidence_sha256 in ("e" * 64, "f" * 64):
+            self._issue160_legacy_event(events, "validation_completed", self.base, {
+                "validation_level": "L3", "evidence_sha256": evidence_sha256,
+                "change_identity": legacy_identity}, "Record unbound legacy L3.")
+        self.assertEqual(len(events), 11)
+        directory = self.root / ".vss/milestones/review-ready-source-identity-recovery"
+        directory.mkdir(parents=True, exist_ok=True)
+        history = directory / "history.ndjson"
+        history.write_bytes(b"\n".join(_canonical(event) for event in events) + b"\n")
+        old_repository = {"name_with_owner": "tullas/vss",
+                          "branch": "feature/review-ready-source-identity-recovery",
+                          "base_sha": self.base, "head_sha": self.base,
+                          "change_identity": legacy_identity}
+        old_state = self.controller._project(events, old_repository)
+        self.controller._atomic_json(directory / "state.json", old_state)
+        self.controller._write_pointer(old_state)
+        self.git("switch", "-c", "feature/issue-160-legacy-state-recovery")
+        (self.root / "README.md").write_text("committed issue 160 recovery descendant\n", encoding="utf-8")
+        self.git("add", "README.md")
+        self.git("commit", "-qm", "Commit issue 160 recovery source")
+        return old_state, events
+
+    def test_issue160_legacy_recovery_invalidates_receipts_and_requires_fresh_l3(self) -> None:
+        constants = self.issue160_recovery_constants()
+        with patch.multiple(milestone_module, **constants):
+            old_state, legacy_events = self.install_issue160_legacy_history()
+            with patch.object(milestone_module, "ISSUE160_LEGACY_HISTORY_TAIL",
+                              legacy_events[-1]["event_sha256"]), \
+                    patch.object(milestone_module, "ISSUE160_LEGACY_ASSESSMENT_EVENT",
+                                 legacy_events[2]["event_sha256"]):
+                before = (self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson").read_bytes()
+                recovered = self.controller.recover_issue160_legacy_state(
+                    10, milestone_module.ISSUE160_LEGACY_RECOVERY_DISPOSITION)
+                after = (self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson").read_bytes()
+                self.assertTrue(after.startswith(before))
+                self.assertEqual(len(after.splitlines()), 12)
+                recovery_event = self.controller._read_events("review-ready-source-identity-recovery")[-1]
+                self.assertEqual(recovery_event["event_type"], "issue160_legacy_state_recovered")
+                self.assertEqual(recovery_event["data"]["prior_history_tail_sha256"], legacy_events[-1]["event_sha256"])
+                self.assertEqual(recovery_event["data"]["residue_provenance_disposition"],
+                                 "not_recorded_not_inferred")
+                self.assertEqual(len(recovery_event["data"]["prior_validation_event_sha256s"]), 2)
+                self.assertEqual(recovery_event["data"]["prior_ci_event_sha256s"], [])
+                self.assertEqual(recovered["status"], "CANONICAL_VALIDATION_REQUIRED")
+                self.assertEqual(recovered["next"], {"action": "run_canonical_validation", "human_boundary": False})
+                self.assertEqual(recovered["repository"]["change_identity"],
+                                 recovery_event["data"]["change_identity"])
+                self.assertEqual(recovered["validation"], {"evidence_sha256": None, "level": "none"})
+                self.assertEqual(recovered["ci"], {"head_sha": None, "status": "not_observed",
+                                                     "classification": "none"})
+                recovered_history = (self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson").read_bytes()
+                with self.assertRaisesRegex(MilestoneFailure, "not legal"):
+                    self.controller.ci_refresh("review-ready-source-identity-recovery")
+                self.assertEqual(recovered_history,
+                                 (self.root / ".vss/milestones/review-ready-source-identity-recovery/history.ndjson").read_bytes())
+                self.assertIsNone(self.controller._validation_current(
+                    self.controller._read_events("review-ready-source-identity-recovery"),
+                    recovered["repository"]))
+                validated = self.controller.validate("canonical", "review-ready-source-identity-recovery")
+                self.assertEqual(validated["status"], "passed")
+                current = self.controller.load("review-ready-source-identity-recovery")
+                self.assertEqual(current["status"], "CI_PENDING")
+                self.assertEqual(current["validation"]["level"], "L3")
+                self.assertNotEqual(current["validation"]["evidence_sha256"],
+                                    old_state["validation"]["evidence_sha256"])
+                self.assertEqual(current["repository"]["head_sha"], recovery_event["data"]["new_head"])
+                fresh_validation = self.controller._read_events(
+                    "review-ready-source-identity-recovery")[-1]["data"]
+                self.assertEqual(fresh_validation["evidence_binding_version"], 1)
+                self.assertEqual(fresh_validation["governed_change_identity"],
+                                 recovery_event["data"]["change_identity"])
+                self.assertEqual(fresh_validation["validation_subject_head_sha"],
+                                 recovery_event["data"]["new_head"])
+                self.assertEqual(current, self.controller.load("review-ready-source-identity-recovery"))
+                self.assertTrue(all(value is False for value in current["authority"].values()))
+
+    def test_issue160_legacy_recovery_rejects_other_current_histories(self) -> None:
+        self.controller.initialize(
+            "review-ready-source-identity-recovery", self.base, 160,
+            ["agent-coordination", "dev-milestone"], ["src/vss_dev/milestone.py"],
+            "Modern issue 160 history must not enter the legacy migration.", mission_evidence())
+        with self.assertRaisesRegex(MilestoneFailure, "issue 160 legacy history"):
+            self.controller.recover_issue160_legacy_state(
+                10, milestone_module.ISSUE160_LEGACY_RECOVERY_DISPOSITION)
+
+    def test_issue160_legacy_recovery_rejects_fabricated_residue_provenance(self) -> None:
+        constants = self.issue160_recovery_constants()
+        with patch.multiple(milestone_module, **constants):
+            _, events = self.install_issue160_legacy_history()
+            events[0]["data"]["residue_provenance"] = None
+            events[0]["data"]["residue_provenance_sha256"] = self.controller._residue_digest(None)
+            self._reseal_issue160_history(events)
+            with patch.object(milestone_module, "ISSUE160_LEGACY_HISTORY_TAIL",
+                              events[-1]["event_sha256"]), \
+                    patch.object(milestone_module, "ISSUE160_LEGACY_ASSESSMENT_EVENT",
+                                 events[2]["event_sha256"]):
+                with self.assertRaisesRegex(MilestoneFailure, "legacy initialization"):
+                    self.controller.recover_issue160_legacy_state(
+                        10, milestone_module.ISSUE160_LEGACY_RECOVERY_DISPOSITION)
 
     def test_post_merge_reconciliation_requires_separate_authorization_and_preserves_authority(self) -> None:
         _, evidence, historical = self.moving_shot_reconciliation_fixture()
