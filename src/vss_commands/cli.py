@@ -121,6 +121,9 @@ def _parser() -> argparse.ArgumentParser:
     milestone_bootstrap.add_argument("--target-head", required=True)
     milestone_bootstrap.add_argument("--reason", required=True)
     milestone_bootstrap.add_argument("--expected-generation", required=True, type=int)
+    milestone_issue160_recovery = milestone_actions.add_parser("recover-issue160-legacy-state")
+    milestone_issue160_recovery.add_argument("--expected-generation", required=True, type=int)
+    milestone_issue160_recovery.add_argument("--human-disposition", required=True)
     milestone_checkpoint = milestone_actions.add_parser("checkpoint")
     milestone_checkpoint.add_argument("--milestone-id")
     milestone_checkpoint.add_argument("--type", required=True, choices=("mission_assessed", "mission_reviewed", "checkpointed", "repair_started", "repair_completed", "blocked", "completed"))
@@ -481,6 +484,9 @@ def main(argv: list[str] | None = None) -> int:
                 value = controller.bootstrap_controller_upgrade(
                     args.milestone_id, args.base_head, args.old_head, args.reviewed_head, args.target_head,
                     args.reason, args.expected_generation)
+            elif args.milestone_action == "recover-issue160-legacy-state":
+                value = controller.recover_issue160_legacy_state(
+                    args.expected_generation, args.human_disposition)
             elif args.milestone_action == "checkpoint":
                 if bool(args.input) != (args.type in {"mission_assessed", "mission_reviewed"}):
                     raise MilestoneFailure("mission checkpoints require --input; other checkpoints do not accept it")

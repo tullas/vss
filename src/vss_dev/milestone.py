@@ -44,6 +44,16 @@ POST_REPAIR_RECONCILIATION_AUTHORIZATION = ("I authorize post-repair reconciliat
     "Attempts 1–5 and historical execution evidence remain unchanged, and no execution authority is granted. This does not authorize Attempt 6, "
     "provider execution, spending, retry, production, publication, merge, push, or workflow activation.")
 BOOTSTRAP_MILESTONE = "dev-wf-2-engineering-observability"
+ISSUE160_LEGACY_MILESTONE = "review-ready-source-identity-recovery"
+ISSUE160_LEGACY_HISTORY_TAIL = "10edae8b275176922895c1addef190ba4872b322d4a545fdd8464e774afb5482"  # pragma: allowlist secret -- public legacy-history digest
+ISSUE160_LEGACY_ASSESSMENT_EVENT = "41e0bfb7ca1121402576aeb19eed0ff45537acf14cdabe56414cb43114a39b31"  # pragma: allowlist secret -- public event digest
+ISSUE160_LEGACY_BASE_HEAD = "f4c092f5810d5fac98c1b6623d37f8cb14b64c3a"  # pragma: allowlist secret -- public Git commit identity
+ISSUE160_RECOVERY_ANCHOR_HEAD = "0e24a3d4f94d60fd3f704195b35749e4ed2bb059"  # pragma: allowlist secret -- public Git commit identity
+ISSUE160_RECOVERY_ANCHOR_IDENTITY = "13b880ade7718d6b122fded2f8782629ef2de91b8702217cb6f0b73d68e88e3a"  # pragma: allowlist secret -- public governed change identity
+ISSUE160_RECOVERY_BRANCH = "feature/issue-160-legacy-state-recovery"
+ISSUE160_REPOSITORY_NAME = "tullas/vss"
+ISSUE160_LEGACY_RECOVERY_DISPOSITION = (
+    "I authorize the issue #160 legacy-state migration with validation and CI invalidation.")
 IDENTITY_REPAIR_PATHS = tuple(sorted((
     "src/vss_commands/cli.py",
     "src/vss_dev/milestone.py",
@@ -1168,6 +1178,14 @@ class MilestoneController:
                 validation = {"evidence_sha256": None, "level": "none"}
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 status, action, human = "LOCAL_VALIDATION_REQUIRED", "run_affected_validation", False
+            elif event["event_type"] == "issue160_legacy_state_recovered":
+                validation = {"evidence_sha256": None, "level": "none"}
+                ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
+                ci_subject_head = None; ci_change_identity = None; ci_evidence_version = None
+                bound_head = event["subject_head_sha"]
+                bound_change_identity = data["change_identity"]
+                modern_binding = True
+                status, action, human = "CANONICAL_VALIDATION_REQUIRED", "run_canonical_validation", False
             elif event["event_type"] == "identity_rebound":
                 ci = {"head_sha": None, "status": "not_observed", "classification": "none"}
                 ci_subject_head = None; ci_change_identity = None
@@ -1307,6 +1325,12 @@ class MilestoneController:
                                                     bound_change_identity, data)
                 bound_head = event["subject_head_sha"]
                 bound_change_identity = data["change_identity"]
+                modern_protocol = True
+            elif event["event_type"] == "issue160_legacy_state_recovered":
+                self._verify_issue160_legacy_recovery(events, index, data)
+                bound_head = data["new_head"]
+                bound_change_identity = data["change_identity"]
+                bound_branch = data["branch"]
                 modern_protocol = True
             elif event["event_type"] == "controller_bootstrap":
                 if (data.get("old_head") != bound_head
@@ -1484,6 +1508,190 @@ class MilestoneController:
         if not 1 <= len(files) <= 32:
             raise MilestoneFailure("historical evidence snapshot is invalid")
         return {"files": files, "sha256": _digest(files)}
+
+    def _verify_issue160_legacy_history(self, events: list[dict[str, Any]]) -> dict[str, Any]:
+        """Recognize only the exact pre-provenance issue #160 event chain."""
+        expected_types = (["initialized", "branch_transitioned", "mission_assessed"]
+                          + ["mission_reviewed"] * 6 + ["validation_completed"] * 2)
+        if (len(events) != 11
+                or events[-1]["event_sha256"] != ISSUE160_LEGACY_HISTORY_TAIL
+                or [event["event_type"] for event in events] != expected_types
+                or any(event["milestone_id"] != ISSUE160_LEGACY_MILESTONE for event in events)):
+            raise MilestoneFailure("issue 160 legacy history is not registered for recovery")
+        initialization = events[0]["data"]
+        if (events[0]["subject_head_sha"] != ISSUE160_LEGACY_BASE_HEAD
+                or set(initialization) != {"issue", "domains", "paths", "initial_branch", "base_sha", "change_identity"}
+                or initialization["issue"] != 160
+                or initialization["initial_branch"] != "main"
+                or initialization["base_sha"] != ISSUE160_LEGACY_BASE_HEAD
+                or "residue_provenance" in initialization
+                or "residue_provenance_sha256" in initialization):
+            raise MilestoneFailure("issue 160 legacy initialization is not admissible")
+        transition = events[1]
+        if (transition["subject_head_sha"] != ISSUE160_LEGACY_BASE_HEAD
+                or transition["data"].get("from_branch") != "main"
+                or transition["data"].get("to_branch") != "feature/review-ready-source-identity-recovery"
+                or transition["data"].get("base_sha") != ISSUE160_LEGACY_BASE_HEAD):
+            raise MilestoneFailure("issue 160 legacy branch history is not admissible")
+        if (events[2]["data"].get("mission") is None
+                or events[2]["data"]["mission"].get("authority_alignment") != "aligned"
+                or events[2]["data"]["mission"].get("triggers") != ["architecture_boundary"]
+                or events[2]["event_sha256"] != ISSUE160_LEGACY_ASSESSMENT_EVENT):
+            raise MilestoneFailure("issue 160 legacy mission assessment is not admissible")
+        accepted = [event for event in events[3:9]
+                    if event["data"].get("review", {}).get("disposition") == "ACCEPT"]
+        validations = events[9:]
+        if (len(accepted) != 2
+                or {event["data"].get("review", {}).get("mechanism") for event in accepted}
+                != {"constitutional", "unknown_unknown"}
+                or any("evidence_binding_version" in event["data"] for event in validations)
+                or any(event["data"].get("validation_level") != "L3"
+                       or not SHA256.fullmatch(event["data"].get("evidence_sha256", ""))
+                       for event in validations)
+                or any(event["event_type"] == "ci_observed" for event in events)):
+            raise MilestoneFailure("issue 160 legacy validation or review history is not admissible")
+        return initialization
+
+    def _verify_issue160_legacy_recovery(self, events: list[dict[str, Any]], index: int,
+                                         data: dict[str, Any]) -> None:
+        if index != 11:
+            raise MilestoneFailure("issue 160 legacy recovery is not in its registered position")
+        prefix = events[:index]
+        initialization = self._verify_issue160_legacy_history(prefix)
+        old_head = prefix[-1]["subject_head_sha"]
+        old_identity = prefix[-1]["data"]["change_identity"]
+        validation_event_sha256s = [event["event_sha256"] for event in prefix
+                                    if event["event_type"] == "validation_completed"]
+        event = events[index]
+        if (data.get("migration_kind") != "issue160_legacy_source_identity"
+                or data.get("prior_generation") != 10
+                or data.get("prior_history_tail_sha256") != ISSUE160_LEGACY_HISTORY_TAIL
+                or data.get("prior_bound_head") != old_head
+                or data.get("prior_change_identity") != old_identity
+                or data.get("base_sha") != initialization["base_sha"]
+                or data.get("new_head") != event["subject_head_sha"]
+                or data.get("branch") != ISSUE160_RECOVERY_BRANCH
+                or data.get("validation_invalidated") is not True
+                or data.get("ci_invalidated") is not True
+                or data.get("prior_validation_event_sha256s") != validation_event_sha256s
+                or data.get("prior_ci_event_sha256s") != []
+                or data.get("residue_provenance_disposition") != "not_recorded_not_inferred"
+                or data.get("resulting_state") != {
+                    "status": "CANONICAL_VALIDATION_REQUIRED",
+                    "next_action": "run_canonical_validation",
+                    "validation_level": "none",
+                    "ci_status": "not_observed",
+                    "ci_head_sha": None}):
+            raise MilestoneFailure("issue 160 legacy recovery event is malformed")
+        self._run(["git", "cat-file", "-e", f"{data['new_head']}^{{commit}}"])
+        if (subprocess.run(["git", "merge-base", "--is-ancestor", old_head, data["new_head"]],
+                           cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           check=False).returncode != 0
+                or self._committed_change_identity(data["base_sha"], data["new_head"])
+                != data["change_identity"]):
+            raise MilestoneFailure("issue 160 legacy recovery source identity is invalid")
+
+    def recover_issue160_legacy_state(self, expected_generation: int,
+                                      human_disposition: str) -> dict[str, Any]:
+        """Append the one registered recovery for the pre-#161/#162 issue #160 history."""
+        if (type(expected_generation) is not int or not isinstance(human_disposition, str)
+                or human_disposition != ISSUE160_LEGACY_RECOVERY_DISPOSITION or len(human_disposition) > 240
+                or any(ord(char) < 32 or ord(char) == 127 for char in human_disposition)):
+            raise MilestoneFailure("issue 160 legacy recovery invocation is invalid")
+        milestone_id = ISSUE160_LEGACY_MILESTONE
+        directory, state_path, history = self._paths(milestone_id)
+        with self._locked(directory):
+            events = self._read_events(milestone_id)
+            initialization = self._verify_issue160_legacy_history(events)
+            stored = _read_json(state_path)
+            self._validate(stored)
+            if expected_generation != 10 or stored.get("generation") != expected_generation:
+                raise MilestoneFailure("issue 160 legacy recovery generation conflict")
+            base_sha = initialization["base_sha"]
+            repository = self._repository(base_sha)
+            try:
+                self._materialized(milestone_id, events, repository)
+            except MilestoneFailure as exc:
+                if str(exc) != "milestone state conflict":
+                    raise
+            else:
+                raise MilestoneFailure("issue 160 legacy state does not require recovery")
+            legacy_branch = events[1]["data"]["to_branch"]
+            legacy_repo = {"name_with_owner": stored["repository"]["name_with_owner"],
+                           "branch": legacy_branch, "base_sha": base_sha,
+                           "head_sha": events[-1]["subject_head_sha"],
+                           "change_identity": events[-1]["data"]["change_identity"]}
+            legacy_projection = self._project(events, legacy_repo)
+            if (_digest(stored) != _digest(legacy_projection)
+                    or stored["status"] != "CI_PENDING"
+                    or stored["validation"].get("level") != "L3"
+                    or stored["validation"].get("evidence_sha256")
+                    != events[-1]["data"]["evidence_sha256"]
+                    or stored["authority"] != AUTHORITY
+                    or stored["policy_sha256"] != self.policy_digest):
+                raise MilestoneFailure("issue 160 legacy materialized state is not intact")
+            if (repository["name_with_owner"] != ISSUE160_REPOSITORY_NAME
+                    or repository["branch"] != ISSUE160_RECOVERY_BRANCH
+                    or repository["base_sha"] != base_sha
+                    or repository["head_sha"] == ISSUE160_LEGACY_BASE_HEAD
+                    or subprocess.run(["git", "merge-base", "--is-ancestor", ISSUE160_RECOVERY_ANCHOR_HEAD,
+                                       repository["head_sha"]], cwd=self.root, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL, check=False).returncode != 0
+                    or self._committed_change_identity(base_sha, ISSUE160_RECOVERY_ANCHOR_HEAD)
+                    != ISSUE160_RECOVERY_ANCHOR_IDENTITY
+                    or repository["change_identity"] != self._committed_change_identity(
+                        base_sha, repository["head_sha"])):
+                raise MilestoneFailure("issue 160 legacy recovery source is not the registered descendant")
+            self._require_clean_worktree("issue 160 legacy recovery")
+            validation_event_sha256s = [event["event_sha256"] for event in events
+                                        if event["event_type"] == "validation_completed"]
+            data = {"migration_kind": "issue160_legacy_source_identity",
+                    "prior_generation": expected_generation,
+                    "prior_history_tail_sha256": events[-1]["event_sha256"],
+                    "prior_bound_head": events[-1]["subject_head_sha"],
+                    "prior_change_identity": events[-1]["data"]["change_identity"],
+                    "base_sha": repository["base_sha"], "branch": repository["branch"],
+                    "new_head": repository["head_sha"],
+                    "change_identity": repository["change_identity"],
+                    "validation_invalidated": True, "ci_invalidated": True,
+                    "prior_validation_event_sha256s": validation_event_sha256s,
+                    "prior_ci_event_sha256s": [],
+                    "residue_provenance_disposition": "not_recorded_not_inferred",
+                    "human_disposition": human_disposition,
+                    "resulting_state": {"status": "CANONICAL_VALIDATION_REQUIRED",
+                                        "next_action": "run_canonical_validation",
+                                        "validation_level": "none", "ci_status": "not_observed",
+                                        "ci_head_sha": None}}
+            event = {"schema_version": "1", "protocol": PROTOCOL, "record_kind": "event",
+                     "milestone_id": milestone_id, "sequence": len(events) + 1,
+                     "event_type": "issue160_legacy_state_recovered",
+                     "prior_event_sha256": events[-1]["event_sha256"],
+                     "subject_head_sha": repository["head_sha"],
+                     "summary": "Invalidate legacy issue 160 validation and bind current source identity.",
+                     "data": data, "authority": dict(AUTHORITY)}
+            event["event_sha256"] = _digest(event)
+            self._validate(event)
+            self._verify_issue160_legacy_recovery(events + [event], len(events), data)
+            if (len(events) >= self.policy["limits"]["max_events"]
+                    or len(_canonical(event)) > self.policy["limits"]["max_event_bytes"]):
+                raise MilestoneFailure("issue 160 legacy recovery event exceeded its bound")
+            current_events = self._read_events(milestone_id)
+            current_repository = self._repository(base_sha)
+            current_state = _read_json(state_path)
+            self._require_clean_worktree("issue 160 legacy recovery")
+            if (len(current_events) != len(events)
+                    or current_events[-1]["event_sha256"] != events[-1]["event_sha256"]
+                    or _digest(current_state) != _digest(stored)
+                    or current_repository != repository):
+                raise MilestoneFailure("issue 160 legacy recovery identity changed during verification")
+            with history.open("ab") as stream:
+                stream.write(_canonical(event) + b"\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            state = self._project(events + [event], repository)
+            self._atomic_json(state_path, state)
+            self._write_pointer(state)
+        return self.load(milestone_id)
 
     def reconcile_source_identity(self, milestone_id: str, summary: str, reason: str,
                                   authorization: str, validation_evidence: Path,
@@ -2077,6 +2285,8 @@ class MilestoneController:
             if (validation_event["data"].get("evidence_binding_version") != 1
                     and not any(event["event_type"] == "validation_invalidated"
                                 and event["data"].get("recovered_event_sha256") == validation_event["event_sha256"]
+                                for event in events[validation_index + 1:])
+                    and not any(event["event_type"] == "issue160_legacy_state_recovered"
                                 for event in events[validation_index + 1:])):
                 state = self._append_legacy_validation_quarantine(state, validation_event)
                 events = self._read_events(state["milestone_id"])

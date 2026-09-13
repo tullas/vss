@@ -195,6 +195,29 @@ CI(A), and routes to fresh exact-HEAD CI(B). It cannot restore `REVIEW_READY` or
 production, provider, Runtime, publication, or workflow authority. A later Git ref movement is a
 new identity conflict: the local lock cannot make Git ref movement atomic with event append.
 
+The pre-#161/#162 local issue #160 history has a separate one-time
+`recover-issue160-legacy-state` action. It is an issue-specific migration event, not a general
+legacy-state primitive: admission pins the existing 11-event history tail, generation 10, base,
+mission assessment, review sequence, and two unbound L3 receipts; verifies the materialized state
+against that exact legacy projection; and requires a clean committed descendant of the pinned
+`0e24a3d` main identity on `feature/issue-160-legacy-state-recovery`. The event records the
+current branch, HEAD, and governed identity, lists every invalidated legacy receipt, states that
+residue provenance was not recorded and is not inferred, and clears validation and CI. It routes
+only to fresh canonical validation, followed by exact-HEAD CI. The action cannot apply to another
+milestone, an altered/resealed history, histories that replay normally, or histories with a modern
+validation or CI event. Normal current milestones use their existing identity-bound validation,
+rebind, and CI routes; they do not qualify for this migration.
+
+The one-time invocation is:
+
+```text
+vss dev milestone recover-issue160-legacy-state --expected-generation 10 \
+  --human-disposition "I authorize the issue #160 legacy-state migration with validation and CI invalidation."
+```
+
+The dedicated event keeps the exceptional admission rule out of normal identity-rebind and
+validation paths, minimizing future attack surface while retaining the old events unchanged.
+
 The one-time `vss dev milestone bootstrap-controller-upgrade` transition is narrower: it is
 available only for `dev-wf-2-engineering-observability`, requires explicit base, old, reviewed,
 and target heads plus the expected generation, and accepts only the registered controller-repair
